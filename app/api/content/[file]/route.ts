@@ -10,7 +10,7 @@ const BASE_RPC_URL = process.env.BASE_RPC_URL as string;
 const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN as string;
 const KEY_PAIR_ID = process.env.KEY_PAIR_ID as string;
 const secretsClient = new SecretsManagerClient({});
-const PRIVATE_KEY_SECRET_ARN = process.env.PRIVATE_KEY_SECRET_ARN as string;
+const PRIVATE_KEY_SECRET_ARN = process.env.NEXT_PRIVATE_KEY_SECRET_ARN as string;
 
 
 const ABI = [

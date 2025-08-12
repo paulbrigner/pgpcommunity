@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { RouteContext } from 'next';
 import { Contract, JsonRpcProvider } from 'ethers';
 import { getSignedUrl } from '@/lambda/cloudFrontSigner';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
@@ -35,10 +34,10 @@ export const revalidate = 0;
 
 export async function GET(
   request: NextRequest,
-  context: RouteContext<{ file: string }>
+  { params }: { params: { file: string } }
 ) {
   const address = request.nextUrl.searchParams.get('address');
-  const { file } = context.params;
+  const { file } = params;
 
   if (!address || !file) {
     return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });

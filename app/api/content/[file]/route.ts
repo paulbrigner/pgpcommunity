@@ -34,10 +34,10 @@ export const revalidate = 0;
 
 export async function GET(
   request: NextRequest,
-  context: { params: Promise<{ file: string }> }
+  { params }: { params: { file: string } }
 ) {
   const address = request.nextUrl.searchParams.get('address');
-  const { file } = await context.params;
+  const { file } = params;
 
   if (!address || !file) {
     return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });

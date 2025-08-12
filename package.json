@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=24"
+    "node": ">=20"
   },
   "scripts": {
     "dev": "next dev",
-    "compile:lambda": "esbuild lambda/generateSignedUrl.ts --bundle --platform=node --target=node24 --format=cjs --tsconfig=tsconfig.lambda.json --outfile=lambda-build/index.js",
+    "compile:lambda": "esbuild lambda/generateSignedUrl.ts --bundle --platform=node --target=node20 --format=cjs --tsconfig=tsconfig.lambda.json --outfile=lambda-build/index.js",
     "package:lambda": "cd lambda-build && zip ../generateSignedUrl.zip index.js",
     "build:lambda": "npm run compile:lambda && npm run package:lambda",
     "build": "npm run build:lambda && next build",

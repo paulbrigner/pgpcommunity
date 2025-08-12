@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
   trailingSlash: true, // Ensures compatibility with S3/CloudFront
   basePath: '/community', // Sets the subdirectory path
   assetPrefix: '/community/',
-  distDir: 'out',
 };
 
 export default nextConfig;

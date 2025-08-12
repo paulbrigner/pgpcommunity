@@ -1,5 +1,7 @@
 version: 1
 frontend:
+  runtime:
+    nodejs: 24
   phases:
     preBuild:
       commands:

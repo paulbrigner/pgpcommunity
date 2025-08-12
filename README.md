@@ -19,7 +19,7 @@ ethers@6.15.0
 
 Development Dependencies:
 @tailwindcss/postcss@4
-@types/node@20
+@types/node@24
 @types/react@19
 @types/react-dom@19
 esbuild@0.19.12
@@ -153,7 +153,7 @@ NEXT_PUBLIC_USDC_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
 npm run build:lambda
 ```
 
-   - Upload `generateSignedUrl.zip` from the project root when creating the Lambda function (runtime Node.js 22.x) and use the IAM role from the previous step. Set the following environment variables (adjust for your resources):
+   - Upload `generateSignedUrl.zip` from the project root when creating the Lambda function (runtime Node.js 24.x) and use the IAM role from the previous step. Set the following environment variables (adjust for your resources):
 
 ```
 BASE_RPC_URL=https://mainnet.base.org

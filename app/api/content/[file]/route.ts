@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Contract, JsonRpcProvider } from 'ethers';
-import { getSignedUrl } from '@/lambda/cloudFrontSigner';
+import { getSignedUrl } from '@/lib/cloudFrontSigner';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
 

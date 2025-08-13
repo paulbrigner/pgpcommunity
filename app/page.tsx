@@ -148,7 +148,7 @@ export default function Home() {
       return;
     }
     try {
-      const res = await fetch(`/api/content/${file}?address=${w.address}`);
+      const res = await fetch(`/community/api/content/${file}?address=${w.address}`);
       if (!res.ok) {
         throw new Error('Failed to fetch signed URL');
       }

@@ -4,12 +4,14 @@ import { getSignedUrl } from '@/lambda/cloudFrontSigner';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
 
-const LOCK_ADDRESS = process.env.LOCK_ADDRESS as string;
-const NETWORK_ID = Number(process.env.NETWORK_ID);
-const BASE_RPC_URL = process.env.BASE_RPC_URL as string;
-const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN as string;
-const KEY_PAIR_ID = process.env.KEY_PAIR_ID as string;
-const secretsClient = new SecretsManagerClient({});
+const LOCK_ADDRESS = process.env.NEXT_PUBLIC_LOCK_ADDRESS as string;
+const NETWORK_ID = Number(process.env.NEXT_PUBLIC_NETWORK_ID);
+const BASE_RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL as string;
+const CLOUDFRONT_DOMAIN = process.env.NEXT_PUBLIC_CLOUDFRONT_DOMAIN as string;
+const KEY_PAIR_ID = process.env.NEXT_PUBLIC_KEY_PAIR_ID as string;
+const secretsClient = new SecretsManagerClient({
+  region: "us-east-1" // e.g., "us-east-1"
+});
 const PRIVATE_KEY_SECRET_ARN = process.env.NEXT_PRIVATE_KEY_SECRET_ARN as string;
 
 
@@ -37,10 +39,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const address = request.nextUrl.searchParams.get('address');
   const { file } = await params;
 
+
   if (!address || !file) {
     return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
   }
-
 
   try {
     const provider = new JsonRpcProvider(BASE_RPC_URL, NETWORK_ID);

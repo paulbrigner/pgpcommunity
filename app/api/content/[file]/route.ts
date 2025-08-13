@@ -12,7 +12,7 @@ const KEY_PAIR_ID = process.env.NEXT_PUBLIC_KEY_PAIR_ID as string;
 const secretsClient = new SecretsManagerClient({
   region: "us-east-1" // e.g., "us-east-1"
 });
-const PRIVATE_KEY_SECRET_ARN = process.env.NEXT_PRIVATE_KEY_SECRET_ARN as string;
+const PRIVATE_KEY_SECRET_ARN = process.env.NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN as string;
 
 
 const ABI = [

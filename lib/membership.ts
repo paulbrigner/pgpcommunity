@@ -72,7 +72,7 @@ async function prepareSigner(
 
   const browserProvider = new BrowserProvider(eip1193, networkId);
   const signer = await browserProvider.getSigner();
-  await walletService.connect(browserProvider as unknown as JsonRpcProvider);
+  await walletService.connect(browserProvider as unknown as JsonRpcProvider, signer);
   return signer;
 }
 

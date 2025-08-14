@@ -1,4 +1,4 @@
-import { getSignedUrl } from './cloudFrontSigner';
+import { getSignedUrl } from '../lib/cloudFrontSigner';
 import { Contract, JsonRpcProvider } from 'ethers';
 import {
   SecretsManagerClient,

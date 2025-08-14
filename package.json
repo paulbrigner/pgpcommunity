@@ -2,35 +2,39 @@
   "name": "pgpforcrypto-community",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
     "dev": "next dev",
-    "compile:lambda": "esbuild lambda/generateSignedUrl.ts --bundle --platform=node --target=node18 --format=cjs --tsconfig=tsconfig.lambda.json --outfile=lambda-build/index.js",
+    "compile:lambda": "esbuild lambda/generateSignedUrl.ts --bundle --platform=node --target=node20 --format=cjs --tsconfig=tsconfig.lambda.json --outfile=lambda-build/index.js",
     "package:lambda": "cd lambda-build && zip ../generateSignedUrl.zip index.js",
     "build:lambda": "npm run compile:lambda && npm run package:lambda",
-    "build": "npm run build:lambda && next build && mv out out-temp && mkdir -p out/community && mv out-temp/* out/community/ && rm -rf out-temp && true",
+    "build": "npm run build:lambda && next build",
     "start": "next start",
     "lint": "next lint",
     "serve": "serve out -r '{\"source\": \"/community\",\"destination\": \"/community.html\"}' -r '{\"source\": \"/community/(.*)\",\"destination\": \"/$1\"}'"
   },
   "dependencies": {
-    "@aws-sdk/client-secrets-manager": "^3.421.0",
-    "@aws-sdk/cloudfront-signer": "^3.421.0",
-    "@privy-io/react-auth": "^2.20.0",
+    "@aws-sdk/client-secrets-manager": "^3.864.0",
+    "@aws-sdk/cloudfront-signer": "^3.862.0",
+    "@privy-io/react-auth": "^2.21.2",
+    "@privy-io/server-auth": "^1.31.0",
     "@unlock-protocol/networks": "^0.0.25",
     "@unlock-protocol/paywall": "^0.8.1",
     "@unlock-protocol/unlock-js": "^0.51.2",
     "ethers": "^6.15.0",
-    "next": "^15.4.4",
+    "next": "^15.4.6",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "esbuild": "^0.19.12",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^24.2.1",
+    "@types/react": "^19.1.9",
+    "@types/react-dom": "^19.1.7",
+    "esbuild": "^0.25.8",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5.9.2"
   }
 }

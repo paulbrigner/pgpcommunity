@@ -19,6 +19,7 @@
     "@aws-sdk/client-secrets-manager": "^3.864.0",
     "@aws-sdk/cloudfront-signer": "^3.862.0",
     "@privy-io/react-auth": "^2.21.2",
+    "@privy-io/server-auth": "^1.31.0",
     "@unlock-protocol/networks": "^0.0.25",
     "@unlock-protocol/paywall": "^0.8.1",
     "@unlock-protocol/unlock-js": "^0.51.2",

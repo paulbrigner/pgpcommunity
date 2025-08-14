@@ -40,11 +40,9 @@ const PAYWALL_CONFIG = {
 
 export default function Home() {
   // Functions from Privy to log the user in/out and check auth state
-  const { login, logout, authenticated, ready } = usePrivy();
+  const { login, logout, authenticated, ready, getAccessToken } = usePrivy();
   // List of wallets connected through Privy
   const { wallets } = useWallets();
-  // Utility to fund a user's wallet with testnet tokens
-  // const { fundWallet } = useFundWallet();
 
   // Detailed membership state: 'active', 'expired', or 'none'
   const [membershipStatus, setMembershipStatus] =
@@ -55,7 +53,7 @@ export default function Home() {
   const [isPurchasing, setIsPurchasing] = useState(false);
   // const [isFunding, setIsFunding] = useState(false);
   // Holds the signed URL to gated content once retrieved
-  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+
 
   // Paywall instance configured for the Base network
   const paywall = useMemo(() => {
@@ -141,22 +139,29 @@ export default function Home() {
   // };
 
   // Ask the backend for a short-lived signed URL to view gated content
-  const getContentUrl = async (file: string) => {
-    const w = wallets[0];
-    if (!w?.address) {
-      console.error('No wallet connected.');
-      return;
-    }
-    try {
-      const res = await fetch(`/community/api/content/${file}?address=${w.address}`);
-      if (!res.ok) {
-        throw new Error('Failed to fetch signed URL');
-      }
-      const data = await res.json();
-      setSignedUrl(data.url);
-    } catch (err) {
-      console.error('Could not load content:', err);
-    }
+const getContentUrl = async (file: string): Promise<string> => {
+  const w = wallets[0];
+  if (!w?.address) {
+    console.error('No wallet connected.');
+    throw new Error('No wallet connected.');
+  }
+  try {
+      const accessToken = await getAccessToken();
+      const res = await fetch(`/community/api/content/${file}`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+        });
+  if (!res.ok) {
+    throw new Error('Failed to fetch signed URL');
+  }
+  const data = await res.json();
+  return data.url;
+} catch (err) {
+  console.error('Could not load content:', err);
+  throw err;
+}
   };
 
   return (
@@ -198,41 +203,50 @@ export default function Home() {
         <p>Checking membership…</p>
       ) : membershipStatus === 'active' ? (
         // User has an active membership and can view content
-        <div className="space-y-4 text-center">
-          <p>Hello, {wallets[0].address}! You’re a member.</p>
-          <div className="space-x-2">
-            <button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => getContentUrl('index.html')}
-            >
-              View Home
-            </button>
-            <button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => getContentUrl('guide.html')}
-            >
-              View Guide
-            </button>
-            <button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => getContentUrl('faq.html')}
-            >
-              View FAQ
-            </button>
-            <button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={logout}
-            >
-              Log Out
-            </button>
-          </div>
-          {signedUrl && (
-            <iframe
-              src={signedUrl}
-              className="w-full h-96 border mt-4"
-            ></iframe>
-          )}
-        </div>
+<div className="space-y-4 text-center">
+  <p>Hello, {wallets[0].address}! You’re a member.</p>
+  <div className="space-x-2">
+    <a
+      className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
+      href="#"
+      onClick={async (e) => {
+        e.preventDefault();
+        const url = await getContentUrl('index.html');
+        window.open(url, '_blank');
+      }}
+    >
+      View Home
+    </a>
+    <a
+      className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
+      href="#"
+      onClick={async (e) => {
+        e.preventDefault();
+        const url = await getContentUrl('guide.html');
+        window.open(url, '_blank');
+      }}
+    >
+      View Guide
+    </a>
+    <a
+      className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
+      href="#"
+      onClick={async (e) => {
+        e.preventDefault();
+        const url = await getContentUrl('faq.html');
+        window.open(url, '_blank');
+      }}
+    >
+      View FAQ
+    </a><br/><br/>
+    <button
+      className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
+      onClick={logout}
+    >
+      Log Out
+    </button>
+  </div>
+</div>
       ) : (
         // User does not have a membership; offer to purchase or renew
         <div className="space-y-4 text-center">

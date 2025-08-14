@@ -13,7 +13,7 @@
     "build": "npm run build:lambda && next build",
     "start": "next start",
     "lint": "next lint",
-    "serve": "serve out -r '{\"source\": \"/community\",\"destination\": \"/community.html\"}' -r '{\"source\": \"/community/(.*)\",\"destination\": \"/$1\"}'"
+    "serve": "serve out"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.864.0",

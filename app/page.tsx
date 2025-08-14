@@ -147,7 +147,7 @@ const getContentUrl = async (file: string): Promise<string> => {
   }
   try {
       const accessToken = await getAccessToken();
-      const res = await fetch(`/community/api/content/${file}`,
+      const res = await fetch(`/api/content/${file}`,
         {
           headers: {
             Authorization: `Bearer ${accessToken}`,

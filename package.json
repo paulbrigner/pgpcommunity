@@ -14,8 +14,6 @@
     "serve": "serve out"
   },
   "dependencies": {
-    "@aws-amplify/ui-react": "^6.11.2",
-    "@aws-amplify/ui-react-ai": "^1.5.0",
     "@aws-sdk/client-secrets-manager": "^3.864.0",
     "@aws-sdk/cloudfront-signer": "^3.862.0",
     "@privy-io/react-auth": "^2.21.2",

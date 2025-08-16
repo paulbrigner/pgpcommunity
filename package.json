@@ -7,15 +7,15 @@
   },
   "scripts": {
     "dev": "next dev",
-    "compile:lambda": "esbuild lambda/generateSignedUrl.ts --bundle --platform=node --target=node20 --format=cjs --tsconfig=tsconfig.lambda.json --outfile=lambda-build/index.js",
-    "package:lambda": "cd lambda-build && zip ../generateSignedUrl.zip index.js",
-    "build:lambda": "npm run compile:lambda && npm run package:lambda",
-    "build": "npm run build:lambda && next build",
+    "build:css": "npx @tailwindcss/cli -i ./src/input.css -o ./src/output.css",
+    "build": "npm run build:css && next build",
     "start": "next start",
     "lint": "next lint",
     "serve": "serve out"
   },
   "dependencies": {
+    "@aws-amplify/ui-react": "^6.11.2",
+    "@aws-amplify/ui-react-ai": "^1.5.0",
     "@aws-sdk/client-secrets-manager": "^3.864.0",
     "@aws-sdk/cloudfront-signer": "^3.862.0",
     "@privy-io/react-auth": "^2.21.2",
@@ -23,18 +23,21 @@
     "@unlock-protocol/networks": "^0.0.25",
     "@unlock-protocol/paywall": "^0.8.1",
     "@unlock-protocol/unlock-js": "^0.51.2",
+    "aws-amplify": "^6.15.5",
     "ethers": "^6.15.0",
     "next": "^15.4.6",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.1.11",
+    "@tailwindcss/postcss": "^4.1.12",
     "@types/node": "^24.2.1",
     "@types/react": "^19.1.9",
     "@types/react-dom": "^19.1.7",
+    "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.8",
-    "tailwindcss": "^4.1.11",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.1.12",
     "typescript": "^5.9.2"
   }
 }

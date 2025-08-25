@@ -13,7 +13,6 @@ import {
   UNLOCK_ADDRESS,
 } from "@/lib/config"; // Environment-specific constants
 import { checkMembership as fetchMembership } from "@/lib/membership"; // Helper function for membership logic
-import { useConnectWallet } from "@/hooks/useConnectWallet";
 
 const PAYWALL_CONFIG = {
   icon: "",
@@ -42,13 +41,14 @@ const PAYWALL_CONFIG = {
 export default function Home() {
   // Functions from Privy to log the user in/out and check auth state
   const {
-    connectWallet,
     login,
     logout,
     authenticated,
     ready,
     getAccessToken,
     user,
+    linkWallet,
+    unlinkWallet,
   } = usePrivy();
   // List of wallets connected through Privy
   const { wallets } = useWallets();
@@ -74,9 +74,12 @@ export default function Home() {
 
   // Check on-chain whether the connected wallet has a valid membership
   const refreshMembership = async () => {
-    if (!ready || !authenticated || wallets.length === 0) return;
+    if (!ready || !authenticated || wallets.length === 0) {
+      setMembershipStatus("none");
+      return;
+    }
 
-    if (user?.wallet && user.wallet.address == wallets[0].address) {
+    if (user?.wallet && user.wallet.address === wallets[0].address) {
       setLoadingMembership(true);
       try {
         const status = await fetchMembership(
@@ -91,6 +94,8 @@ export default function Home() {
       } finally {
         setLoadingMembership(false);
       }
+    } else {
+      setMembershipStatus("none");
     }
   };
 
@@ -98,12 +103,6 @@ export default function Home() {
     // Whenever authentication or wallet details change, re-check membership
     refreshMembership();
   }, [ready, authenticated, wallets]);
-
-  useEffect(() => {
-    if (wallets.length > 0 && authenticated && !user?.wallet) {
-      wallets[0].loginOrLink();
-    }
-  }, [wallets, authenticated]);
 
   // Trigger the Privy login flow if the user is not authenticated
   const userLogin = async () => {
@@ -116,15 +115,25 @@ export default function Home() {
     }
   };
 
-  const { connect, isConnecting } = useConnectWallet({
-    onSuccess: (wallet) => {
-      // Add your success logic here
-    },
-    onError: (error) => {
+  const connect = () => {
+    try {
+      linkWallet();
+    } catch (error) {
       console.error("Connection failed:", error);
-      // Add your error handling here
-    },
-  });
+    }
+  };
+
+  const disconnectWallet = async () => {
+    const w = wallets[0];
+    if (!w) return;
+    try {
+      await unlinkWallet(w.address);
+      w.disconnect();
+      setMembershipStatus("none");
+    } catch (error) {
+      console.error("Disconnect failed:", error);
+    }
+  };
 
   // Open the Unlock Protocol checkout using the existing provider
   const purchaseMembership = async () => {
@@ -195,9 +204,8 @@ export default function Home() {
             <button
               className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
               onClick={connect}
-              disabled={isConnecting}
             >
-              {isConnecting ? "Connecting..." : "Connect Wallet"}
+              Connect Wallet
             </button>
             <button
               className="px-4 py-2 border rounded-md bg-gray-200 hover:bg-gray-300"
@@ -218,13 +226,13 @@ export default function Home() {
             </p>
             <button
               className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={logout}
+              onClick={disconnectWallet}
             >
               Disconnect Wallet
             </button>
             <button
               className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => window.location.reload()}
+              onClick={connect}
             >
               Reconnect Wallet
             </button>

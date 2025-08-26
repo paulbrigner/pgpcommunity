@@ -13,7 +13,7 @@ import {
   UNLOCK_ADDRESS,
 } from "@/lib/config"; // Environment-specific constants
 import { checkMembership as fetchMembership } from "@/lib/membership"; // Helper function for membership logic
-import { useConnectWallet } from "@/hooks/useConnectWallet";
+import { Button } from "@/components/ui/button";
 
 const PAYWALL_CONFIG = {
   icon: "",
@@ -42,13 +42,14 @@ const PAYWALL_CONFIG = {
 export default function Home() {
   // Functions from Privy to log the user in/out and check auth state
   const {
-    connectWallet,
     login,
     logout,
     authenticated,
     ready,
     getAccessToken,
     user,
+    linkWallet,
+    unlinkWallet,
   } = usePrivy();
   // List of wallets connected through Privy
   const { wallets } = useWallets();
@@ -74,9 +75,12 @@ export default function Home() {
 
   // Check on-chain whether the connected wallet has a valid membership
   const refreshMembership = async () => {
-    if (!ready || !authenticated || wallets.length === 0) return;
+    if (!ready || !authenticated || wallets.length === 0) {
+      setMembershipStatus("none");
+      return;
+    }
 
-    if (user?.wallet && user.wallet.address == wallets[0].address) {
+    if (user?.wallet && user.wallet.address === wallets[0].address) {
       setLoadingMembership(true);
       try {
         const status = await fetchMembership(
@@ -91,6 +95,8 @@ export default function Home() {
       } finally {
         setLoadingMembership(false);
       }
+    } else {
+      setMembershipStatus("none");
     }
   };
 
@@ -98,12 +104,6 @@ export default function Home() {
     // Whenever authentication or wallet details change, re-check membership
     refreshMembership();
   }, [ready, authenticated, wallets]);
-
-  useEffect(() => {
-    if (wallets.length > 0 && authenticated && !user?.wallet) {
-      wallets[0].loginOrLink();
-    }
-  }, [wallets, authenticated]);
 
   // Trigger the Privy login flow if the user is not authenticated
   const userLogin = async () => {
@@ -116,15 +116,13 @@ export default function Home() {
     }
   };
 
-  const { connect, isConnecting } = useConnectWallet({
-    onSuccess: (wallet) => {
-      // Add your success logic here
-    },
-    onError: (error) => {
+  const connect = () => {
+    try {
+      linkWallet();
+    } catch (error) {
       console.error("Connection failed:", error);
-      // Add your error handling here
-    },
-  });
+    }
+  };
 
   // Open the Unlock Protocol checkout using the existing provider
   const purchaseMembership = async () => {
@@ -179,12 +177,12 @@ export default function Home() {
       {!authenticated ? ( // User has not logged in yet
         <div className="space-y-4 text-center">
           <p>Please login to continue.</p>
-          <button
+          <Button
             className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
             onClick={userLogin}
           >
             Login
-          </button>
+          </Button>
         </div>
       ) : wallets.length === 0 ? ( // Logged in but no external wallet (e.g. MetaMask) is detected
         <div className="space-y-4 text-center">
@@ -192,48 +190,58 @@ export default function Home() {
             No external wallet detected. Please install and connect your wallet.
           </p>
           <div className="space-x-2">
-            <button
+            <Button
               className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
               onClick={connect}
-              disabled={isConnecting}
             >
-              {isConnecting ? "Connecting..." : "Connect Wallet"}
-            </button>
-            <button
+              Connect Wallet
+            </Button>
+            <Button
               className="px-4 py-2 border rounded-md bg-gray-200 hover:bg-gray-300"
               onClick={logout}
             >
               Log Out
-            </button>
+            </Button>
           </div>
         </div>
       ) : loadingMembership ? ( // Waiting for membership check to finish
         <p>Checking membership…</p>
       ) : user ? ( // Only check wallet if user exists
         !user.wallet || user.wallet.address !== wallets[0].address ? ( // wallet connected but linked to another account
-          <div className="space-y-4 text-center">
-            <p>
-              Your wallet is not connected or it is linked to another account.
-              Please connect a wallet that is not already used in this system.
-            </p>
-            <button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={logout}
-            >
-              Disconnect Wallet
-            </button>
-            <button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={() => window.location.reload()}
-            >
-              Reconnect Wallet
-            </button>
-          </div>
+          !user.wallet ? (
+            <div>
+              <p>Please connect a wallet: </p>
+              <Button
+                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                onClick={connect}
+              >
+                Connect Wallet
+              </Button>
+              <Button
+                className="px-4 py-2 border rounded-md bg-gray-200 hover:bg-gray-300"
+                onClick={logout}
+              >
+                Log Out
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4 text-center">
+              <p>
+                Your wallet is linked to another account. Please use your
+                browswer extension to connect a wallet that is not already used
+                in this system.
+              </p>
+              <Button
+                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
+                onClick={logout}
+              >
+                Log Out
+              </Button>
+            </div>
+          )
         ) : membershipStatus === "active" ? ( // User has an active membership and can view content
           <div className="space-y-4 text-center">
-            <p>
-              Hello connected wallet, {wallets[0].address}! You’re a member.
-            </p>
+            <p>Hello {user.email.address}! You’re a member.</p>
             <div className="space-x-2">
               <a
                 className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
@@ -270,12 +278,12 @@ export default function Home() {
               </a>
               <br />
               <br />
-              <button
+              <Button
                 className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
                 onClick={logout}
               >
                 Log Out
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
@@ -288,7 +296,7 @@ export default function Home() {
                 : "You need a membership."}
             </p>
             <div className="space-x-2">
-              <button
+              <Button
                 className="px-4 py-2 border rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
                 onClick={purchaseMembership}
                 disabled={isPurchasing}
@@ -300,19 +308,19 @@ export default function Home() {
                   : membershipStatus === "expired"
                   ? "Renew Membership"
                   : "Get Membership"}
-              </button>
-              <button
+              </Button>
+              <Button
                 className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
                 onClick={refreshMembership}
               >
                 Refresh Status
-              </button>
-              <button
+              </Button>
+              <Button
                 className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
                 onClick={logout}
               >
                 Log Out
-              </button>
+              </Button>
             </div>
           </div>
         )

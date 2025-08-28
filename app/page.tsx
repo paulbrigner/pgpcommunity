@@ -177,12 +177,7 @@ export default function Home() {
       {!authenticated ? ( // User has not logged in yet
         <div className="space-y-4 text-center">
           <p>Please login to continue.</p>
-          <Button
-            className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-            onClick={userLogin}
-          >
-            Login
-          </Button>
+          <Button onClick={userLogin}>Login</Button>
         </div>
       ) : wallets.length === 0 ? ( // Logged in but no external wallet (e.g. MetaMask) is detected
         <div className="space-y-4 text-center">
@@ -190,16 +185,8 @@ export default function Home() {
             No external wallet detected. Please install and connect your wallet.
           </p>
           <div className="space-x-2">
-            <Button
-              className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              onClick={connect}
-            >
-              Connect Wallet
-            </Button>
-            <Button
-              className="px-4 py-2 border rounded-md bg-gray-200 hover:bg-gray-300"
-              onClick={logout}
-            >
+            <Button onClick={connect}>Connect Wallet</Button>
+            <Button variant="outline" onClick={logout}>
               Log Out
             </Button>
           </div>
@@ -211,16 +198,8 @@ export default function Home() {
           !user.wallet ? (
             <div>
               <p>Please connect a wallet: </p>
-              <Button
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                onClick={connect}
-              >
-                Connect Wallet
-              </Button>
-              <Button
-                className="px-4 py-2 border rounded-md bg-gray-200 hover:bg-gray-300"
-                onClick={logout}
-              >
+              <Button onClick={connect}>Connect Wallet</Button>
+              <Button variant="outline" onClick={logout}>
                 Log Out
               </Button>
             </div>
@@ -231,10 +210,7 @@ export default function Home() {
                 browswer extension to connect a wallet that is not already used
                 in this system.
               </p>
-              <Button
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                onClick={logout}
-              >
+              <Button variant="outline" onClick={logout}>
                 Log Out
               </Button>
             </div>
@@ -243,45 +219,39 @@ export default function Home() {
           <div className="space-y-4 text-center">
             <p>Hello {user.email.address}! You’re a member.</p>
             <div className="space-x-2">
-              <a
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                href="#"
+              <Button
+                asChild
                 onClick={async (e) => {
                   e.preventDefault();
                   const url = await getContentUrl("index.html");
                   window.open(url, "_blank");
                 }}
               >
-                View Home
-              </a>
-              <a
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                href="#"
+                <a href="#">View Home</a>
+              </Button>
+              <Button
+                asChild
                 onClick={async (e) => {
                   e.preventDefault();
                   const url = await getContentUrl("guide.html");
                   window.open(url, "_blank");
                 }}
               >
-                View Guide
-              </a>
-              <a
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                href="#"
+                <a href="#">View Guide</a>
+              </Button>
+              <Button
+                asChild
                 onClick={async (e) => {
                   e.preventDefault();
                   const url = await getContentUrl("faq.html");
                   window.open(url, "_blank");
                 }}
               >
-                View FAQ
-              </a>
+                <a href="#">View FAQ</a>
+              </Button>
               <br />
               <br />
-              <Button
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                onClick={logout}
-              >
+              <Button variant="outline" onClick={logout}>
                 Log Out
               </Button>
             </div>
@@ -296,11 +266,7 @@ export default function Home() {
                 : "You need a membership."}
             </p>
             <div className="space-x-2">
-              <Button
-                className="px-4 py-2 border rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                onClick={purchaseMembership}
-                disabled={isPurchasing}
-              >
+              <Button onClick={purchaseMembership} disabled={isPurchasing}>
                 {isPurchasing
                   ? membershipStatus === "expired"
                     ? "Renewing…"
@@ -309,16 +275,8 @@ export default function Home() {
                   ? "Renew Membership"
                   : "Get Membership"}
               </Button>
-              <Button
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                onClick={refreshMembership}
-              >
-                Refresh Status
-              </Button>
-              <Button
-                className="px-4 py-2 border rounded-md bg-blue-600 text-white hover:bg-blue-700"
-                onClick={logout}
-              >
+              <Button onClick={refreshMembership}>Refresh Status</Button>
+              <Button variant="outline" onClick={logout}>
                 Log Out
               </Button>
             </div>

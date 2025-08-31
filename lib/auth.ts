@@ -11,6 +11,7 @@ import {
   PRIVY_APP_KEY_SECRET_ARN,
   BASE_NETWORK_ID,
   BASE_RPC_URL,
+  AWS_REGION,
 } from "@/lib/config"; // Environment-specific constants
 
 const ABI = [
@@ -18,7 +19,7 @@ const ABI = [
   "function getHasValidKey(address) view returns (bool)",
 ];
 
-const secretsClient = new SecretsManagerClient({ region: "us-east-1" });
+const secretsClient = new SecretsManagerClient({ region: AWS_REGION });
 
 async function getPrivyPrivateKey(): Promise<string> {
   const res = await secretsClient.send(
@@ -30,27 +31,38 @@ async function getPrivyPrivateKey(): Promise<string> {
   return res.SecretString;
 }
 
+export type VerifiedIdentity = Awaited<ReturnType<PrivyClient["getUser"]>>;
+
+// Verifies the identity token (from cookie or header) and returns the user
+export async function verifyIdentity(
+  request: NextRequest
+): Promise<VerifiedIdentity | null> {
+  const idTokenFromCookie = request.cookies.get("privy-id-token")?.value;
+  const idTokenFromHeader = request.headers.get("privy-id-token") ?? undefined;
+  const idToken = idTokenFromCookie ?? idTokenFromHeader;
+  if (!idToken) return null;
+
+  const privySecret = await getPrivyPrivateKey();
+  const client = new PrivyClient(PRIVY_APP_ID, privySecret);
+  try {
+    const user = await client.getUser({ idToken });
+    return user;
+  } catch (error) {
+    console.error("Invalid identity token:", error);
+    return null;
+  }
+}
+
+// Backward-compatible helper: returns the first linked wallet address
 export async function authenticateUser(
   request: NextRequest
 ): Promise<string | null> {
-  const authHeader = request.headers.get("authorization");
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return null;
-  }
-  const accessToken = authHeader.replace("Bearer ", "");
-  const privyPrivateKey = await getPrivyPrivateKey();
-  const privy = new PrivyClient(PRIVY_APP_ID, privyPrivateKey);
-  const verifiedClaims = await privy.verifyAuthToken(accessToken);
-  const userId = verifiedClaims.userId;
-  const user = await privy.getUserById(userId);
+  const user = await verifyIdentity(request);
+  if (!user) return null;
   const walletAccount = user.linkedAccounts.find(
     (account) => account.type === "wallet"
   );
-  if (!walletAccount) {
-    return null;
-  }
-  const address = walletAccount.address;
-  return address;
+  return walletAccount?.address ?? null;
 }
 
 export async function checkMembership(address: string): Promise<boolean> {

@@ -2,7 +2,12 @@
 // so it needs to run on the client side rather than on the server.
 "use client";
 
-import { usePrivy, useWallets } from "@privy-io/react-auth"; // Hooks for authentication and wallet interaction
+import {
+  useLogin,
+  usePrivy,
+  useWallets,
+  useConnectWallet,
+} from "@privy-io/react-auth"; // Hooks for authentication and wallet interaction
 import { useState, useEffect, useMemo } from "react"; // React helpers for state and lifecycle
 import { Paywall } from "@unlock-protocol/paywall";
 import { networks } from "@unlock-protocol/networks";
@@ -24,7 +29,7 @@ const PAYWALL_CONFIG = {
       network: BASE_NETWORK_ID,
       recipient: "",
       dataBuilder: "",
-      emailRequired: true,
+      emailRequired: false,
       maxRecipients: null,
     },
   },
@@ -33,7 +38,6 @@ const PAYWALL_CONFIG = {
   skipSelect: false,
   hideSoldOut: false,
   pessimistic: false,
-  redirectUri: "https://www.pgpforcrypto.org/community",
   skipRecipient: true,
   endingCallToAction: "Join Now!",
   persistentCheckout: false,
@@ -42,7 +46,6 @@ const PAYWALL_CONFIG = {
 export default function Home() {
   // Functions from Privy to log the user in/out and check auth state
   const {
-    login,
     logout,
     authenticated,
     ready,
@@ -51,8 +54,37 @@ export default function Home() {
     linkWallet,
     unlinkWallet,
   } = usePrivy();
+
+  const { login } = useLogin({
+    onComplete: ({
+      user,
+      isNewUser,
+      wasAlreadyAuthenticated,
+      loginMethod,
+      loginAccount,
+    }) => {
+      // console.log("User logged in successfully", user);
+      // console.log("Is new user:", isNewUser);
+      // console.log("Was already authenticated:", wasAlreadyAuthenticated);
+      // console.log("Login method:", loginMethod);
+      // console.log("Login account:", loginAccount);
+      // Navigate to dashboard, show welcome message, etc.
+    },
+    onError: (error) => {
+      console.error("Login failed", error);
+      // Show error message
+    },
+  });
+
   // List of wallets connected through Privy
   const { wallets } = useWallets();
+  const connectedWallet = wallets[0];
+  const connectedAddress = connectedWallet?.address?.toLowerCase();
+  const linkedAddress = user?.wallet?.address?.toLowerCase();
+  const hasLinkedWallet = Boolean(user?.wallet?.address);
+  const hasConnectedWallet = wallets.length > 0;
+  const sameWalletLinkedAndConnected =
+    hasLinkedWallet && hasConnectedWallet && connectedAddress === linkedAddress;
   // Detailed membership state: 'active', 'expired', or 'none'
   const [membershipStatus, setMembershipStatus] = useState<
     "active" | "expired" | "none"
@@ -61,6 +93,7 @@ export default function Home() {
   const [loadingMembership, setLoadingMembership] = useState(false);
   // Flags to show when purchase/renewal or funding actions are running
   const [isPurchasing, setIsPurchasing] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Paywall instance configured for the Base network
   const paywall = useMemo(() => {
@@ -80,7 +113,7 @@ export default function Home() {
       return;
     }
 
-    if (user?.wallet && user.wallet.address === wallets[0].address) {
+    if (sameWalletLinkedAndConnected) {
       setLoadingMembership(true);
       try {
         const status = await fetchMembership(
@@ -100,10 +133,14 @@ export default function Home() {
     }
   };
 
+  const { connectWallet } = useConnectWallet();
+
   useEffect(() => {
-    // Whenever authentication or wallet details change, re-check membership
-    refreshMembership();
-  }, [ready, authenticated, wallets]);
+    // When auth + linked == connected, check membership automatically
+    if (ready && authenticated && sameWalletLinkedAndConnected) {
+      refreshMembership();
+    }
+  }, [ready, authenticated, sameWalletLinkedAndConnected]);
 
   // Trigger the Privy login flow if the user is not authenticated
   const userLogin = async () => {
@@ -116,11 +153,32 @@ export default function Home() {
     }
   };
 
-  const connect = () => {
+  // Trigger the Privy wallet connect flow
+  // If a linked wallet exists, suggest connecting that address.
+  // Otherwise, fall back to linking a wallet to the user.
+  const connect = async () => {
     try {
-      linkWallet();
+      const addr = user?.wallet?.address;
+      if (addr) {
+        await connectWallet({ address: addr });
+      } else {
+        await linkWallet();
+      }
     } catch (error) {
       console.error("Connection failed:", error);
+    }
+  };
+
+  // Unlink the current external EVM wallet (ignore embedded/Privy wallets)
+  const unlinkCurrentWallet = async () => {
+    try {
+      const w: any = user?.wallet;
+      if (!w) return;
+      await unlinkWallet(w.address);
+    } catch (error) {
+      console.error("Unlink failed:", error);
+    } finally {
+      setMembershipStatus("none");
     }
   };
 
@@ -135,7 +193,15 @@ export default function Home() {
     try {
       const provider = await w.getEthereumProvider();
       await paywall.connect(provider);
-      await paywall.loadCheckoutModal(PAYWALL_CONFIG);
+      // Prevent Unlock from navigating; we'll control refresh ourselves.
+      const checkoutConfig = { ...PAYWALL_CONFIG } as any;
+      delete checkoutConfig.redirectUri;
+      await paywall.loadCheckoutModal(checkoutConfig);
+      // Force a single hard reload after the modal fully closes.
+      if (typeof window !== "undefined") {
+        window.location.replace(window.location.href);
+        return;
+      }
       await refreshMembership();
     } catch (error) {
       console.error("Purchase failed:", error);
@@ -168,18 +234,31 @@ export default function Home() {
     }
   };
 
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await refreshMembership();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   return (
     <div className="max-w-md mx-auto p-6 space-y-6">
       <h1 className="text-3xl font-bold text-center">
         PGP for Crypto Community
       </h1>
-      {/* The UI below shows different views based on authentication and membership state */}
-      {!authenticated ? ( // User has not logged in yet
+      {/* Scenario-driven UI based on auth, wallet linking, and membership */}
+      {!ready ? (
+        <p>Loading…</p>
+      ) : !authenticated ? (
+        // Not logged in yet
         <div className="space-y-4 text-center">
           <p>Please login to continue.</p>
           <Button onClick={userLogin}>Login</Button>
         </div>
-      ) : wallets.length === 0 ? ( // Logged in but no external wallet (e.g. MetaMask) is detected
+      ) : !hasConnectedWallet ? (
+        // Logged in but no external wallet detected/connected
         <div className="space-y-4 text-center">
           <p>
             No external wallet detected. Please install and connect your wallet.
@@ -191,100 +270,115 @@ export default function Home() {
             </Button>
           </div>
         </div>
-      ) : loadingMembership ? ( // Waiting for membership check to finish
+      ) : !hasLinkedWallet ? (
+        // Has a connected wallet but user has no linked wallet yet
+        <div className="space-y-4 text-center">
+          <p>A wallet is connected. Link it to continue.</p>
+          <div className="space-x-2">
+            <Button onClick={connect}>Link Wallet</Button>
+            <Button variant="outline" onClick={logout}>
+              Log Out
+            </Button>
+          </div>
+        </div>
+      ) : !sameWalletLinkedAndConnected ? (
+        // A wallet is connected but it does not match the linked wallet
+        <div className="space-y-4 text-center">
+          <p>
+            Connected wallet ({connectedWallet?.address}) does not match your
+            linked wallet ({user?.wallet?.address}).
+          </p>
+          <p>Switch to the linked wallet in your wallet app, then refresh.</p>
+          <div className="space-x-2">
+            <Button onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button onClick={unlinkCurrentWallet} variant="secondary">
+              Unlink Wallet
+            </Button>
+            <Button onClick={connect}>Link Current Wallet</Button>
+            <Button variant="outline" onClick={logout}>
+              Log Out
+            </Button>
+          </div>
+        </div>
+      ) : loadingMembership ? (
         <p>Checking membership…</p>
-      ) : user ? ( // Only check wallet if user exists
-        !user.wallet || user.wallet.address !== wallets[0].address ? ( // wallet connected but linked to another account
-          !user.wallet ? (
-            <div>
-              <p>Please connect a wallet: </p>
-              <Button onClick={connect}>Connect Wallet</Button>
-              <Button variant="outline" onClick={logout}>
-                Log Out
-              </Button>
-            </div>
-          ) : (
-            <div className="space-y-4 text-center">
-              <p>
-                Your wallet is linked to another account. Please use your
-                browswer extension to connect a wallet that is not already used
-                in this system.
-              </p>
-              <Button variant="outline" onClick={logout}>
-                Log Out
-              </Button>
-            </div>
-          )
-        ) : membershipStatus === "active" ? ( // User has an active membership and can view content
-          <div className="space-y-4 text-center">
-            <p>Hello {user.email.address}! You’re a member.</p>
-            <div className="space-x-2">
-              <Button
-                asChild
-                onClick={async (e) => {
-                  e.preventDefault();
-                  const url = await getContentUrl("index.html");
-                  window.open(url, "_blank");
-                }}
-              >
-                <a href="#">View Home</a>
-              </Button>
-              <Button
-                asChild
-                onClick={async (e) => {
-                  e.preventDefault();
-                  const url = await getContentUrl("guide.html");
-                  window.open(url, "_blank");
-                }}
-              >
-                <a href="#">View Guide</a>
-              </Button>
-              <Button
-                asChild
-                onClick={async (e) => {
-                  e.preventDefault();
-                  const url = await getContentUrl("faq.html");
-                  window.open(url, "_blank");
-                }}
-              >
-                <a href="#">View FAQ</a>
-              </Button>
-              <br />
-              <br />
-              <Button variant="outline" onClick={logout}>
-                Log Out
-              </Button>
-            </div>
+      ) : membershipStatus === "active" ? (
+        // Scenario 1: linked wallet has a valid membership -> authorized
+        <div className="space-y-4 text-center">
+          <p>
+            Hello {user?.email?.address ?? user?.wallet?.address ?? "member"}!
+            You’re a member.
+          </p>
+          <div className="space-x-2">
+            <Button
+              asChild
+              onClick={async (e) => {
+                e.preventDefault();
+                const url = await getContentUrl("index.html");
+                window.open(url, "_blank");
+              }}
+            >
+              <a href="#">View Home</a>
+            </Button>
+            <Button
+              asChild
+              onClick={async (e) => {
+                e.preventDefault();
+                const url = await getContentUrl("guide.html");
+                window.open(url, "_blank");
+              }}
+            >
+              <a href="#">View Guide</a>
+            </Button>
+            <Button
+              asChild
+              onClick={async (e) => {
+                e.preventDefault();
+                const url = await getContentUrl("faq.html");
+                window.open(url, "_blank");
+              }}
+            >
+              <a href="#">View FAQ</a>
+            </Button>
+            <br />
+            <br />
+            <Button variant="outline" onClick={logout}>
+              Log Out
+            </Button>
           </div>
-        ) : (
-          // Default membership not active case
-          <div className="space-y-4 text-center">
-            <p>
-              Hello, {wallets[0].address}!{" "}
-              {membershipStatus === "expired"
-                ? "Your membership has expired."
-                : "You need a membership."}
-            </p>
-            <div className="space-x-2">
-              <Button onClick={purchaseMembership} disabled={isPurchasing}>
-                {isPurchasing
-                  ? membershipStatus === "expired"
-                    ? "Renewing…"
-                    : "Purchasing…"
-                  : membershipStatus === "expired"
-                  ? "Renew Membership"
-                  : "Get Membership"}
-              </Button>
-              <Button onClick={refreshMembership}>Refresh Status</Button>
-              <Button variant="outline" onClick={logout}>
-                Log Out
-              </Button>
-            </div>
-          </div>
-        )
+        </div>
       ) : (
-        // Handle loading/undefined user state
-        <p>Loading user information...</p>
+        // Scenario 2: linked wallet but no valid membership -> offer purchase/renew or unlink
+        <div className="space-y-4 text-center">
+          <p>
+            Hello, {connectedWallet?.address}!{" "}
+            {membershipStatus === "expired"
+              ? "Your membership has expired."
+              : "You need a membership."}
+          </p>
+          <div className="space-x-2">
+            <Button onClick={purchaseMembership} disabled={isPurchasing}>
+              {isPurchasing
+                ? membershipStatus === "expired"
+                  ? "Renewing…"
+                  : "Purchasing…"
+                : membershipStatus === "expired"
+                ? "Renew Membership"
+                : "Get Membership"}
+            </Button>
+            <Button onClick={onRefresh} disabled={refreshing}>
+              {refreshing ? "Refreshing…" : "Refresh Status"}
+            </Button>
+            <Button onClick={unlinkCurrentWallet} variant="secondary">
+              Unlink Wallet
+            </Button>
+            <Button variant="outline" onClick={logout}>
+              Log Out
+            </Button>
+          </div>
+        </div>
       )}
     </div>
   );

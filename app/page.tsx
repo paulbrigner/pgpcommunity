@@ -160,7 +160,8 @@ export default function Home() {
     try {
       const addr = user?.wallet?.address;
       if (addr) {
-        await connectWallet({ address: addr });
+        // Suggest connecting a wallet; Privy's connectWallet does not accept an address option in this version.
+        await connectWallet();
       } else {
         await linkWallet();
       }

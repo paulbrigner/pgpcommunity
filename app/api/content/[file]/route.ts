@@ -37,6 +37,16 @@ export async function GET(
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
+  if (!CLOUDFRONT_DOMAIN || !KEY_PAIR_ID || !PRIVATE_KEY_SECRET_ARN) {
+    console.error(
+      "Missing required env: CLOUDFRONT_DOMAIN/KEY_PAIR_ID/PRIVATE_KEY_SECRET_ARN"
+    );
+    return NextResponse.json(
+      { error: "Server misconfiguration" },
+      { status: 500 }
+    );
+  }
+
   // // Authentication
   // const address = await authenticateUser(request);
   // if (!address) {

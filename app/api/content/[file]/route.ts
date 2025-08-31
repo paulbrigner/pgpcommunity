@@ -47,17 +47,17 @@ export async function GET(
     );
   }
 
-  // // Authentication
-  // const address = await authenticateUser(request);
-  // if (!address) {
-  //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  // }
+  // Authentication
+  const address = await authenticateUser(request);
+  if (!address) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
-  // // Authorization
-  // const isValidMember = await checkMembership(address);
-  // if (!isValidMember) {
-  //   return NextResponse.json({ error: 'No valid membership' }, { status: 403 });
-  // }
+  // Authorization
+  const isValidMember = await checkMembership(address);
+  if (!isValidMember) {
+    return NextResponse.json({ error: "No valid membership" }, { status: 403 });
+  }
 
   // Generate signed URL
   const privateKey = await getPrivateKey();

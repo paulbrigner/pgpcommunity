@@ -1,19 +1,21 @@
-
-import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
-import { NextRequest, NextResponse } from 'next/server';
-import { getSignedUrl } from '@/lib/cloudFrontSigner';
-import { authenticateUser, checkMembership } from '@/lib/auth';
+import {
+  SecretsManagerClient,
+  GetSecretValueCommand,
+} from "@aws-sdk/client-secrets-manager";
+import { NextRequest, NextResponse } from "next/server";
+import { getSignedUrl } from "@/lib/cloudFrontSigner";
+import { authenticateUser, checkMembership } from "@/lib/auth";
 import {
   CLOUDFRONT_DOMAIN,
   KEY_PAIR_ID,
   PRIVATE_KEY_SECRET_ARN,
-  AWS_REGION
-} from '@/lib/config'; // Environment-specific constants
+  AWS_REGION,
+} from "@/lib/config"; // Environment-specific constants
 
 export const revalidate = 0;
 
 const secretsClient = new SecretsManagerClient({
-  region: AWS_REGION
+  region: AWS_REGION,
 });
 
 async function getPrivateKey(): Promise<string> {
@@ -21,29 +23,31 @@ async function getPrivateKey(): Promise<string> {
     new GetSecretValueCommand({ SecretId: PRIVATE_KEY_SECRET_ARN })
   );
   if (!res.SecretString) {
-    throw new Error('Secret value is empty');
+    throw new Error("Secret value is empty");
   }
-   return res.SecretString;
+  return res.SecretString;
 }
 
-
-export async function GET(request: NextRequest, { params }: { params: Promise<{ file: string }> }) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ file: string }> }
+) {
   const { file } = await params;
   if (!file) {
-    return NextResponse.json({ error: 'Missing parameters' }, { status: 400 });
+    return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
-  // Authentication
-  const address = await authenticateUser(request);
-  if (!address) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  // // Authentication
+  // const address = await authenticateUser(request);
+  // if (!address) {
+  //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  // }
 
-  // Authorization
-  const isValidMember = await checkMembership(address);
-  if (!isValidMember) {
-    return NextResponse.json({ error: 'No valid membership' }, { status: 403 });
-  }
+  // // Authorization
+  // const isValidMember = await checkMembership(address);
+  // if (!isValidMember) {
+  //   return NextResponse.json({ error: 'No valid membership' }, { status: 403 });
+  // }
 
   // Generate signed URL
   const privateKey = await getPrivateKey();

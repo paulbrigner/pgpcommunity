@@ -31,18 +31,11 @@ NEXT_PUBLIC_BASE_RPC_URL=https://mainnet.base.org
 NEXT_PUBLIC_CLOUDFRONT_DOMAIN=assets.pgpforcrypto.org
 NEXT_PUBLIC_KEY_PAIR_ID=KERO2MLM81YXV
 NEXT_PUBLIC_AWS_REGION=us-east-1
-
-# Server-only (Amplify environment variables)
-# Preferred:
-PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
-AWS_REGION=us-east-1
-# Optional fallback (supported by code for compatibility):
 NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
 ```
 
 Notes:
-- The API route reads `PRIVATE_KEY_SECRET_ARN` first and falls back to `NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN` for hosted envs where only NEXT_PUBLIC vars are available. Prefer server‑only vars in production.
-- Ensure the Amplify role has `secretsmanager:GetSecretValue` for the secret.
+- Ensure the Amplify role has `secretsmanager:GetSecretValue` permission for the secret referenced by `NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN`.
 
 ## Deployment
 ### Step 5: Configure Origin Access Control (OAC)

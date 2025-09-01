@@ -1,18 +1,18 @@
 # PGP Community Platform
 
 ## Overview
-A community-driven platform built with Next.js 15+ leveraging server-side rendering and API routes. Hosted on AWS Amplify with advanced authentication and authorization using Privy and Unlock Protocol. Content access is secured via **CloudFront signed URLs** generated programmatically using `cloudFrontSigner.ts` and secrets stored in **AWS Secrets Manager**.
+Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via Privy and Unlock Protocol. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key stored in AWS Secrets Manager.
 
 ## Features
-- **Secure Content Delivery**: 
-  - Private files hosted in S3 accessed via CloudFront signed URLs
+- **Secure Content Delivery**:
+  - Private files in S3 accessed via CloudFront signed URLs
   - **Origin Access Control (OAC)** restricts S3 bucket access to CloudFront only
-  - Signed URL generation handled via `cloudFrontSigner.ts` (no Lambda required)
-  - Private key for signing URLs stored securely in AWS Secrets Manager
+  - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts` (no Lambda required)
+  - Private key stored securely in AWS Secrets Manager
 - **Authentication/Authorization**:
-  - Privy integration for wallet-based authentication
-  - Unlock Protocol for NFT-based access control
-  - Custom auth middleware in `/app/api/content/[file]/route.ts`
+  - Privy for login + wallet linking
+  - Unlock Protocol for membership gating
+  - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
 - **Secrets Management**:
   - AWS Secrets Manager stores sensitive credentials including:
     - CloudFront private key for signed URL generation
@@ -20,20 +20,29 @@ A community-driven platform built with Next.js 15+ leveraging server-side render
     - AWS CloudFront distribution configuration
 
 ## Setup
-### Environment Variables (in `.env.local`)
+### Environment Variables
 ```bash
-# .env.local
-NEXT_PUBLIC_PRIVY_APP_ID='cm8n9i4k102ps6lhj9ejdp886'
-NEXT_PUBLIC_SIGNER_URL='https://emjxaqlflhuemvnkqiwzccgtue0foutk.lambda-url.us-east-1.on.aws/'
-NEXT_PUBLIC_LOCK_ADDRESS='0xed16cd934780a48697c2fd89f1b13ad15f0b64e1'
-NEXT_PUBLIC_UNLOCK_ADDRESS='0xd0b14797b9D08493392865647384974470202A78'
-NEXT_PUBLIC_BASE_NETWORK_ID='8453'
-NEXT_PUBLIC_BASE_RPC_URL='https://mainnet.base.org'
-NEXT_PUBLIC_CLOUDFRONT_DOMAIN='assets.pgpforcrypto.org'
-NEXT_PUBLIC_KEY_PAIR_ID='KERO2MLM81YXV'
-NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN='arn:aws:secretsmanager:us-east-1:860091316962:secret:pgpcommunity_pk-4s9DKg'
-NEXT_PUBLIC_PRIVY_APP_KEY_SECRET_ARN='arn:aws:secretsmanager:us-east-1:860091316962:secret:pgpcommunity_privy_pk-rFg8ye'
+# Public (client + server)
+NEXT_PUBLIC_PRIVY_APP_ID=...
+NEXT_PUBLIC_LOCK_ADDRESS=...
+NEXT_PUBLIC_UNLOCK_ADDRESS=...
+NEXT_PUBLIC_BASE_NETWORK_ID=8453
+NEXT_PUBLIC_BASE_RPC_URL=https://mainnet.base.org
+NEXT_PUBLIC_CLOUDFRONT_DOMAIN=assets.pgpforcrypto.org
+NEXT_PUBLIC_KEY_PAIR_ID=KERO2MLM81YXV
+NEXT_PUBLIC_AWS_REGION=us-east-1
+
+# Server-only (Amplify environment variables)
+# Preferred:
+PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
+AWS_REGION=us-east-1
+# Optional fallback (supported by code for compatibility):
+NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
 ```
+
+Notes:
+- The API route reads `PRIVATE_KEY_SECRET_ARN` first and falls back to `NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN` for hosted envs where only NEXT_PUBLIC vars are available. Prefer server‑only vars in production.
+- Ensure the Amplify role has `secretsmanager:GetSecretValue` for the secret.
 
 ## Deployment
 ### Step 5: Configure Origin Access Control (OAC)
@@ -67,9 +76,10 @@ NEXT_PUBLIC_PRIVY_APP_KEY_SECRET_ARN='arn:aws:secretsmanager:us-east-1:860091316
 1. **User Authentication**: 
    - Privy/Unlock verifies wallet/NFT ownership
 2. **Server-Side Signing**:
-   - `cloudFrontSigner.ts` retrieves private key from Secrets Manager
-   - Generates signed URL (5-minute expiration) using AWS SDK
-   - Returns URL via `/api/content/[file]` route
+   - API runs on Node.js runtime (`export const runtime = "nodejs"`)
+   - Retrieves the private key from Secrets Manager
+   - Generates a 5‑minute signed URL via `lib/cloudFrontSigner.ts`
+   - Returns `{ url }` from `/api/content/[file]`
 3. **CloudFront Validation**:
    - Validates signature using public key
    - Serves content only if OAC policy and signature are valid
@@ -87,16 +97,16 @@ NEXT_PUBLIC_PRIVY_APP_KEY_SECRET_ARN='arn:aws:secretsmanager:us-east-1:860091316
 - **OAC Configuration**:
   - Ensures S3 bucket only responds to CloudFront requests
   - Eliminates need for bucket policies targeting CloudFront IPs
-- **Privy API Integration**:
-  - `PRIVY_API_SECRET` must remain server-side only
-  - Used for server-side verification of wallet authentication
+- **Privy/Unlock Integration**:
+  - Client uses Privy for authentication and wallet linking
+  - Unlock checkout is opened client-side; after closing, the app refreshes membership status
 - **CloudFront Distribution**:
   - Configured with Trusted Key Groups for signature validation
   - OAC ensures S3 only serves content via authenticated CloudFront requests
 
 ## Dependencies
-- **Core**: Next.js 15+, TypeScript, AWS Amplify
-- **Auth**: `@privy-io/react-auth`, `@unlock-protocol/unlock-js`
-- **Deployment**: `@aws-sdk/client-cloudfront`, `@aws-sdk/client-secrets-manager`, `@aws-amplify/adapter-nextjs`
-- **Security**: AWS Secrets Manager, Origin Access Control (OAC)
-
+- **Core**: Next.js 15+, TypeScript, AWS Amplify, Tailwind CSS v4 (CLI)
+- **UI**: shadcn/ui (see `components.json`, `@/components/ui/*`)
+- **Auth**: `@privy-io/react-auth`, `@unlock-protocol/paywall`
+- **AWS SDK**: `@aws-sdk/client-secrets-manager`
+- **Security**: AWS Secrets Manager, CloudFront OAC

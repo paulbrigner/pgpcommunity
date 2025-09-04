@@ -4,15 +4,17 @@ import {
 } from "@aws-sdk/client-secrets-manager";
 import { NextRequest, NextResponse } from "next/server";
 import { getSignedUrl } from "@/lib/cloudFrontSigner";
-import { authenticateUser, checkMembership } from "@/lib/auth";
+import { getToken } from "next-auth/jwt";
 import {
   CLOUDFRONT_DOMAIN,
   KEY_PAIR_ID,
   PRIVATE_KEY_SECRET_ARN,
   AWS_REGION,
 } from "@/lib/config"; // Environment-specific constants
+import { NEXTAUTH_SECRET } from "@/lib/config";
 
 export const revalidate = 0;
+export const runtime = "nodejs";
 
 const secretsClient = new SecretsManagerClient({
   region: AWS_REGION,
@@ -47,16 +49,10 @@ export async function GET(
     );
   }
 
-  // Authentication
-  const address = await authenticateUser(request);
-  if (!address) {
+  // Authentication via NextAuth JWT (session token)
+  const token = await getToken({ req: request as any, secret: NEXTAUTH_SECRET });
+  if (!token) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  // Authorization
-  const isValidMember = await checkMembership(address);
-  if (!isValidMember) {
-    return NextResponse.json({ error: "No valid membership" }, { status: 403 });
   }
 
   // Generate signed URL

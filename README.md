@@ -32,10 +32,24 @@ NEXT_PUBLIC_CLOUDFRONT_DOMAIN=assets.pgpforcrypto.org
 NEXT_PUBLIC_KEY_PAIR_ID=KERO2MLM81YXV
 NEXT_PUBLIC_AWS_REGION=us-east-1
 NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
+
+# NextAuth (project uses NEXT_PUBLIC_* for consistency)
+NEXT_PUBLIC_NEXTAUTH_URL=https://your-domain
+NEXT_PUBLIC_NEXTAUTH_SECRET=your-long-random-secret
+NEXT_PUBLIC_NEXTAUTH_TABLE=NextAuth
 ```
 
 Notes:
 - Ensure the Amplify role has `secretsmanager:GetSecretValue` permission for the secret referenced by `NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN`.
+- DynamoDB table for NextAuth is created/used by the adapter (name via `NEXTAUTH_TABLE`). Ensure the Amplify role has read/write access to it.
+
+### Authentication (NextAuth v4 + SIWE)
+- API route: `app/api/auth/[...nextauth]/route.ts` uses NextAuth v4 with a Credentials provider to verify SIWE messages and a DynamoDB adapter for session persistence.
+- Session fields: `session.user.email` and `session.user.walletAddress` mirror the former Privy fields.
+- Client helper: `lib/siwe/client.ts` exposes `signInWithSiwe()` to trigger an injected wallet flow and sign the SIWE message, then call NextAuth `signIn`.
+
+Protecting API routes
+- Use NextAuth’s JWT: in a route handler, import `getToken` from `next-auth/jwt` and require a valid token before serving content. Example in `app/api/content/[file]/route.ts`.
 
 ## Deployment
 ### Step 5: Configure Origin Access Control (OAC)
@@ -100,6 +114,14 @@ Notes:
 ## Dependencies
 - **Core**: Next.js 15+, TypeScript, AWS Amplify, Tailwind CSS v4 (CLI)
 - **UI**: shadcn/ui (see `components.json`, `@/components/ui/*`)
-- **Auth**: `@privy-io/react-auth`, `@unlock-protocol/paywall`
+- **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`, `@unlock-protocol/paywall`
 - **AWS SDK**: `@aws-sdk/client-secrets-manager`
 - **Security**: AWS Secrets Manager, CloudFront OAC
+
+## Node 22 Migration Checklist (Later)
+- Update runtime: change `amplify.yml` to `runtime.nodejs: 22` and use `nvm install 22 && nvm use 22` in preBuild.
+- Update local defaults: set `.nvmrc` to `22` and in `package.json` set `engines.node` to `"^22"` (or `">=22 <23"`).
+- Verify deps on Node 22: run `npm i && npm run build` locally; watch for OpenSSL/crypto warnings.
+- CloudFront signer: if Node 22/ OpenSSL rejects `RSA-SHA1` in `lib/cloudFrontSigner.ts`, switch to `@aws-sdk/cloudfront-signer` (SHA256) or update the signing logic accordingly.
+- Amplify deploy: redeploy with Node 22 and confirm SSR/API routes, SIWE sign-in, Unlock checkout, and `/api/content/[file]` return signed URLs.
+- Rollback plan: keep a branch with Node 20 configs to revert quickly if needed.

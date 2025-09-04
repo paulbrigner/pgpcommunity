@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePrivy } from "@privy-io/react-auth";
+import { useSession, signIn, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { signInWithSiwe } from "@/lib/siwe/client";
 
 type IdentitySuccess = {
   userId: string;
@@ -13,7 +14,9 @@ type IdentitySuccess = {
 type IdentityResponse = IdentitySuccess | { error: string };
 
 export default function IdentityTestPage() {
-  const { ready, authenticated, login, logout, getAccessToken } = usePrivy();
+  const { data: session, status } = useSession();
+  const ready = status !== "loading";
+  const authenticated = status === "authenticated";
   const [data, setData] = useState<IdentityResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,11 +26,7 @@ export default function IdentityTestPage() {
       setLoading(true);
       setError(null);
       setData(null);
-      const token = await getAccessToken();
-      const res = await fetch("/api/identityTest", {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: "no-store",
-      });
+      const res = await fetch("/api/identityTest", { cache: "no-store" });
       const json = (await res.json()) as IdentityResponse;
       if (!res.ok) {
         const msg = (json as { error?: string }).error || "Unauthorized";
@@ -56,13 +55,20 @@ export default function IdentityTestPage() {
       </p>
 
       {!authenticated ? (
-        <Button onClick={login}>Login</Button>
+        <Button
+          onClick={async () => {
+            const res = await signInWithSiwe();
+            if (!res.ok) console.error(res.error || "SIWE sign-in failed");
+          }}
+        >
+          Login with Wallet
+        </Button>
       ) : (
         <div className="space-x-2">
           <Button onClick={fetchIdentity} disabled={loading}>
             {loading ? "Verifying…" : "Verify Identity"}
           </Button>
-          <Button variant="outline" onClick={logout}>
+          <Button variant="outline" onClick={() => signOut()}>
             Log Out
           </Button>
         </div>

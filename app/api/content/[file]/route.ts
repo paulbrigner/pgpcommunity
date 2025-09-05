@@ -10,8 +10,8 @@ import {
   KEY_PAIR_ID,
   PRIVATE_KEY_SECRET_ARN,
   AWS_REGION,
+  NEXTAUTH_SECRET
 } from "@/lib/config"; // Environment-specific constants
-import { NEXTAUTH_SECRET } from "@/lib/config";
 
 export const revalidate = 0;
 export const runtime = "nodejs";

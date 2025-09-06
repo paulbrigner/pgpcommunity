@@ -1,6 +1,8 @@
 // Server-only configuration (Amplify Gen 2 secrets + private env)
 // Reads from $amplify/env/server when available in Amplify Hosting Gen 2
 // Falls back to process.env for local development.
+import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
+
 
 let serverEnv: Record<string, string | undefined> | undefined;
 try {
@@ -31,7 +33,29 @@ try {
   serverEnv = undefined;
 }
 
-const fromServer = (k: string) => serverEnv?.[k] ?? process.env[k];
+const getSecretFromSSM = async (paramName: string): Promise<string | undefined> => {
+  try {
+    const ssm = new SSMClient({ region: "us-east-1" });
+    const response = await ssm.send(
+      new GetParameterCommand({
+        Name: `/amplify/${process.env.AMPLIFY_APP_ID}/${paramName}`,
+        WithDecryption: true,
+      })
+    );
+    return response.Parameter?.Value;
+  } catch (e) {
+    console.error(`Failed to fetch ${paramName}:`, e);
+    return undefined;
+  }
+};
+
+const fromServer = (k: string) => {
+  const fromEnv = process.env[k];
+  if (fromEnv) return fromEnv;
+
+  // Fallback to SSM if secret isn't in env
+  return getSecretFromSSM(k).then((val) => val || "");
+};
 
 // NextAuth
 export const NEXTAUTH_URL = fromServer("NEXTAUTH_URL") as string;

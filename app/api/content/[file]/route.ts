@@ -5,13 +5,7 @@ import {
 import { NextRequest, NextResponse } from "next/server";
 import { getSignedUrl } from "@/lib/cloudFrontSigner";
 import { getToken } from "next-auth/jwt";
-import { NEXTAUTH_SECRET } from "@/lib/config.server";
-import {
-  CLOUDFRONT_DOMAIN,
-  KEY_PAIR_ID,
-  PRIVATE_KEY_SECRET_ARN,
-  AWS_REGION,
-} from "@/lib/config.public"; // Public environment constants
+import { NEXTAUTH_SECRET, CLOUDFRONT_DOMAIN, KEY_PAIR_ID, PRIVATE_KEY_SECRET_ARN, AWS_REGION } from "@/lib/config.server";
 
 export const revalidate = 0;
 export const runtime = "nodejs";

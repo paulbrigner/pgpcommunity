@@ -47,6 +47,12 @@ export const EMAIL_SERVER_USER = fromServer("EMAIL_SERVER_USER") as string | und
 export const EMAIL_SERVER_PASSWORD = fromServer("EMAIL_SERVER_PASSWORD") as string | undefined;
 export const EMAIL_SERVER_SECURE = fromServer("EMAIL_SERVER_SECURE") as string | undefined;
 
+// Server-side access to public values as well (prefer process.env at runtime)
+export const AWS_REGION = fromServer("NEXT_PUBLIC_AWS_REGION") as string | undefined;
+export const PRIVATE_KEY_SECRET_ARN = fromServer("NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN") as string | undefined;
+export const CLOUDFRONT_DOMAIN = fromServer("NEXT_PUBLIC_CLOUDFRONT_DOMAIN") as string | undefined;
+export const KEY_PAIR_ID = fromServer("NEXT_PUBLIC_KEY_PAIR_ID") as string | undefined;
+
 // Note: Do not throw at module import time if secrets are missing.
 // In Amplify Gen 2, secrets may not be present during build-time.
 // Route handlers should handle missing secrets at runtime if needed.

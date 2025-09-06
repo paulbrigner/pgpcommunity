@@ -16,8 +16,8 @@ import {
   EMAIL_SERVER_USER,
   EMAIL_SERVER_PASSWORD,
   EMAIL_SERVER_SECURE,
+  AWS_REGION,
 } from "@/lib/config.server";
-import { AWS_REGION } from "@/lib/config.public";
 
 // Ensure NextAuth sees a base URL for callbacks (used by Email provider)
 if (!process.env.NEXTAUTH_URL && NEXTAUTH_URL) {

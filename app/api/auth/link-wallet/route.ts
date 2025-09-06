@@ -4,8 +4,7 @@ import { SiweMessage } from "siwe";
 import { DynamoDBAdapter } from "@next-auth/dynamodb-adapter";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocument } from "@aws-sdk/lib-dynamodb";
-import { NEXTAUTH_SECRET, NEXTAUTH_TABLE, NEXTAUTH_URL } from "@/lib/config.server";
-import { AWS_REGION } from "@/lib/config.public";
+import { NEXTAUTH_SECRET, NEXTAUTH_TABLE, NEXTAUTH_URL, AWS_REGION } from "@/lib/config.server";
 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 const documentClient = DynamoDBDocument.from(dynamoClient);

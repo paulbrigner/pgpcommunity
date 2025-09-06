@@ -3,7 +3,8 @@ import { getToken } from "next-auth/jwt";
 import { DynamoDBAdapter } from "@next-auth/dynamodb-adapter";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocument } from "@aws-sdk/lib-dynamodb";
-import { AWS_REGION, NEXTAUTH_SECRET, NEXTAUTH_TABLE } from "@/lib/config";
+import { NEXTAUTH_SECRET, NEXTAUTH_TABLE } from "@/lib/config.server";
+import { AWS_REGION } from "@/lib/config.public";
 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 const documentClient = DynamoDBDocument.from(dynamoClient);
@@ -57,4 +58,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
-

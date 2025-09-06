@@ -12,7 +12,7 @@ import {
   BASE_NETWORK_ID,
   BASE_RPC_URL,
   UNLOCK_ADDRESS,
-} from "@/lib/config"; // Environment-specific constants
+} from "@/lib/config.public"; // Client-safe environment constants
 import { checkMembership as fetchMembership } from "@/lib/membership"; // Helper function for membership logic
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";

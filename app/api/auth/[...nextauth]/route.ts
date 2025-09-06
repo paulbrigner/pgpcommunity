@@ -6,7 +6,6 @@ import { DynamoDBAdapter } from "@next-auth/dynamodb-adapter";
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocument } from "@aws-sdk/lib-dynamodb";
 import {
-  AWS_REGION,
   NEXTAUTH_SECRET,
   NEXTAUTH_TABLE,
   NEXTAUTH_URL,
@@ -17,7 +16,8 @@ import {
   EMAIL_SERVER_USER,
   EMAIL_SERVER_PASSWORD,
   EMAIL_SERVER_SECURE,
-} from "@/lib/config";
+} from "@/lib/config.server";
+import { AWS_REGION } from "@/lib/config.public";
 
 // Ensure NextAuth sees a base URL for callbacks (used by Email provider)
 if (!process.env.NEXTAUTH_URL && NEXTAUTH_URL) {

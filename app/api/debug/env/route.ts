@@ -30,6 +30,12 @@ function has(v: unknown): boolean {
   return typeof v === "string" ? v.length > 0 : v !== undefined && v !== null;
 }
 
+function val(v: unknown): string | null {
+  if (v === undefined || v === null) return null;
+  if (typeof v === "string") return v;
+  try { return JSON.stringify(v); } catch { return String(v); }
+}
+
 function readAmplifyEnv(scope: "server" | "client" | "base"): Record<string, string | undefined> {
   try {
     // eslint-disable-next-line no-eval
@@ -103,6 +109,31 @@ export async function GET() {
         NEXT_PUBLIC_AWS_REGION: has(AWS_REGION),
       },
     },
+    resolvedValues: {
+      server: {
+        NEXTAUTH_SECRET: val(NEXTAUTH_SECRET),
+        NEXTAUTH_URL: val(NEXTAUTH_URL),
+        NEXTAUTH_TABLE: val(NEXTAUTH_TABLE),
+        EMAIL_SERVER: val(EMAIL_SERVER),
+        EMAIL_FROM: val(EMAIL_FROM),
+        EMAIL_SERVER_HOST: val(EMAIL_SERVER_HOST),
+        EMAIL_SERVER_PORT: val(EMAIL_SERVER_PORT),
+        EMAIL_SERVER_USER: val(EMAIL_SERVER_USER),
+        EMAIL_SERVER_PASSWORD: val(EMAIL_SERVER_PASSWORD),
+        EMAIL_SERVER_SECURE: val(EMAIL_SERVER_SECURE),
+      },
+      client: {
+        NEXT_PUBLIC_LOCK_ADDRESS: val(LOCK_ADDRESS),
+        NEXT_PUBLIC_UNLOCK_ADDRESS: val(UNLOCK_ADDRESS),
+        NEXT_PUBLIC_BASE_NETWORK_ID: val(BASE_NETWORK_ID),
+        NEXT_PUBLIC_BASE_RPC_URL: val(BASE_RPC_URL),
+        NEXT_PUBLIC_USDC_ADDRESS: val(USDC_ADDRESS),
+        NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN: val(PRIVATE_KEY_SECRET_ARN),
+        NEXT_PUBLIC_CLOUDFRONT_DOMAIN: val(CLOUDFRONT_DOMAIN),
+        NEXT_PUBLIC_KEY_PAIR_ID: val(KEY_PAIR_ID),
+        NEXT_PUBLIC_AWS_REGION: val(AWS_REGION),
+      },
+    },
     raw: {
       processEnv: {
         // server
@@ -126,12 +157,34 @@ export async function GET() {
         NEXT_PUBLIC_AWS_REGION: has(process.env.NEXT_PUBLIC_AWS_REGION),
         NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN: has(process.env.NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN),
       },
+      processEnvValues: {
+        NEXTAUTH_SECRET: val(process.env.NEXTAUTH_SECRET),
+        NEXTAUTH_URL: val(process.env.NEXTAUTH_URL),
+        NEXTAUTH_TABLE: val(process.env.NEXTAUTH_TABLE),
+        EMAIL_SERVER: val(process.env.EMAIL_SERVER),
+        EMAIL_FROM: val(process.env.EMAIL_FROM),
+        EMAIL_SERVER_HOST: val(process.env.EMAIL_SERVER_HOST),
+        EMAIL_SERVER_PORT: val(process.env.EMAIL_SERVER_PORT),
+        EMAIL_SERVER_USER: val(process.env.EMAIL_SERVER_USER),
+        EMAIL_SERVER_PASSWORD: val(process.env.EMAIL_SERVER_PASSWORD),
+        EMAIL_SERVER_SECURE: val(process.env.EMAIL_SERVER_SECURE),
+        NEXT_PUBLIC_LOCK_ADDRESS: val(process.env.NEXT_PUBLIC_LOCK_ADDRESS),
+        NEXT_PUBLIC_UNLOCK_ADDRESS: val(process.env.NEXT_PUBLIC_UNLOCK_ADDRESS),
+        NEXT_PUBLIC_BASE_NETWORK_ID: val(process.env.NEXT_PUBLIC_BASE_NETWORK_ID),
+        NEXT_PUBLIC_BASE_RPC_URL: val(process.env.NEXT_PUBLIC_BASE_RPC_URL),
+        NEXT_PUBLIC_CLOUDFRONT_DOMAIN: val(process.env.NEXT_PUBLIC_CLOUDFRONT_DOMAIN),
+        NEXT_PUBLIC_KEY_PAIR_ID: val(process.env.NEXT_PUBLIC_KEY_PAIR_ID),
+        NEXT_PUBLIC_AWS_REGION: val(process.env.NEXT_PUBLIC_AWS_REGION),
+        NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN: val(process.env.NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN),
+      },
       amplifyServer: Object.fromEntries(serverKeys.map((k) => [k, has(ampServer[k])])),
+      amplifyServerValues: Object.fromEntries(serverKeys.map((k) => [k, val(ampServer[k])])),
       amplifyClient: Object.fromEntries(clientKeys.map((k) => [k, has(ampClient[k])])),
+      amplifyClientValues: Object.fromEntries(clientKeys.map((k) => [k, val(ampClient[k])])),
       amplifyBase: Object.fromEntries([...serverKeys, ...clientKeys].map((k) => [k, has(ampBase[k])])),
+      amplifyBaseValues: Object.fromEntries([...serverKeys, ...clientKeys].map((k) => [k, val(ampBase[k])])),
     },
   };
 
   return NextResponse.json(presence);
 }
-

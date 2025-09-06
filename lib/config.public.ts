@@ -4,8 +4,11 @@
 
 let clientEnv: Record<string, string | undefined> | undefined;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  clientEnv = require("$amplify/env/client").env as Record<string, string | undefined>;
+  // Use eval('require') so bundlers do not statically resolve the module at build time
+  // eslint-disable-next-line no-eval
+  const req: any = (eval as any)("require");
+  const mod = req("$amplify/env/client");
+  clientEnv = (mod && mod.env) as Record<string, string | undefined>;
 } catch (_) {
   clientEnv = undefined;
 }
@@ -22,4 +25,3 @@ export const PRIVATE_KEY_SECRET_ARN = fromClient("NEXT_PUBLIC_PRIVATE_KEY_SECRET
 export const CLOUDFRONT_DOMAIN = fromClient("NEXT_PUBLIC_CLOUDFRONT_DOMAIN") as string;
 export const KEY_PAIR_ID = fromClient("NEXT_PUBLIC_KEY_PAIR_ID") as string;
 export const AWS_REGION = fromClient("NEXT_PUBLIC_AWS_REGION") as string;
-

@@ -4,9 +4,11 @@
 
 let serverEnv: Record<string, string | undefined> | undefined;
 try {
-  // Use require at runtime so bundlers don’t try to include it on client
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  serverEnv = require("$amplify/env/server").env as Record<string, string | undefined>;
+  // Use eval('require') so bundlers do not statically resolve the module at build time
+  // eslint-disable-next-line no-eval
+  const req: any = (eval as any)("require");
+  const mod = req("$amplify/env/server");
+  serverEnv = (mod && mod.env) as Record<string, string | undefined>;
 } catch (_) {
   serverEnv = undefined;
 }
@@ -34,4 +36,3 @@ if (process.env.NODE_ENV === "production") {
     throw new Error("NEXTAUTH_SECRET is not set. Configure it in Amplify secrets or env.");
   }
 }
-

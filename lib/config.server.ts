@@ -29,10 +29,6 @@ export const EMAIL_SERVER_USER = fromServer("EMAIL_SERVER_USER") as string | und
 export const EMAIL_SERVER_PASSWORD = fromServer("EMAIL_SERVER_PASSWORD") as string | undefined;
 export const EMAIL_SERVER_SECURE = fromServer("EMAIL_SERVER_SECURE") as string | undefined;
 
-// Optional: fail fast in production if critical secrets are missing
-if (process.env.NODE_ENV === "production") {
-  if (!NEXTAUTH_SECRET) {
-    // Throwing here surfaces a clear configuration error early
-    throw new Error("NEXTAUTH_SECRET is not set. Configure it in Amplify secrets or env.");
-  }
-}
+// Note: Do not throw at module import time if secrets are missing.
+// In Amplify Gen 2, secrets may not be present during build-time.
+// Route handlers should handle missing secrets at runtime if needed.

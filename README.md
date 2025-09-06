@@ -1,7 +1,7 @@
 # PGP Community Platform
 
 ## Overview
-Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via Privy and Unlock Protocol. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key stored in AWS Secrets Manager.
+Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email magic links) and SIWE for wallet sign-in/linking, with Unlock Protocol for membership gating. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key stored in AWS Secrets Manager.
 
 ## Features
 - **Secure Content Delivery**:
@@ -10,20 +10,18 @@ Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is hand
   - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts` (no Lambda required)
   - Private key stored securely in AWS Secrets Manager
 - **Authentication/Authorization**:
-  - Privy for login + wallet linking
+  - NextAuth (email magic links) + SIWE for wallet sign-in/linking
   - Unlock Protocol for membership gating
-  - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
+  - API route `/api/content/[file]` issues CloudFront signed URLs (see `app/api/content/[file]/route.ts`)
 - **Secrets Management**:
   - AWS Secrets Manager stores sensitive credentials including:
     - CloudFront private key for signed URL generation
-    - Privy API secret key
     - AWS CloudFront distribution configuration
 
 ## Setup
 ### Environment Variables
 ```bash
 # Public (client + server)
-NEXT_PUBLIC_PRIVY_APP_ID=...
 NEXT_PUBLIC_LOCK_ADDRESS=...
 NEXT_PUBLIC_UNLOCK_ADDRESS=...
 NEXT_PUBLIC_BASE_NETWORK_ID=8453
@@ -109,18 +107,12 @@ Protecting API routes
      --name cloudfront-private-key \
      --secret-string "$(cat private_key.pem)"
    ```
-2. **Store Privy API Secret**:
-   ```bash
-   # Create secret for Privy API access
-   aws secretsmanager create-secret \
-     --name privy-api-secret \
-     --secret-string "{\"apiSecret\": \"your-privy-api-secret\"}"
-   ```
 
 ## Security Architecture
 ### CloudFront Signed URLs Workflow
-1. **User Authentication**: 
-   - Privy/Unlock verifies wallet/NFT ownership
+1. **User Authentication**:
+   - NextAuth (email) + SIWE handle user and wallet authentication
+   - Unlock verifies membership (lock/NFT ownership)
 2. **Server-Side Signing**:
    - API runs on Node.js runtime (`export const runtime = "nodejs"`)
    - Retrieves the private key from Secrets Manager
@@ -135,7 +127,6 @@ Protecting API routes
 |------------------------|-----------------------------------------------------------------------------|
 | **AWS Secrets Manager** | Stores sensitive credentials including:                                    |
 |                        | - CloudFront private key for signing URLs                                  |
-|                        | - Privy API secret key                                                     |
 | **Origin Access Control** | Restricts S3 bucket access to authorized CloudFront distributions only     |
 | **cloudFrontSigner.ts** | Server-side TypeScript implementation for signed URL generation            |
 

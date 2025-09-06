@@ -7,6 +7,14 @@ export const PRIVATE_KEY_SECRET_ARN = process.env.NEXT_PUBLIC_PRIVATE_KEY_SECRET
 export const CLOUDFRONT_DOMAIN = process.env.NEXT_PUBLIC_CLOUDFRONT_DOMAIN as string;
 export const KEY_PAIR_ID = process.env.NEXT_PUBLIC_KEY_PAIR_ID as string;
 export const AWS_REGION = process.env.NEXT_PUBLIC_AWS_REGION as string;
-export const NEXTAUTH_URL = process.env.NEXT_PUBLIC_NEXTAUTH_URL as string;
-export const NEXTAUTH_SECRET = process.env.NEXT_PUBLIC_NEXTAUTH_SECRET as string;
-export const NEXTAUTH_TABLE = process.env.NEXT_PUBLIC_NEXTAUTH_TABLE as string;
+// Prefer server-only envs; fall back to public vars only if present (not recommended)
+export const NEXTAUTH_URL = (process.env.NEXTAUTH_URL || process.env.NEXT_PUBLIC_NEXTAUTH_URL) as string;
+export const NEXTAUTH_SECRET = (process.env.NEXTAUTH_SECRET || process.env.NEXT_PUBLIC_NEXTAUTH_SECRET) as string;
+export const NEXTAUTH_TABLE = (process.env.NEXTAUTH_TABLE || process.env.NEXT_PUBLIC_NEXTAUTH_TABLE) as string;
+export const EMAIL_SERVER = process.env.EMAIL_SERVER as string;
+export const EMAIL_FROM = process.env.EMAIL_FROM as string;
+export const EMAIL_SERVER_HOST = process.env.EMAIL_SERVER_HOST as string | undefined;
+export const EMAIL_SERVER_PORT = process.env.EMAIL_SERVER_PORT as string | undefined;
+export const EMAIL_SERVER_USER = process.env.EMAIL_SERVER_USER as string | undefined;
+export const EMAIL_SERVER_PASSWORD = process.env.EMAIL_SERVER_PASSWORD as string | undefined;
+export const EMAIL_SERVER_SECURE = process.env.EMAIL_SERVER_SECURE as string | undefined;

@@ -33,20 +33,59 @@ NEXT_PUBLIC_KEY_PAIR_ID=KERO2MLM81YXV
 NEXT_PUBLIC_AWS_REGION=us-east-1
 NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
 
-# NextAuth (project uses NEXT_PUBLIC_* for consistency)
-NEXT_PUBLIC_NEXTAUTH_URL=https://your-domain
-NEXT_PUBLIC_NEXTAUTH_SECRET=your-long-random-secret
-NEXT_PUBLIC_NEXTAUTH_TABLE=NextAuth
+# NextAuth
+# Server-only secrets
+NEXTAUTH_URL=https://your-domain
+NEXTAUTH_SECRET=your-long-random-secret
+NEXTAUTH_TABLE=NextAuth
+# If you also set NEXT_PUBLIC_NEXTAUTH_URL for client-only needs, keep it in sync with NEXTAUTH_URL.
+# Do NOT expose NEXTAUTH_SECRET as a NEXT_PUBLIC_* variable.
+
+# Email provider (AWS SES)
+# Option A: Discrete SMTP vars (recommended to avoid URL encoding issues)
+EMAIL_SERVER_HOST=email-smtp.us-east-1.amazonaws.com
+EMAIL_SERVER_PORT=587
+EMAIL_SERVER_USER=SMTP_USER
+EMAIL_SERVER_PASSWORD=SMTP_PASS
+EMAIL_SERVER_SECURE=false
+EMAIL_FROM=PGP Community <no-reply@your-domain>
+
+# Option B: Single SMTP URL (must URL-encode username/password if they contain special chars)
+# EMAIL_SERVER=smtp://SMTP_USER:SMTP_PASS@email-smtp.us-east-1.amazonaws.com:587
 ```
 
 Notes:
 - Ensure the Amplify role has `secretsmanager:GetSecretValue` permission for the secret referenced by `NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN`.
 - DynamoDB table for NextAuth is created/used by the adapter (name via `NEXTAUTH_TABLE`). Ensure the Amplify role has read/write access to it.
 
-### Authentication (NextAuth v4 + SIWE)
-- API route: `app/api/auth/[...nextauth]/route.ts` uses NextAuth v4 with a Credentials provider to verify SIWE messages and a DynamoDB adapter for session persistence.
-- Session fields: `session.user.email` and `session.user.walletAddress` mirror the former Privy fields.
-- Client helper: `lib/siwe/client.ts` exposes `signInWithSiwe()` to trigger an injected wallet flow and sign the SIWE message, then call NextAuth `signIn`.
+### Authentication (NextAuth v4 + Email + SIWE)
+- API route: `app/api/auth/[...nextauth]/route.ts` uses NextAuth v4 with:
+  - Email provider (magic links) using SES SMTP via `EMAIL_SERVER`/`EMAIL_FROM`
+  - Credentials provider to verify SIWE messages
+  - DynamoDB adapter for User/Account/VerificationToken persistence
+- Session fields: `session.user.id`, `session.user.email`, and `session.user.walletAddress`.
+- Client helper: `lib/siwe/client.ts` exposes `signInWithSiwe()` to trigger SIWE sign-in.
+- Email sign-in page: `app/(auth)/signin/page.tsx`.
+
+Email-first UX and wallet linking
+- Unlinked wallet sign-ins redirect to `/signin` with a helpful banner and `callbackUrl` back to where the user started.
+- Authenticated users without a wallet see a “Link Wallet” action on the home page.
+- Wallets are linked to the current user via `POST /api/auth/link-wallet` and shown as `session.user.wallets`.
+
+Linking a wallet (Milestone 2)
+- API route: `app/api/auth/link-wallet/route.ts` verifies a SIWE message and links the wallet to the currently signed-in user using the NextAuth adapter.
+- Client helper: `linkWalletWithSiwe()` in `lib/siwe/client.ts` triggers the SIWE signature and POSTs to the link route.
+- Conflict handling: returns HTTP 409 if the wallet address is already linked to a different account.
+
+Unlinking a wallet
+- API route: `app/api/auth/unlink-wallet/route.ts` removes a linked wallet for the current user.
+- UI: See the Wallets section on `Settings → Profile` to unlink addresses.
+
+Profile collection (Milestone 3)
+- Sign-in page collects `firstName` (required), `lastName` (required), `xHandle` (optional), and `linkedinUrl` (optional) along with email.
+- Client validation ensures required fields and basic URL format.
+- The data is saved to the database after email verification via `POST /api/profile/update`.
+- Session exposes `session.user.firstName`, `lastName`, `xHandle`, `linkedinUrl`, and the UI greets the user by first name.
 
 Protecting API routes
 - Use NextAuth’s JWT: in a route handler, import `getToken` from `next-auth/jwt` and require a valid token before serving content. Example in `app/api/content/[file]/route.ts`.
@@ -101,11 +140,8 @@ Protecting API routes
 | **cloudFrontSigner.ts** | Server-side TypeScript implementation for signed URL generation            |
 
 ## Architecture Notes
-- **OAC Configuration**:
-  - Ensures S3 bucket only responds to CloudFront requests
-  - Eliminates need for bucket policies targeting CloudFront IPs
-- **Privy/Unlock Integration**:
-  - Client uses Privy for authentication and wallet linking
+- **Unlock Integration**:
+  - Wallet auth via NextAuth + SIWE (only for previously linked wallets)
   - Unlock checkout is opened client-side; after closing, the app refreshes membership status
 - **CloudFront Distribution**:
   - Configured with Trusted Key Groups for signature validation

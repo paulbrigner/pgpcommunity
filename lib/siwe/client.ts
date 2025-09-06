@@ -4,6 +4,43 @@ import { SiweMessage, generateNonce } from "siwe";
 import { getAddress } from "ethers";
 import { signIn } from "next-auth/react";
 
+async function getNextAuthCsrfToken(): Promise<string | undefined> {
+  try {
+    // First, try cookie (fast path)
+    const rawCookie = (globalThis as any)?.document?.cookie as string | undefined;
+    if (rawCookie) {
+      const m = rawCookie.match(/(?:^|; )next-auth\.csrf-token=([^;]+)/);
+      if (m && m[1]) {
+        const val = decodeURIComponent(m[1]);
+        const token = val.split("|")[0];
+        if (token) return token;
+      }
+    }
+  } catch {}
+  try {
+    // Fallback: ask NextAuth to issue a fresh CSRF token
+    const res = await fetch("/api/auth/csrf", { method: "GET", credentials: "include" });
+    if (res.ok) {
+      const data: any = await res.json();
+      const token = data?.csrfToken as string | undefined;
+      if (token) return token;
+      // After this request, the cookie should also be set; try reading again
+      try {
+        const rawCookie2 = (globalThis as any)?.document?.cookie as string | undefined;
+        if (rawCookie2) {
+          const m2 = rawCookie2.match(/(?:^|; )next-auth\.csrf-token=([^;]+)/);
+          if (m2 && m2[1]) {
+            const val2 = decodeURIComponent(m2[1]);
+            const token2 = val2.split("|")[0];
+            if (token2) return token2;
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return undefined;
+}
+
 export async function signInWithSiwe(): Promise<{ ok: boolean; error?: string }>{
   try {
     const eth = (globalThis as any).ethereum;
@@ -16,19 +53,8 @@ export async function signInWithSiwe(): Promise<{ ok: boolean; error?: string }>
     const chainId = parseInt(chainIdHex, 16);
     const domain = globalThis.location.host;
     const origin = globalThis.location.origin;
-    // Use NextAuth's CSRF token cookie value as SIWE nonce to satisfy server verification
-    let nonce: string | undefined;
-    try {
-      const rawCookie = (globalThis as any)?.document?.cookie as string | undefined;
-      if (rawCookie) {
-        const m = rawCookie.match(/(?:^|; )next-auth\.csrf-token=([^;]+)/);
-        if (m && m[1]) {
-          const val = decodeURIComponent(m[1]);
-          // Cookie format: `${token}|${hash}` — we only need the token
-          nonce = val.split("|")[0];
-        }
-      }
-    } catch {}
+    // Use NextAuth's CSRF token value as SIWE nonce to satisfy server verification
+    let nonce: string | undefined = await getNextAuthCsrfToken();
     if (!nonce) nonce = generateNonce();
 
     const message = new SiweMessage({
@@ -89,6 +115,55 @@ export async function signInWithSiwe(): Promise<{ ok: boolean; error?: string }>
               return String(e);
             }
           })();
+    return { ok: false, error: msg };
+  }
+}
+
+export async function linkWalletWithSiwe(): Promise<{ ok: boolean; error?: string }>{
+  try {
+    const eth = (globalThis as any).ethereum;
+    if (!eth) return { ok: false, error: "No injected wallet found" };
+
+    const [rawAddress] = await eth.request({ method: "eth_requestAccounts" });
+    const address = getAddress(rawAddress);
+    const chainIdHex = await eth.request({ method: "eth_chainId" });
+    const chainId = parseInt(chainIdHex, 16);
+    const domain = globalThis.location.host;
+    const origin = globalThis.location.origin;
+
+    // Prefer NextAuth CSRF token as SIWE nonce
+    let nonce: string | undefined = await getNextAuthCsrfToken();
+    if (!nonce) nonce = generateNonce();
+
+    const message = new SiweMessage({
+      domain,
+      address,
+      statement: "Link your wallet to PGP Community.",
+      uri: origin,
+      version: "1",
+      chainId,
+      nonce,
+    });
+    const prepared = message.prepareMessage();
+    const signature = await eth.request({
+      method: "personal_sign",
+      params: [prepared, address],
+    });
+
+    const res = await fetch("/api/auth/link-wallet", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, signature }),
+    });
+    if (!res.ok) {
+      let detail: any = undefined;
+      try { detail = await res.json(); } catch {}
+      const msg = detail?.error || res.statusText || `HTTP ${res.status}`;
+      return { ok: false, error: msg };
+    }
+    return { ok: true };
+  } catch (e: any) {
+    const msg = typeof e?.message === "string" ? e.message : (() => { try { return JSON.stringify(e); } catch { return String(e); } })();
     return { ok: false, error: msg };
   }
 }

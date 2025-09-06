@@ -3,6 +3,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react"; // React helpers for state and lifecycle
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
 import { networks } from "@unlock-protocol/networks";
@@ -41,12 +42,17 @@ const PAYWALL_CONFIG = {
 
 export default function Home() {
   // NextAuth session
-  const { data: session, status } = useSession();
+  const { data: session, status, update } = useSession();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const authenticated = status === "authenticated";
   const ready = status !== "loading";
   const walletAddress = (session?.user as any)?.walletAddress as
     | string
     | undefined;
+  const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
+  const firstName = (session?.user as any)?.firstName as string | undefined;
   // Detailed membership state: 'active', 'expired', or 'none'
   const [membershipStatus, setMembershipStatus] = useState<
     "active" | "expired" | "none"
@@ -56,6 +62,9 @@ export default function Home() {
   // Flags to show when purchase/renewal or funding actions are running
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Local auth error (e.g., SIWE with unlinked wallet)
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // Paywall instance configured for the Base network
   const paywall = useMemo(() => {
@@ -97,6 +106,34 @@ export default function Home() {
       refreshMembership();
     }
   }, [ready, authenticated, walletAddress]);
+
+  // After email sign-in, apply any locally saved profile to the server and refresh session
+  useEffect(() => {
+    if (!ready || !authenticated) return;
+    try {
+      const raw = localStorage.getItem("pendingProfile");
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      if (!data?.firstName || !data?.lastName) return;
+      (async () => {
+        try {
+          const res = await fetch("/api/profile/update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          if (!res.ok) {
+            console.error("Profile update failed", await res.text());
+          } else {
+            await update({});
+            localStorage.removeItem("pendingProfile");
+          }
+        } catch (e) {
+          console.error("Profile update error", e);
+        }
+      })();
+    } catch {}
+  }, [ready, authenticated, update]);
 
   // Open the Unlock Protocol checkout using the existing provider
   const purchaseMembership = async () => {
@@ -160,15 +197,56 @@ export default function Home() {
             onClick={async () => {
               const res = await signInWithSiwe();
               if (!res.ok) {
-                console.error(
-                  `SIWE sign-in failed: ${res.error ?? "Unknown error"}`
-                );
+                // Redirect to email sign-in with a helpful reason and callback back to here
+                const current = (() => {
+                  const q = searchParams?.toString();
+                  return q && q.length ? `${pathname}?${q}` : pathname || "/";
+                })();
+                router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=wallet-unlinked`);
                 return;
               }
+              setAuthError(null);
             }}
           >
             Login with Wallet
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              const current = (() => {
+                const q = searchParams?.toString();
+                return q && q.length ? `${pathname}?${q}` : pathname || "/";
+              })();
+              router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=signup`);
+            }}
+          >
+            Sign up with Email
+          </Button>
+          {authError && (
+            <p className="text-sm text-red-600 dark:text-red-400">{authError}</p>
+          )}
+        </div>
+      ) : !walletAddress && wallets.length === 0 ? (
+        // Authenticated but no wallet linked yet
+        <div className="space-y-4 text-center">
+          <p>You’re signed in. Link your wallet to continue.</p>
+          <Button
+            onClick={async () => {
+              const { linkWalletWithSiwe } = await import("@/lib/siwe/client");
+              const res = await linkWalletWithSiwe();
+              if (!res.ok) {
+                alert(res.error || "Linking failed");
+                return;
+              }
+              // Refresh session so walletAddress populates, which triggers membership check
+              try { await update({}); } catch {}
+            }}
+          >
+            Link Wallet
+          </Button>
+          <div>
+            <Button variant="outline" onClick={() => signOut()}>Log Out</Button>
+          </div>
         </div>
       ) : loadingMembership ? (
         <p>Checking membership…</p>
@@ -176,7 +254,7 @@ export default function Home() {
         // Scenario 1: linked wallet has a valid membership -> authorized
         <div className="space-y-4 text-center">
           <p>
-            Hello {(session?.user as any)?.email ?? walletAddress ?? "member"}!
+            Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}!
             You’re a member.
           </p>
           <div className="space-x-2">
@@ -210,6 +288,9 @@ export default function Home() {
             >
               <a href="#">View FAQ</a>
             </Button>
+            <Button asChild variant="outline">
+              <a href="/settings/profile">Edit Profile</a>
+            </Button>
             <br />
             <br />
             <Button variant="outline" onClick={() => signOut()}>
@@ -221,7 +302,7 @@ export default function Home() {
         // Scenario 2: authenticated but no valid membership -> offer purchase/renew
         <div className="space-y-4 text-center">
           <p>
-            Hello, {walletAddress}!{" "}
+            Hello, {firstName || walletAddress || (session?.user as any)?.email}!{" "}
             {membershipStatus === "expired"
               ? "Your membership has expired."
               : "You need a membership."}
@@ -238,6 +319,9 @@ export default function Home() {
             </Button>
             <Button onClick={onRefresh} disabled={refreshing}>
               {refreshing ? "Refreshing…" : "Refresh Status"}
+            </Button>
+            <Button asChild variant="outline">
+              <a href="/settings/profile">Edit Profile</a>
             </Button>
             <Button variant="outline" onClick={() => signOut()}>
               Log Out

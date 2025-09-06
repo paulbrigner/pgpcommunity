@@ -7,8 +7,26 @@ try {
   // Use eval('require') so bundlers do not statically resolve the module at build time
   // eslint-disable-next-line no-eval
   const req: any = (eval as any)("require");
-  const mod = req("$amplify/env/client");
-  clientEnv = (mod && mod.env) as Record<string, string | undefined>;
+
+  const extractEnv = (m: any): Record<string, string | undefined> | undefined => {
+    if (!m) return undefined;
+    if (m.env && typeof m.env === "object") return m.env as Record<string, string | undefined>;
+    if (m.default?.env && typeof m.default.env === "object") return m.default.env as Record<string, string | undefined>;
+    if (typeof m === "object") return m as Record<string, string | undefined>;
+    return undefined;
+  };
+
+  const modClient = (() => {
+    try { return req("$amplify/env/client"); } catch { return undefined; }
+  })();
+  const modBase = (() => {
+    try { return req("$amplify/env"); } catch { return undefined; }
+  })();
+
+  const envClient = extractEnv(modClient) || {};
+  const envBase = extractEnv(modBase) || {};
+  const merged = { ...envBase, ...envClient };
+  clientEnv = Object.keys(merged).length ? merged : undefined;
 } catch (_) {
   clientEnv = undefined;
 }

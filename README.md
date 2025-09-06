@@ -19,9 +19,11 @@ Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is hand
     - AWS CloudFront distribution configuration
 
 ## Setup
-### Environment Variables
+### Environment Variables (Amplify Gen 2)
+In Amplify Hosting Gen 2, define client-safe variables under regular Environment Variables and server-only values as Secrets. The app reads them via Amplify’s virtual env modules with local fallbacks.
+
+Public (client-safe)
 ```bash
-# Public (client + server)
 NEXT_PUBLIC_LOCK_ADDRESS=...
 NEXT_PUBLIC_UNLOCK_ADDRESS=...
 NEXT_PUBLIC_BASE_NETWORK_ID=8453
@@ -30,17 +32,17 @@ NEXT_PUBLIC_CLOUDFRONT_DOMAIN=assets.pgpforcrypto.org
 NEXT_PUBLIC_KEY_PAIR_ID=KERO2MLM81YXV
 NEXT_PUBLIC_AWS_REGION=us-east-1
 NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN=arn:aws:secretsmanager:us-east-1:...:secret:pgpcommunity_pk-...
+```
 
+Server-only (Secrets)
+```bash
 # NextAuth
-# Server-only secrets
 NEXTAUTH_URL=https://your-domain
 NEXTAUTH_SECRET=your-long-random-secret
 NEXTAUTH_TABLE=NextAuth
-# If you also set NEXT_PUBLIC_NEXTAUTH_URL for client-only needs, keep it in sync with NEXTAUTH_URL.
-# Do NOT expose NEXTAUTH_SECRET as a NEXT_PUBLIC_* variable.
 
 # Email provider (AWS SES)
-# Option A: Discrete SMTP vars (recommended to avoid URL encoding issues)
+# Option A: Discrete SMTP vars (recommended)
 EMAIL_SERVER_HOST=email-smtp.us-east-1.amazonaws.com
 EMAIL_SERVER_PORT=587
 EMAIL_SERVER_USER=SMTP_USER
@@ -48,13 +50,19 @@ EMAIL_SERVER_PASSWORD=SMTP_PASS
 EMAIL_SERVER_SECURE=false
 EMAIL_FROM=PGP Community <no-reply@your-domain>
 
-# Option B: Single SMTP URL (must URL-encode username/password if they contain special chars)
+# Option B: Single SMTP URL (if preferred)
 # EMAIL_SERVER=smtp://SMTP_USER:SMTP_PASS@email-smtp.us-east-1.amazonaws.com:587
 ```
 
 Notes:
 - Ensure the Amplify role has `secretsmanager:GetSecretValue` permission for the secret referenced by `NEXT_PUBLIC_PRIVATE_KEY_SECRET_ARN`.
 - DynamoDB table for NextAuth is created/used by the adapter (name via `NEXTAUTH_TABLE`). Ensure the Amplify role has read/write access to it.
+
+### Env Handling In Code
+- Server code reads secrets/vars from `$amplify/env/server` with dev fallback to `process.env` in `lib/config.server.ts`.
+- Client code reads public vars from `$amplify/env/client` with dev fallback to `process.env` in `lib/config.public.ts`.
+- Do not mark server-only values as `NEXT_PUBLIC_*`.
+- For local development, place values in `.env.local` (standard Next.js behavior).
 
 ### Authentication (NextAuth v4 + Email + SIWE)
 - API route: `app/api/auth/[...nextauth]/route.ts` uses NextAuth v4 with:
@@ -87,6 +95,10 @@ Profile collection
 
 Protecting API routes
 - Use NextAuth’s JWT: in a route handler, import `getToken` from `next-auth/jwt` and require a valid token before serving content. Example in `app/api/content/[file]/route.ts`.
+
+Config files
+- Server-only: `lib/config.server.ts`
+- Client-safe: `lib/config.public.ts`
 
 ## Deployment
 ### Step 5: Configure Origin Access Control (OAC)
@@ -144,6 +156,8 @@ Protecting API routes
 - **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`, `@unlock-protocol/paywall`
 - **AWS SDK**: `@aws-sdk/client-secrets-manager`
 - **Security**: AWS Secrets Manager, CloudFront OAC
+Notes:
+- Amplify env access uses virtual modules `$amplify/env/server` and `$amplify/env/client`; no extra NPM dependency is required.
 
 ## Node 22 Migration Checklist (Later)
 - Update runtime: change `amplify.yml` to `runtime.nodejs: 22` and use `nvm install 22 && nvm use 22` in preBuild.

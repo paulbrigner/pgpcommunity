@@ -1,29 +1,27 @@
 # PGP Community Platform
 
 ## Overview
-Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via Privy and Unlock Protocol. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key loaded from server environment variables.
+Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with optional SIWE wallet linking, and Unlock Protocol for membership gating. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key loaded from server environment variables.
 
 ## Features
 - **Secure Content Delivery**:
   - Private files in S3 accessed via CloudFront signed URLs
   - **Origin Access Control (OAC)** restricts S3 bucket access to CloudFront only
-  - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts` (no Lambda required)
+  - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts`
   - Private key provided via server env var `PRIVATE_KEY_SECRET`
 - **Authentication/Authorization**:
-  - Privy for login + wallet linking
+  - NextAuth for email sign-in and SIWE wallet linking
   - Unlock Protocol for membership gating
   - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
 - **Secrets Management**:
   - Server environment variables store sensitive credentials including:
     - CloudFront private key for signed URL generation (`PRIVATE_KEY_SECRET`)
-    - Privy API secret key (if used)
     - CloudFront distribution config values (`CLOUDFRONT_DOMAIN`, `KEY_PAIR_ID`)
 
 ## Setup
 ### Environment Variables
 ```bash
 ## Public (client + server)
-NEXT_PUBLIC_PRIVY_APP_ID=...
 NEXT_PUBLIC_LOCK_ADDRESS=...
 NEXT_PUBLIC_UNLOCK_ADDRESS=...
 NEXT_PUBLIC_BASE_NETWORK_ID=8453
@@ -53,7 +51,7 @@ EMAIL_SERVER_SECURE=false
 EMAIL_FROM=PGP Community <no-reply@your-domain>
 
 # Option B: Single SMTP URL (must URL-encode username/password if they contain special chars)
-# EMAIL_SERVER=smtp://SMTP_USER:SMTP_PASS@email-smtp.us-east-1.amazonaws.com:587
+ # EMAIL_SERVER=smtp://SMTP_USER:SMTP_PASS@email-smtp.us-east-1.amazonaws.com:587
 ```
 
 Notes:
@@ -107,8 +105,8 @@ Protecting API routes
 
 ## Security Architecture
 ### CloudFront Signed URLs Workflow
-1. **User Authentication**: 
-   - Privy/Unlock verifies wallet/NFT ownership
+1. **User Authentication**:
+   - NextAuth verifies email sessions; SIWE verifies wallet ownership; Unlock enforces membership
 2. **Server-Side Signing**:
    - API runs on Node.js runtime (`export const runtime = "nodejs"`)
    - Reads the private key from environment variable `PRIVATE_KEY_SECRET`

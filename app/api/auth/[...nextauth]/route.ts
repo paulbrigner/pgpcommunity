@@ -17,6 +17,7 @@ import {
   EMAIL_SERVER_USER,
   EMAIL_SERVER_PASSWORD,
   EMAIL_SERVER_SECURE,
+  BASE_RPC_URL
 } from "@/lib/config";
 import { getStatusAndExpiry } from "@/lib/membership-server";
 

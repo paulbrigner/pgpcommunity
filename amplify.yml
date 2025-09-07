@@ -22,7 +22,7 @@ frontend:
         - env | grep -e CLOUDFRONT_DOMAIN >> .env.production
         - env | grep -e KEY_PAIR_ID >> .env.production
         - env | grep -e REGION_AWS >> .env.production
-        - echo "PRIVATE_KEY_SECRET=\"$(printenv PRIVATE_KEY_SECRET)\"" >> .env.production
+        - env | grep -e PRIVATE_KEY_SECRET >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

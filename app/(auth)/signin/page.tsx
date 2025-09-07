@@ -4,6 +4,8 @@ import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Info, Mail } from "lucide-react";
 
 export default function SignInPage() {
   const searchParams = useSearchParams();
@@ -68,11 +70,33 @@ export default function SignInPage() {
   return (
     <div className="mx-auto max-w-md p-6 space-y-6">
       <h1 className="text-2xl font-semibold">Sign in</h1>
-      {searchParams?.get("reason") === "wallet-unlinked" && (
-        <div className="rounded-md border border-amber-400 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">
-          Your wallet isn’t linked yet. Sign in with email to create your account, then link your wallet from the home page.
-        </div>
-      )}
+      {(() => {
+        const reason = searchParams?.get("reason");
+        if (!reason) return null;
+        if (reason === "wallet-unlinked") {
+          return (
+            <Alert>
+              <Info className="h-4 w-4" />
+              <AlertTitle>Wallet not linked</AlertTitle>
+              <AlertDescription>
+                Sign in with email to create your account, then link your wallet from the home page.
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        if (reason === "signup") {
+          return (
+            <Alert>
+              <Mail className="h-4 w-4" />
+              <AlertTitle>Create your account</AlertTitle>
+              <AlertDescription>
+                Enter your details and we’ll email a magic link to verify your address.
+              </AlertDescription>
+            </Alert>
+          );
+        }
+        return null;
+      })()}
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-2">
@@ -149,10 +173,16 @@ export default function SignInPage() {
         </Button>
       </form>
       {message && (
-        <p className="text-sm text-green-600 dark:text-green-400">{message}</p>
+        <Alert>
+          <AlertTitle>Check your inbox</AlertTitle>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
       )}
       {error && (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        <Alert variant="destructive">
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
       )}
     </div>
   );

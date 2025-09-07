@@ -18,6 +18,7 @@ import {
   EMAIL_SERVER_PASSWORD,
   EMAIL_SERVER_SECURE,
 } from "@/lib/config";
+import { getStatusAndExpiry } from "@/lib/membership-server";
 
 // Ensure NextAuth sees a base URL for callbacks (used by Email provider)
 if (!process.env.NEXTAUTH_URL && NEXTAUTH_URL) {
@@ -132,6 +133,36 @@ const authOptions = {
     async jwt({ token, user }: any) {
       if (user?.walletAddress) token.walletAddress = user.walletAddress;
       if (user?.email) token.email = user.email;
+      // Opportunistically enrich token with membership status/expiry, cached for 5 minutes
+      try {
+        const nowSec = Math.floor(Date.now() / 1000);
+        const last = (token as any).membershipCheckedAt as number | undefined;
+        const stale = !last || nowSec - last > 300;
+        if (stale && token?.sub) {
+          const adapter: any = DynamoDBAdapter(documentClient as any, {
+            tableName: NEXTAUTH_TABLE || "NextAuth",
+          });
+          const userRecord = await adapter.getUser(token.sub);
+          const wallets: string[] = Array.isArray((userRecord as any)?.wallets)
+            ? ((userRecord as any).wallets as string[])
+            : [];
+          const primary = (token as any).walletAddress as string | undefined;
+          const addresses = (wallets?.length ? wallets : primary ? [primary] : []) as string[];
+          if (addresses.length) {
+            const { status, expiry } = await getStatusAndExpiry(
+              addresses,
+              BASE_RPC_URL,
+              Number(process.env.NEXT_PUBLIC_BASE_NETWORK_ID || 0),
+              process.env.NEXT_PUBLIC_LOCK_ADDRESS as string
+            );
+            (token as any).membershipStatus = status;
+            (token as any).membershipExpiry = expiry ?? null;
+            (token as any).membershipCheckedAt = nowSec;
+          }
+        }
+      } catch (e) {
+        // ignore membership enrichment errors
+      }
       return token;
     },
     async session({ session, token }: any) {
@@ -157,6 +188,9 @@ const authOptions = {
           (session.user as any).lastName = (userRecord as any)?.lastName ?? null;
           (session.user as any).xHandle = (userRecord as any)?.xHandle ?? null;
           (session.user as any).linkedinUrl = (userRecord as any)?.linkedinUrl ?? null;
+          // Membership info from JWT (cached server-side)
+          (session.user as any).membershipStatus = (token as any)?.membershipStatus ?? null;
+          (session.user as any).membershipExpiry = (token as any)?.membershipExpiry ?? null;
           // Derive display name if not set
           if (!(session.user as any).name && (userRecord as any)?.firstName) {
             const fn = (userRecord as any).firstName as string;

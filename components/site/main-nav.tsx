@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   NavigationMenu,
@@ -11,12 +11,14 @@ import {
   NavigationMenuList,
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
+import { signInWithSiwe } from "@/lib/siwe/client";
 
 export function MainNav() {
   const { status } = useSession();
   const authenticated = status === "authenticated";
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const callbackUrl = useMemo(() => {
     const q = searchParams?.toString();
@@ -30,40 +32,42 @@ export function MainNav() {
         <NavigationMenu>
           <NavigationMenuList>
             <NavigationMenuItem>
-              <Link href="/" legacyBehavior passHref>
-                <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                  Home
-                </NavigationMenuLink>
-              </Link>
+              <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
+                <Link href="/">Home</Link>
+              </NavigationMenuLink>
             </NavigationMenuItem>
 
             {authenticated && (
               <NavigationMenuItem>
-                <Link href="/settings/profile" legacyBehavior passHref>
-                  <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                    Edit Profile
-                  </NavigationMenuLink>
-                </Link>
+                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
+                  <Link href="/settings/profile">Edit Profile</Link>
+                </NavigationMenuLink>
               </NavigationMenuItem>
             )}
 
             {!authenticated && (
               <NavigationMenuItem>
-                <Link href={`/signin?callbackUrl=${encodeURIComponent(callbackUrl)}&reason=signup`} legacyBehavior passHref>
-                  <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                    Sign Up
-                  </NavigationMenuLink>
-                </Link>
+                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
+                  <Link href={`/signin?callbackUrl=${encodeURIComponent(callbackUrl)}&reason=signup`}>Sign Up</Link>
+                </NavigationMenuLink>
               </NavigationMenuItem>
             )}
 
             {!authenticated && (
               <NavigationMenuItem>
-                <Link href={`/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`} legacyBehavior passHref>
-                  <NavigationMenuLink className={navigationMenuTriggerStyle()}>
-                    Sign In
-                  </NavigationMenuLink>
-                </Link>
+                <a
+                  href="#signin"
+                  className={navigationMenuTriggerStyle()}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    const res = await signInWithSiwe();
+                    if (!res.ok) {
+                      router.push(`/signin?callbackUrl=${encodeURIComponent(callbackUrl)}&reason=wallet-unlinked`);
+                    }
+                  }}
+                >
+                  Sign In
+                </a>
               </NavigationMenuItem>
             )}
 
@@ -71,7 +75,14 @@ export function MainNav() {
               <NavigationMenuItem>
                 <a
                   href="#logout"
-                  onClick={(e) => { e.preventDefault(); signOut(); }}
+                  onClick={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await signOut({ callbackUrl: "/" });
+                    } catch {
+                      router.push("/");
+                    }
+                  }}
                   className={navigationMenuTriggerStyle()}
                 >
                   Log Out

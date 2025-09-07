@@ -2,7 +2,7 @@
 // so it needs to run on the client side rather than on the server.
 "use client";
 
-import { useState, useEffect, useMemo } from "react"; // React helpers for state and lifecycle
+import { useState, useEffect, useMemo, useRef } from "react"; // React helpers for state and lifecycle
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
@@ -13,10 +13,11 @@ import {
   BASE_RPC_URL,
   UNLOCK_ADDRESS,
 } from "@/lib/config"; // Environment-specific constants
-import { checkMembership as fetchMembership } from "@/lib/membership"; // Helper function for membership logic
+import { checkMembership as fetchMembership, getMembershipExpiration } from "@/lib/membership"; // Helper functions for membership logic
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, CalendarClock, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
+import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
 
 const PAYWALL_CONFIG = {
   icon: "",
@@ -54,15 +55,22 @@ export default function Home() {
     | undefined;
   const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
   const firstName = (session?.user as any)?.firstName as string | undefined;
-  // Detailed membership state: 'active', 'expired', or 'none'
+  const lastName = (session?.user as any)?.lastName as string | undefined;
+  const profileComplete = !!(firstName && lastName);
+  const walletLinked = !!(walletAddress || wallets.length > 0);
+  // Membership state; 'unknown' avoids UI flicker until we hydrate from session/cache
   const [membershipStatus, setMembershipStatus] = useState<
-    "active" | "expired" | "none"
-  >("none");
+    "active" | "expired" | "none" | "unknown"
+  >("unknown");
   // Indicates whether we are currently checking membership status
   const [loadingMembership, setLoadingMembership] = useState(false);
+  const [checkedMembership, setCheckedMembership] = useState(false);
   // Flags to show when purchase/renewal or funding actions are running
   const [isPurchasing, setIsPurchasing] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  
+  const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
+  const refreshSeq = useRef(0);
+  const prevStatusRef = useRef<"active" | "expired" | "none">("none");
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
@@ -80,33 +88,102 @@ export default function Home() {
 
   // Check on-chain whether the session wallet has a valid membership
   const refreshMembership = async () => {
-    if (!ready || !authenticated || !walletAddress) {
-      setMembershipStatus("none");
+    if (!ready || !authenticated || !(walletAddress || (wallets && wallets.length > 0))) {
+      // Not enough info to check yet; preserve current state
       return;
     }
 
     setLoadingMembership(true);
+    const seq = ++refreshSeq.current;
     try {
-      const status = await fetchMembership(
-        [{ address: walletAddress } as any],
-        BASE_RPC_URL,
-        BASE_NETWORK_ID,
-        LOCK_ADDRESS
-      );
-      setMembershipStatus(status);
+      const addresses = wallets && wallets.length
+        ? wallets.map((a) => String(a).toLowerCase())
+        : [String(walletAddress) as string];
+      // initiate refresh via server API
+      const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(','))}`, { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`expiry API: ${resp.status}`);
+      const { expiry, status } = await resp.json();
+      // Only apply if this is the latest refresh
+      if (seq === refreshSeq.current) {
+        // Prefer fresh expiry if present; otherwise keep prior future-dated expiry
+        const preservedExpiry =
+          (typeof expiry === 'number' && expiry > 0)
+            ? expiry
+            : (membershipExpiry && membershipExpiry * 1000 > Date.now() ? membershipExpiry : null);
+
+        setMembershipExpiry(preservedExpiry);
+        const nowSec = Math.floor(Date.now() / 1000);
+        const derived = typeof preservedExpiry === 'number' && preservedExpiry > 0
+          ? (preservedExpiry > nowSec ? 'active' : 'expired')
+          : undefined;
+        let effectiveStatus = (derived ?? status) as "active" | "expired" | "none";
+        // Avoid downgrading to 'none' on transient RPC failures if we previously knew better
+        if (effectiveStatus === 'none' && prevStatusRef.current !== 'none') {
+          effectiveStatus = prevStatusRef.current;
+        }
+        setMembershipStatus(effectiveStatus);
+        // Persist a short-lived client cache to minimize re-checks
+        try {
+          const cache = { status: effectiveStatus, expiry: preservedExpiry, at: Math.floor(Date.now()/1000), addresses: addresses.join(',') };
+          localStorage.setItem('membershipCache', JSON.stringify(cache));
+        } catch {}
+        prevStatusRef.current = effectiveStatus;
+      } else {
+        // stale refresh, ignore
+      }
     } catch (error) {
       console.error("Membership check failed:", error);
     } finally {
       setLoadingMembership(false);
+      setCheckedMembership(true);
     }
   };
 
   useEffect(() => {
-    // When authenticated, check membership automatically
-    if (ready && authenticated && walletAddress) {
+    // Prefer server-provided membership data via session; fall back to client cache; otherwise fetch in background
+    if (!ready || !authenticated) return;
+    const su: any = session?.user || {};
+    const addresses = (wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : []).map((a) => String(a).toLowerCase());
+    const addressesKey = addresses.join(',');
+
+    if (su.membershipStatus) {
+      setMembershipStatus(su.membershipStatus);
+      setMembershipExpiry(typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null);
+      setCheckedMembership(true);
+      // Remember last known good status to avoid transient downgrades
+      try { if (su.membershipStatus !== 'none') { prevStatusRef.current = su.membershipStatus; } } catch {}
+      // Prime client cache
+      try {
+        const cache = { status: su.membershipStatus, expiry: su.membershipExpiry ?? null, at: Math.floor(Date.now()/1000), addresses: addressesKey };
+        localStorage.setItem('membershipCache', JSON.stringify(cache));
+      } catch {}
+      return;
+    }
+
+    // Try client cache (5 min TTL)
+    try {
+      const raw = localStorage.getItem('membershipCache');
+      if (raw) {
+        const cache = JSON.parse(raw || '{}');
+        const age = Math.floor(Date.now()/1000) - (cache?.at || 0);
+        if (cache?.addresses === addressesKey && age < 300 && cache?.status) {
+          setMembershipStatus(cache.status);
+          setMembershipExpiry(typeof cache.expiry === 'number' ? cache.expiry : null);
+          setCheckedMembership(true);
+          // Preserve last known good status to prevent transient downgrades
+          try { if (cache.status !== 'none') { prevStatusRef.current = cache.status; } } catch {}
+          // Background refresh without changing checked flag
+          refreshMembership();
+          return;
+        }
+      }
+    } catch {}
+
+    if (addresses.length) {
+      // No session value and no usable cache: do a foreground fetch once
       refreshMembership();
     }
-  }, [ready, authenticated, walletAddress]);
+  }, [ready, authenticated, (session as any)?.user?.membershipStatus, (session as any)?.user?.membershipExpiry, walletAddress, wallets]);
 
   // After email sign-in, apply any locally saved profile to the server and refresh session
   useEffect(() => {
@@ -172,14 +249,7 @@ export default function Home() {
     return data.url;
   };
 
-  const onRefresh = async () => {
-    try {
-      setRefreshing(true);
-      await refreshMembership();
-    } finally {
-      setRefreshing(false);
-    }
-  };
+  
 
   return (
     <div className="mx-auto p-6 space-y-6">
@@ -213,7 +283,7 @@ export default function Home() {
                 }}
                 className="w-full sm:w-auto"
               >
-                <Wallet className="mr-2 h-4 w-4" /> Login with Wallet
+                <Wallet className="mr-2 h-4 w-4" /> Sign In with Wallet
               </Button>
               <Button
                 variant="outline"
@@ -267,7 +337,7 @@ export default function Home() {
 
           <section className="rounded-lg border p-4">
             <h3 className="font-semibold mb-2">How it works</h3>
-            <ul className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 text-sm">
+            <ul className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 text-sm">
               <li className="flex items-start gap-2">
                 <BadgeCheck className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
                 <div>
@@ -286,123 +356,107 @@ export default function Home() {
                 <KeyIcon className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
                 <div>
                   <div className="font-medium">Activate membership</div>
-                  <div className="text-muted-foreground">Purchase the PGP Unlock membership (a time‑based subscription) to unlock member‑only features.</div>
+                  <div className="text-muted-foreground">Purchase the PGP Unlock membership.</div>
                 </div>
               </li>
-              <li className="flex items-start gap-2">
-                <CalendarClock className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
-                <div>
-                  <div className="font-medium">Join meetings & collect</div>
-                  <div className="text-muted-foreground">Attend events and claim POAPs/NFTs.</div>
-                </div>
-              </li>
+              
             </ul>
             <div className="mt-4 text-sm text-muted-foreground">
               This site uses the open‑source, Web3‑based Unlock Protocol to issue and verify memberships. When you buy a membership, Unlock mints a time‑limited key (NFT) to your wallet. We verify your active key on‑chain to grant access to member‑only pages and features. When your key expires, you can renew to continue access. <a className="underline hover:text-foreground" href="https://unlock-protocol.com/" target="_blank" rel="noreferrer">Learn more about Unlock Protocol</a>.
             </div>
           </section>
         </div>
-      ) : !walletAddress && wallets.length === 0 ? (
-        // Authenticated but no wallet linked yet
-        <div className="max-w-md mx-auto space-y-4 text-center">
-          <p>You’re signed in. Link your wallet to continue.</p>
-          <Button
-            onClick={async () => {
-              const { linkWalletWithSiwe } = await import("@/lib/siwe/client");
-              const res = await linkWalletWithSiwe();
-              if (!res.ok) {
-                alert(res.error || "Linking failed");
-                return;
-              }
-              // Refresh session so walletAddress populates, which triggers membership check
-              try { await update({}); } catch {}
-            }}
-          >
-            Link Wallet
-          </Button>
-          <div>
-            <Button variant="outline" onClick={() => signOut()}>Log Out</Button>
-          </div>
-        </div>
-      ) : loadingMembership ? (
-        <p>Checking membership…</p>
+      ) : membershipStatus === "unknown" ? (
+        // Neutral placeholder while background check/session hydration completes
+        <div className="mx-auto max-w-4xl" />
       ) : membershipStatus === "active" ? (
         // Scenario 1: linked wallet has a valid membership -> authorized
-        <div className="max-w-md mx-auto space-y-4 text-center">
-          <p>
-            Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}!
-            You’re a member.
-          </p>
-          <div className="space-x-2">
-            <Button
-              asChild
-              onClick={async (e) => {
-                e.preventDefault();
-                const url = await getContentUrl("index.html");
-                window.open(url, "_blank");
-              }}
-            >
-              <a href="#">View Home</a>
-            </Button>
-            <Button
-              asChild
-              onClick={async (e) => {
-                e.preventDefault();
-                const url = await getContentUrl("guide.html");
-                window.open(url, "_blank");
-              }}
-            >
-              <a href="#">View Guide</a>
-            </Button>
-            <Button
-              asChild
-              onClick={async (e) => {
-                e.preventDefault();
-                const url = await getContentUrl("faq.html");
-                window.open(url, "_blank");
-              }}
-            >
-              <a href="#">View FAQ</a>
-            </Button>
-            <Button asChild variant="outline">
-              <a href="/settings/profile">Edit Profile</a>
-            </Button>
-            <br />
-            <br />
-            <Button variant="outline" onClick={() => signOut()}>
-              Log Out
-            </Button>
+        <div className="mx-auto max-w-4xl space-y-6">
+          <div className="text-center">
+            <p>
+              Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! You’re a member.
+            </p>
           </div>
+          {walletLinked && profileComplete ? (
+            <div className="max-w-md mx-auto space-y-2">
+              {typeof membershipExpiry === 'number' && membershipExpiry > 0 ? (
+                <p className="text-center text-sm text-muted-foreground">
+                  {`Membership active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`}
+                </p>
+              ) : null}
+              <div className="rounded-lg border p-4">
+                <h3 className="text-sm font-semibold mb-2 text-center">Member Tools</h3>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <Button
+                    asChild
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      const url = await getContentUrl("index.html");
+                      window.open(url, "_blank");
+                    }}
+                  >
+                    <a href="#">View Home</a>
+                  </Button>
+                  <Button
+                    asChild
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      const url = await getContentUrl("guide.html");
+                      window.open(url, "_blank");
+                    }}
+                  >
+                    <a href="#">View Guide</a>
+                  </Button>
+                  <Button
+                    asChild
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      const url = await getContentUrl("faq.html");
+                      window.open(url, "_blank");
+                    }}
+                  >
+                    <a href="#">View FAQ</a>
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <OnboardingChecklist
+              walletLinked={true}
+              profileComplete={profileComplete}
+              membershipStatus="active"
+            />
+          )}
+        </div>
+      ) : !walletLinked ? (
+        // Authenticated but wallet not linked (after hydration)
+        <div className="mx-auto max-w-4xl space-y-6">
+          <div className="text-center">
+            <p>
+              Hello {firstName || (session?.user as any)?.email || "there"}! Link your wallet to continue.
+            </p>
+          </div>
+          <OnboardingChecklist
+            walletLinked={false}
+            profileComplete={!!(firstName && lastName)}
+            membershipStatus="none"
+          />
         </div>
       ) : (
         // Scenario 2: authenticated but no valid membership -> offer purchase/renew
-        <div className="max-w-md mx-auto space-y-4 text-center">
-          <p>
-            Hello, {firstName || walletAddress || (session?.user as any)?.email}!{" "}
-            {membershipStatus === "expired"
-              ? "Your membership has expired."
-              : "You need a membership."}
-          </p>
-          <div className="space-x-2">
-            <Button onClick={purchaseMembership} disabled={isPurchasing}>
-              {isPurchasing
-                ? membershipStatus === "expired"
-                  ? "Renewing…"
-                  : "Purchasing…"
-                : membershipStatus === "expired"
-                ? "Renew Membership"
-                : "Get Membership"}
-            </Button>
-            <Button onClick={onRefresh} disabled={refreshing}>
-              {refreshing ? "Refreshing…" : "Refresh Status"}
-            </Button>
-            <Button asChild variant="outline">
-              <a href="/settings/profile">Edit Profile</a>
-            </Button>
-            <Button variant="outline" onClick={() => signOut()}>
-              Log Out
-            </Button>
+        <div className="mx-auto max-w-4xl space-y-6">
+          <div className="text-center">
+            <p>
+              Hello, {firstName || walletAddress || (session?.user as any)?.email}! {membershipStatus === "expired" ? "Your membership has expired." : "You need a membership."}
+            </p>
           </div>
+          <OnboardingChecklist
+            walletLinked={true}
+            profileComplete={!!(firstName && lastName)}
+            membershipStatus={membershipStatus}
+            onPurchaseMembership={purchaseMembership}
+            purchasing={isPurchasing}
+          />
         </div>
       )}
     </div>

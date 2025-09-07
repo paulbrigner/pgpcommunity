@@ -16,6 +16,7 @@ import {
 import { checkMembership as fetchMembership } from "@/lib/membership"; // Helper function for membership logic
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
+import { BadgeCheck, BellRing, CalendarClock, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
 
 const PAYWALL_CONFIG = {
   icon: "",
@@ -181,53 +182,129 @@ export default function Home() {
   };
 
   return (
-    <div className="max-w-md mx-auto p-6 space-y-6">
-      <h1 className="text-3xl font-bold text-center">
+    <div className="mx-auto p-6 space-y-6">
+      <h1 className="text-3xl md:text-4xl font-bold text-center">
         PGP for Crypto Community
       </h1>
       {/* Scenario-driven UI based on auth, wallet linking, and membership */}
       {!ready ? (
-        <p>Loading…</p>
+        <p className="text-center">Loading…</p>
       ) : !authenticated ? (
-        // Not logged in yet
-        <div className="space-y-4 text-center">
-          <p>Please login to continue.</p>
-          <Button
-            onClick={async () => {
-              const res = await signInWithSiwe();
-              if (!res.ok) {
-                // Redirect to email sign-in with a helpful reason and callback back to here
-                const current = (() => {
-                  const q = searchParams?.toString();
-                  return q && q.length ? `${pathname}?${q}` : pathname || "/";
-                })();
-                router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=wallet-unlinked`);
-                return;
-              }
-              setAuthError(null);
-            }}
-          >
-            Login with Wallet
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => {
-              const current = (() => {
-                const q = searchParams?.toString();
-                return q && q.length ? `${pathname}?${q}` : pathname || "/";
-              })();
-              router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=signup`);
-            }}
-          >
-            Sign up with Email
-          </Button>
-          {authError && (
-            <p className="text-sm text-red-600 dark:text-red-400">{authError}</p>
-          )}
+        // Not logged in yet — Landing & Benefits
+        <div className="mx-auto max-w-4xl space-y-10">
+          <section className="text-center space-y-4">
+            <p className="text-lg text-muted-foreground">
+              Join a community of privacy and crypto enthusiasts. Support PGP efforts, collect meeting NFTs, and get insider updates.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Button
+                onClick={async () => {
+                  const res = await signInWithSiwe();
+                  if (!res.ok) {
+                    // Redirect to email sign-in with a helpful reason and callback back to here
+                    const current = (() => {
+                      const q = searchParams?.toString();
+                      return q && q.length ? `${pathname}?${q}` : pathname || "/";
+                    })();
+                    router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=wallet-unlinked`);
+                    return;
+                  }
+                  setAuthError(null);
+                }}
+                className="w-full sm:w-auto"
+              >
+                <Wallet className="mr-2 h-4 w-4" /> Login with Wallet
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const current = (() => {
+                    const q = searchParams?.toString();
+                    return q && q.length ? `${pathname}?${q}` : pathname || "/";
+                  })();
+                  router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=signup`);
+                }}
+                className="w-full sm:w-auto"
+              >
+                Sign up with Email
+              </Button>
+            </div>
+            {authError && (
+              <p className="text-sm text-red-600 dark:text-red-400">{authError}</p>
+            )}
+          </section>
+
+          <section className="grid gap-4 sm:grid-cols-2">
+            <div className="flex items-start gap-3 rounded-lg border p-4">
+              <HeartHandshake className="h-5 w-5 mt-0.5 text-primary" />
+              <div>
+                <h3 className="font-medium">Support the PGP Community</h3>
+                <p className="text-sm text-muted-foreground">Your membership helps sustain open, privacy‑preserving tooling and community events.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border p-4">
+              <TicketCheck className="h-5 w-5 mt-0.5 text-primary" />
+              <div>
+                <h3 className="font-medium">Track Meeting POAPs/NFTs</h3>
+                <p className="text-sm text-muted-foreground">Automatically collect and showcase proof of attendance and meeting NFTs.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border p-4">
+              <BellRing className="h-5 w-5 mt-0.5 text-primary" />
+              <div>
+                <h3 className="font-medium">Insider Updates</h3>
+                <p className="text-sm text-muted-foreground">Be first to hear about upcoming meetings, demos, and releases.</p>
+              </div>
+            </div>
+            <div className="flex items-start gap-3 rounded-lg border p-4">
+              <ShieldCheck className="h-5 w-5 mt-0.5 text-primary" />
+              <div>
+                <h3 className="font-medium">Member‑Only Content</h3>
+                <p className="text-sm text-muted-foreground">Access gated guides, recordings, and resources when your membership is active.</p>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-lg border p-4">
+            <h3 className="font-semibold mb-2">How it works</h3>
+            <ul className="grid gap-3 sm:grid-cols-2 md:grid-cols-4 text-sm">
+              <li className="flex items-start gap-2">
+                <BadgeCheck className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+                <div>
+                  <div className="font-medium">Create your account</div>
+                  <div className="text-muted-foreground">Sign in with your wallet or email.</div>
+                </div>
+              </li>
+              <li className="flex items-start gap-2">
+                <Wallet className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+                <div>
+                  <div className="font-medium">Link a wallet</div>
+                  <div className="text-muted-foreground">Use it for NFTs, donations, and access.</div>
+                </div>
+              </li>
+              <li className="flex items-start gap-2">
+                <KeyIcon className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+                <div>
+                  <div className="font-medium">Activate membership</div>
+                  <div className="text-muted-foreground">Purchase the PGP Unlock membership (a time‑based subscription) to unlock member‑only features.</div>
+                </div>
+              </li>
+              <li className="flex items-start gap-2">
+                <CalendarClock className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+                <div>
+                  <div className="font-medium">Join meetings & collect</div>
+                  <div className="text-muted-foreground">Attend events and claim POAPs/NFTs.</div>
+                </div>
+              </li>
+            </ul>
+            <div className="mt-4 text-sm text-muted-foreground">
+              This site uses the open‑source, Web3‑based Unlock Protocol to issue and verify memberships. When you buy a membership, Unlock mints a time‑limited key (NFT) to your wallet. We verify your active key on‑chain to grant access to member‑only pages and features. When your key expires, you can renew to continue access. <a className="underline hover:text-foreground" href="https://unlock-protocol.com/" target="_blank" rel="noreferrer">Learn more about Unlock Protocol</a>.
+            </div>
+          </section>
         </div>
       ) : !walletAddress && wallets.length === 0 ? (
         // Authenticated but no wallet linked yet
-        <div className="space-y-4 text-center">
+        <div className="max-w-md mx-auto space-y-4 text-center">
           <p>You’re signed in. Link your wallet to continue.</p>
           <Button
             onClick={async () => {
@@ -251,7 +328,7 @@ export default function Home() {
         <p>Checking membership…</p>
       ) : membershipStatus === "active" ? (
         // Scenario 1: linked wallet has a valid membership -> authorized
-        <div className="space-y-4 text-center">
+        <div className="max-w-md mx-auto space-y-4 text-center">
           <p>
             Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}!
             You’re a member.
@@ -299,7 +376,7 @@ export default function Home() {
         </div>
       ) : (
         // Scenario 2: authenticated but no valid membership -> offer purchase/renew
-        <div className="space-y-4 text-center">
+        <div className="max-w-md mx-auto space-y-4 text-center">
           <p>
             Hello, {firstName || walletAddress || (session?.user as any)?.email}!{" "}
             {membershipStatus === "expired"

@@ -165,7 +165,6 @@ export default function Home() {
 
   // Ask the backend for a short-lived signed URL to view gated content
   const getContentUrl = async (file: string): Promise<string> => {
-    if (!walletAddress) throw new Error("No wallet connected.");
     const res = await fetch(`/api/content/${file}`);
     if (!res.ok) throw new Error("Failed to fetch signed URL");
     const data = await res.json();

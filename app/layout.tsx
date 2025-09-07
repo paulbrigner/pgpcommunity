@@ -1,5 +1,6 @@
 import './globals.css';
 import { Providers } from './providers';
+import { MainNav } from '@/components/site/main-nav';
 
 export const metadata = {
   title: 'PGP for Crypto Community',
@@ -14,7 +15,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body suppressHydrationWarning>
-        <Providers>{children}</Providers>
+        <Providers>
+          <MainNav />
+          {children}
+        </Providers>
       </body>
     </html>
   );

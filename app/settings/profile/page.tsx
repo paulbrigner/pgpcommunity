@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertCircle, CheckCircle2 } from "lucide-react";
 
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
@@ -128,6 +130,20 @@ export default function ProfileSettingsPage() {
           ← Back to Home
         </Button>
       </div>
+      {message && (
+        <Alert>
+          <CheckCircle2 className="h-4 w-4" />
+          <AlertTitle>Success</AlertTitle>
+          <AlertDescription>{message}</AlertDescription>
+        </Alert>
+      )}
+      {error && (
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
       <form onSubmit={onSubmit} className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-2">
@@ -149,8 +165,6 @@ export default function ProfileSettingsPage() {
         </div>
         <div className="flex gap-2">
           <Button type="submit" disabled={submitting}>{submitting ? "Saving…" : "Save changes"}</Button>
-          {message && <span className="text-sm text-green-600 dark:text-green-400">{message}</span>}
-          {error && <span className="text-sm text-red-600 dark:text-red-400">{error}</span>}
         </div>
       </form>
       <div className="space-y-3">

@@ -1,34 +1,16 @@
-import {
-  SecretsManagerClient,
-  GetSecretValueCommand,
-} from "@aws-sdk/client-secrets-manager";
 import { NextRequest, NextResponse } from "next/server";
 import { getSignedUrl } from "@/lib/cloudFrontSigner";
 import { getToken } from "next-auth/jwt";
 import {
   CLOUDFRONT_DOMAIN,
   KEY_PAIR_ID,
-  PRIVATE_KEY_SECRET_ARN,
-  AWS_REGION,
+  PRIVATE_KEY_SECRET,
   NEXTAUTH_SECRET
 } from "@/lib/config"; // Environment-specific constants
 
 export const revalidate = 0;
 export const runtime = "nodejs";
 
-const secretsClient = new SecretsManagerClient({
-  region: AWS_REGION,
-});
-
-async function getPrivateKey(): Promise<string> {
-  const res = await secretsClient.send(
-    new GetSecretValueCommand({ SecretId: PRIVATE_KEY_SECRET_ARN })
-  );
-  if (!res.SecretString) {
-    throw new Error("Secret value is empty");
-  }
-  return res.SecretString;
-}
 
 export async function GET(
   request: NextRequest,
@@ -39,9 +21,9 @@ export async function GET(
     return NextResponse.json({ error: "Missing parameters" }, { status: 400 });
   }
 
-  if (!CLOUDFRONT_DOMAIN || !KEY_PAIR_ID || !PRIVATE_KEY_SECRET_ARN) {
+  if (!CLOUDFRONT_DOMAIN || !KEY_PAIR_ID ) {
     console.error(
-      "Missing required env: CLOUDFRONT_DOMAIN/KEY_PAIR_ID/PRIVATE_KEY_SECRET_ARN"
+      "Missing required env: CLOUDFRONT_DOMAIN/KEY_PAIR_ID"
     );
     return NextResponse.json(
       { error: "Server misconfiguration" },
@@ -56,7 +38,7 @@ export async function GET(
   }
 
   // Generate signed URL
-  const privateKey = await getPrivateKey();
+  const privateKey = PRIVATE_KEY_SECRET;
   const expires = Math.floor(Date.now() / 1000) + 60 * 5; // 5 minutes from now
   const url = getSignedUrl({
     url: `https://${CLOUDFRONT_DOMAIN}/${file}`,

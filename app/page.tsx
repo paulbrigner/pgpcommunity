@@ -146,6 +146,14 @@ export default function Home() {
     const addresses = (wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : []).map((a) => String(a).toLowerCase());
     const addressesKey = addresses.join(',');
 
+    // If no linked wallets yet, we know membership cannot be verified; show onboarding immediately.
+    if (!addresses.length) {
+      setMembershipStatus('none');
+      setMembershipExpiry(null);
+      setCheckedMembership(true);
+      return;
+    }
+
     if (su.membershipStatus) {
       setMembershipStatus(su.membershipStatus);
       setMembershipExpiry(typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null);
@@ -179,10 +187,8 @@ export default function Home() {
       }
     } catch {}
 
-    if (addresses.length) {
-      // No session value and no usable cache: do a foreground fetch once
-      refreshMembership();
-    }
+    // No session value and no usable cache: do a foreground fetch once
+    refreshMembership();
   }, [ready, authenticated, (session as any)?.user?.membershipStatus, (session as any)?.user?.membershipExpiry, walletAddress, wallets]);
 
   // After email sign-in, apply any locally saved profile to the server and refresh session
@@ -367,8 +373,18 @@ export default function Home() {
           </section>
         </div>
       ) : membershipStatus === "unknown" ? (
-        // Neutral placeholder while background check/session hydration completes
-        <div className="mx-auto max-w-4xl" />
+        // If wallet is not linked yet, show onboarding; otherwise neutral placeholder during hydration
+        !walletLinked ? (
+          <div className="mx-auto max-w-4xl space-y-6">
+            <OnboardingChecklist
+              walletLinked={false}
+              profileComplete={!!(firstName && lastName)}
+              membershipStatus="none"
+            />
+          </div>
+        ) : (
+          <div className="mx-auto max-w-4xl" />
+        )
       ) : membershipStatus === "active" ? (
         // Scenario 1: linked wallet has a valid membership -> authorized
         <div className="mx-auto max-w-4xl space-y-6">
@@ -378,15 +394,21 @@ export default function Home() {
             </p>
           </div>
           {walletLinked && profileComplete ? (
-            <div className="max-w-md mx-auto space-y-2">
-              {typeof membershipExpiry === 'number' && membershipExpiry > 0 ? (
-                <p className="text-center text-sm text-muted-foreground">
-                  {`Membership active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`}
+            <div className="grid gap-4 md:grid-cols-2">
+              {/* Membership Card */}
+              <div className="rounded-lg border p-4 space-y-2">
+                <h2 className="text-lg font-semibold">Membership</h2>
+                <p className="text-sm text-muted-foreground">
+                  {typeof membershipExpiry === 'number' && membershipExpiry > 0
+                    ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                    : 'Active'}
                 </p>
-              ) : null}
-              <div className="rounded-lg border p-4">
-                <h3 className="text-sm font-semibold mb-2 text-center">Member Tools</h3>
-                <div className="flex flex-wrap items-center justify-center gap-2">
+              </div>
+
+              {/* Member Tools */}
+              <div className="rounded-lg border p-4 space-y-3">
+                <h2 className="text-lg font-semibold">Member Tools</h2>
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     asChild
                     onClick={async (e) => {
@@ -419,10 +441,28 @@ export default function Home() {
                   </Button>
                 </div>
               </div>
+
+              {/* Donations (placeholder) */}
+              <div className="rounded-lg border p-4 space-y-2">
+                <h2 className="text-lg font-semibold">Donations</h2>
+                <p className="text-sm text-muted-foreground">Support the PGP Community. Donation options coming soon.</p>
+              </div>
+
+              {/* NFT/POAPs (placeholder) */}
+              <div className="rounded-lg border p-4 space-y-2">
+                <h2 className="text-lg font-semibold">NFT / POAPs</h2>
+                <p className="text-sm text-muted-foreground">Your collected meeting NFTs/POAPs will appear here.</p>
+              </div>
+
+              {/* News / Updates (placeholder) */}
+              <div className="rounded-lg border p-4 space-y-2 md:col-span-2">
+                <h2 className="text-lg font-semibold">News & Updates</h2>
+                <p className="text-sm text-muted-foreground">Member announcements and updates will appear here.</p>
+              </div>
             </div>
           ) : (
             <OnboardingChecklist
-              walletLinked={true}
+              walletLinked={walletLinked}
               profileComplete={profileComplete}
               membershipStatus="active"
             />
@@ -451,7 +491,7 @@ export default function Home() {
             </p>
           </div>
           <OnboardingChecklist
-            walletLinked={true}
+            walletLinked={walletLinked}
             profileComplete={!!(firstName && lastName)}
             membershipStatus={membershipStatus}
             onPurchaseMembership={purchaseMembership}

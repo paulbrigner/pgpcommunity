@@ -236,12 +236,10 @@ export default function Home() {
       const checkoutConfig = { ...PAYWALL_CONFIG } as any;
       delete checkoutConfig.redirectUri;
       await paywall.loadCheckoutModal(checkoutConfig);
-      // Force a single hard reload after the modal fully closes.
-      if (typeof window !== "undefined") {
-        window.location.replace(window.location.href);
-        return;
-      }
-      await refreshMembership();
+      // After the modal closes, clear any cached membership and sign out to force a clean session
+      try { localStorage.removeItem('membershipCache'); } catch {}
+      await signOut({ callbackUrl: '/' });
+      return;
     } catch (error) {
       console.error("Purchase failed:", error);
     } finally {

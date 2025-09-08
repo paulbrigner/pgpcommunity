@@ -78,7 +78,7 @@ export function OnboardingChecklist({
           action={
             membershipStatus === "active" ? null : (
               <Button size="sm" onClick={() => onPurchaseMembership?.()} disabled={purchasing}>
-                {purchasing ? "Processing…" : membershipStatus === "expired" ? "Renew" : "Get Membership"}
+                {purchasing ? "Processing…" : membershipStatus === "expired" ? "Renew Membership" : "Get Membership"}
               </Button>
             )
           }

@@ -3,6 +3,7 @@ import { JsonRpcProvider, Contract } from 'ethers';
 const ABI = [
   'function getHasValidKey(address _owner) view returns (bool)',
   'function keyExpirationTimestampFor(address _owner) view returns (uint256)',
+  'function totalKeys(address _owner) view returns (uint256)',
   'function balanceOf(address _owner) view returns (uint256)',
   'function tokenOfOwnerByIndex(address _owner, uint256 _index) view returns (uint256)',
   'function keyExpirationTimestampFor(uint256 _tokenId) view returns (uint256)',
@@ -25,7 +26,8 @@ export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, ne
   const contract = new Contract(lockAddress, ABI, provider);
   const now = Math.floor(Date.now() / 1000);
   let maxExpiry: number | null = null;
-  let anyHasKey = false;
+  let anyHasValidKey = false;
+  let hadAnyKey = false;
 
   const tryTokenExpiry = async (tokenId: bigint): Promise<number | null> => {
     const sigs = [
@@ -48,7 +50,13 @@ export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, ne
     const addr = addrRaw.toLowerCase();
     try {
       const has = await callWithRetries(() => contract.getHasValidKey(addr));
-      if (has) anyHasKey = true;
+      if (has) anyHasValidKey = true;
+    } catch {}
+
+    // Try totalKeys first (more widely supported than ERC721 enumerable on some versions)
+    try {
+      const total: bigint = await callWithRetries(() => contract.totalKeys(addr));
+      if (total > 0n) hadAnyKey = true;
     } catch {}
 
     // Direct address-based expiry
@@ -66,6 +74,7 @@ export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, ne
     try {
       const bal: bigint = await callWithRetries(() => contract.balanceOf(addr));
       if (bal > 0n) {
+        hadAnyKey = true;
         const tokenId: bigint = await callWithRetries(() => contract.tokenOfOwnerByIndex(addr, 0n));
         const n = await tryTokenExpiry(tokenId);
         if (typeof n === 'number' && n > 0) maxExpiry = Math.max(maxExpiry ?? 0, n);
@@ -76,9 +85,11 @@ export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, ne
   let status: 'active'|'expired'|'none' = 'none';
   if (typeof maxExpiry === 'number' && maxExpiry > 0) {
     status = maxExpiry > now ? 'active' : 'expired';
-  } else if (anyHasKey) {
+  } else if (anyHasValidKey) {
     status = 'active';
+  } else if (hadAnyKey) {
+    // Address holds (or held) a key but we could not fetch a timestamp; treat as expired
+    status = 'expired';
   }
   return { status, expiry: maxExpiry ?? null };
 }
-

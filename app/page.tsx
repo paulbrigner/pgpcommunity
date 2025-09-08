@@ -405,9 +405,9 @@ export default function Home() {
                     ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                     : 'Active'}
                 </p>
-                <div>
-                  <Button variant="outline" onClick={() => setConfirmOpen(true)}>Renew Now</Button>
-                </div>
+                <p className="text-xs text-muted-foreground">
+                  This membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas.
+                </p>
               </div>
 
               {/* Member Tools */}
@@ -526,6 +526,9 @@ export default function Home() {
               <strong>First time only:</strong> you may see two on‑chain steps—Approve USDC (gas only) then Purchase (0.10 USDC + gas).
             </div>
             <div>That’s it—0.10 USDC for the membership, plus pennies of ETH for gas.</div>
+            <div className="text-xs text-muted-foreground">
+              Note: If your wallet has sufficient USDC and a bit of ETH for gas when your current period ends, the membership can renew automatically.
+            </div>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

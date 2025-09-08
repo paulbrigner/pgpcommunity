@@ -91,6 +91,15 @@ Protecting API routes
 - Use NextAuth’s JWT: in a route handler, import `getToken` from `next-auth/jwt` and require a valid token before serving content. Example in `app/api/content/[file]/route.ts`.
 
 ## Deployment
+### CI/CD (GitHub + AWS Amplify)
+- Connected build: the Amplify app is linked to this GitHub repository. Pushes to the tracked branch (e.g., `main`) trigger an automatic build and deploy to the Production environment.
+- Preview builds: pull requests create ephemeral preview deployments with unique URLs for review. Merge or close the PR to clean them up.
+- Build config: the pipeline is defined in `amplify.yml` at the repo root. It sets the Node runtime and runs the Next.js build (including API routes/SSR) and any post‑build steps.
+- Environment variables: set per Amplify environment in the Amplify Console (never commit secrets). Server‑only variables (no `NEXT_PUBLIC_` prefix) are injected at build/runtime for API routes and SSR.
+- Branch environments: you can connect additional branches (e.g., `staging`) to create isolated Amplify environments with their own env vars and URLs.
+- Rollbacks & retries: from the Amplify Console, redeploy a previous successful build or retry a failed one without a new commit.
+- IAM & permissions: ensure the Amplify service role has access to required AWS resources (S3/CloudFront for assets, DynamoDB for NextAuth, SES for email).
+
 ### Step 5: Configure Origin Access Control (OAC)
 1. **Create OAC Policy** in CloudFront console:
    ```bash
@@ -104,6 +113,28 @@ Protecting API routes
 <!-- Secrets are provided via environment variables. -->
 
 ## Security Architecture
+### Authentication & Authorization
+- **Identity providers**:
+  - Email (magic link) via NextAuth Email provider + SES SMTP.
+  - Wallet (SIWE) only for wallets already linked to the signed‑in user. Unlinked wallets are rejected with a clear message.
+- **Session model (JWT)**:
+  - NextAuth uses JWT sessions; the session callback enriches `session.user` with profile fields and linked `wallets` from DynamoDB.
+  - Server periodically enriches the JWT with membership `status` and `expiry` (5‑minute TTL) using a server‑side RPC, reducing on‑chain calls from the client.
+  - To avoid spoofing via a connected browser wallet, the app uses only addresses in the user’s linked `wallets` for membership checks and ignores unlinked browser wallets.
+- **Wallet linking**:
+  - SIWE signature is verified in `POST /api/auth/link-wallet`. On success the address is added to the user record and shown in `session.user.wallets`.
+  - Unlinking is available via `POST /api/auth/unlink-wallet` and in Settings → Profile.
+- **Authorization**:
+  - Member‑only content: gated via Unlock membership. The server checks membership (by linked wallets) and issues time‑boxed CloudFront signed URLs for assets.
+  - API protection: routes verify an authenticated session (e.g., `getToken` in `/api/content/[file]`) and/or membership before returning data.
+  - Admin routes (roadmap): add a role flag on the user record; protect `/admin/*` routes by role in the session callback.
+- **CSRF & replay protection**:
+  - NextAuth’s built‑in CSRF protection for email sign‑in flow; SIWE uses NextAuth’s CSRF token as the nonce.
+  - All state‑changing routes require an authenticated session and validate inputs server‑side.
+- **Secrets & RPC**:
+  - Client uses `NEXT_PUBLIC_BASE_RPC_URL` (browser‑safe, domain‑allow‑listed keys if using a managed provider).
+  - Server uses a private `BASE_RPC_URL` (no `NEXT_PUBLIC_`) and can be extended to try multiple providers for redundancy.
+
 ### CloudFront Signed URLs Workflow
 1. **User Authentication**:
    - NextAuth verifies email sessions; SIWE verifies wallet ownership; Unlock enforces membership
@@ -133,7 +164,13 @@ Protecting API routes
 
 ## Dependencies
 - **Core**: Next.js 15+, TypeScript, AWS Amplify, Tailwind CSS v4 (CLI)
-- **UI**: shadcn/ui (see `components.json`, `@/components/ui/*`)
+- **UI**:
+  - shadcn/ui (see `components.json`, `@/components/ui/*`)
+  - Radix UI (primitives):
+    - `@radix-ui/react-navigation-menu`
+    - `@radix-ui/react-alert-dialog`
+    - `@radix-ui/react-slot`
+    - Note: adding more shadcn components may add additional `@radix-ui/*` packages.
 - **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`, `@unlock-protocol/paywall`
 - **Security**: CloudFront OAC
 

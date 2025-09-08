@@ -1,18 +1,19 @@
 # PGP Community Platform
 
 ## Overview
-Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with optional SIWE wallet linking, and Unlock Protocol for membership gating. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key loaded from server environment variables.
+Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with SIWE wallet linking, and Unlock Protocol for membership gating. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key loaded from server environment variables.
 
 ## Features
+
+- **Authentication/Authorization**:
+  - NextAuth for email sign-in and SIWE wallet linking
+  - Unlock Protocol for membership gating
+  - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
 - **Secure Content Delivery**:
   - Private files in S3 accessed via CloudFront signed URLs
   - **Origin Access Control (OAC)** restricts S3 bucket access to CloudFront only
   - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts`
   - Private key provided via server env var `PRIVATE_KEY_SECRET`
-- **Authentication/Authorization**:
-  - NextAuth for email sign-in and SIWE wallet linking
-  - Unlock Protocol for membership gating
-  - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
 - **Secrets Management**:
   - Server environment variables store sensitive credentials including:
     - CloudFront private key for signed URL generation (`PRIVATE_KEY_SECRET`)
@@ -72,7 +73,7 @@ Email-first UX and wallet linking
 - Authenticated users without a wallet see a “Link Wallet” action on the home page.
 - Wallets are linked to the current user via `POST /api/auth/link-wallet` and shown as `session.user.wallets`.
 
-Linking a wallet (Milestone 2)
+Linking a wallet
 - API route: `app/api/auth/link-wallet/route.ts` verifies a SIWE message and links the wallet to the currently signed-in user using the NextAuth adapter.
 - Client helper: `linkWalletWithSiwe()` in `lib/siwe/client.ts` triggers the SIWE signature and POSTs to the link route.
 - Conflict handling: returns HTTP 409 if the wallet address is already linked to a different account.
@@ -81,7 +82,7 @@ Unlinking a wallet
 - API route: `app/api/auth/unlink-wallet/route.ts` removes a linked wallet for the current user.
 - UI: See the Wallets section on `Settings → Profile` to unlink addresses.
 
-Profile collection (Milestone 3)
+Profile collection
 - Sign-in page collects `firstName` (required), `lastName` (required), `xHandle` (optional), and `linkedinUrl` (optional) along with email.
 - Client validation ensures required fields and basic URL format.
 - The data is saved to the database after email verification via `POST /api/profile/update`.

@@ -18,13 +18,14 @@ import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, CalendarClock, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
 const PAYWALL_CONFIG = {
   icon: "",
   locks: {
     [LOCK_ADDRESS]: {
       name: "PGP Community Membership",
-      order: 1,
+      order: 0,
       network: BASE_NETWORK_ID,
       recipient: "",
       dataBuilder: "",
@@ -34,7 +35,7 @@ const PAYWALL_CONFIG = {
   },
   title: "Join the PGP* for Crypto Community",
   referrer: UNLOCK_ADDRESS,
-  skipSelect: false,
+  skipSelect: true,
   hideSoldOut: false,
   pessimistic: false,
   skipRecipient: true,
@@ -71,6 +72,7 @@ export default function Home() {
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
@@ -403,6 +405,9 @@ export default function Home() {
                     ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                     : 'Active'}
                 </p>
+                <div>
+                  <Button variant="outline" onClick={() => setConfirmOpen(true)}>Renew Now</Button>
+                </div>
               </div>
 
               {/* Member Tools */}
@@ -494,11 +499,40 @@ export default function Home() {
             walletLinked={walletLinked}
             profileComplete={!!(firstName && lastName)}
             membershipStatus={membershipStatus}
-            onPurchaseMembership={purchaseMembership}
+            onPurchaseMembership={() => setConfirmOpen(true)}
             purchasing={isPurchasing}
           />
         </div>
       )}
+      {/* Purchase/Renew prerequisites dialog */}
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Before you continue</AlertDialogTitle>
+            <AlertDialogDescription>
+              Review wallet requirements before continuing.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 text-left">
+            <div>What to have in your wallet:</div>
+            <ul className="list-disc pl-5 space-y-1">
+              <li>USDC (Base): 0.10 USDC for the membership itself.</li>
+              <li>ETH (Base): a tiny amount for gas; keep ~0.00001–0.00005 ETH to cover the approval + purchase and future renewals.</li>
+            </ul>
+            <div>
+              <strong>Price reference:</strong> The lock is priced in USDC and the last price‑update sets it to 0.10 USDC. Each renewal adds ~30 days.
+            </div>
+            <div>
+              <strong>First time only:</strong> you may see two on‑chain steps—Approve USDC (gas only) then Purchase (0.10 USDC + gas).
+            </div>
+            <div>That’s it—0.10 USDC for the membership, plus pennies of ETH for gas.</div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setConfirmOpen(false); purchaseMembership(); }}>Continue</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

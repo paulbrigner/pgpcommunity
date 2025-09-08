@@ -132,8 +132,16 @@ const authOptions = {
   ],
   callbacks: {
     async jwt({ token, user }: any) {
-      if (user?.walletAddress) token.walletAddress = user.walletAddress;
+      // Persist email for convenience
       if (user?.email) token.email = user.email;
+      // Only persist walletAddress when explicitly provided by SIWE authorize
+      if (user && Object.prototype.hasOwnProperty.call(user, 'walletAddress')) {
+        if ((user as any).walletAddress) {
+          (token as any).walletAddress = (user as any).walletAddress;
+        } else {
+          delete (token as any).walletAddress;
+        }
+      }
       // Opportunistically enrich token with membership status/expiry, cached for 5 minutes
       try {
         const nowSec = Math.floor(Date.now() / 1000);
@@ -147,8 +155,8 @@ const authOptions = {
           const wallets: string[] = Array.isArray((userRecord as any)?.wallets)
             ? ((userRecord as any).wallets as string[])
             : [];
-          const primary = (token as any).walletAddress as string | undefined;
-          const addresses = (wallets?.length ? wallets : primary ? [primary] : []) as string[];
+          // Only consider addresses actually linked to this user
+          const addresses = wallets;
           if (addresses.length) {
             const { status, expiry } = await getStatusAndExpiry(
               addresses,
@@ -182,8 +190,10 @@ const authOptions = {
             ? ((userRecord as any).wallets as string[])
             : [];
           (session.user as any).wallets = wallets;
-          // Populate walletAddress from token if present, otherwise first linked wallet
-          (session.user as any).walletAddress = token.walletAddress || wallets[0] || null;
+          // Use token wallet only if it belongs to this user; otherwise fallback to first linked wallet
+          const tokenWallet: string | null = (token as any)?.walletAddress || null;
+          const safePrimary = tokenWallet && wallets.includes(tokenWallet) ? tokenWallet : (wallets[0] || null);
+          (session.user as any).walletAddress = safePrimary;
           // Populate profile fields
           (session.user as any).firstName = (userRecord as any)?.firstName ?? null;
           (session.user as any).lastName = (userRecord as any)?.lastName ?? null;

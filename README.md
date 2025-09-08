@@ -3,6 +3,9 @@
 ## Overview
 Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with SIWE wallet linking, and Unlock Protocol for membership gating. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key loaded from server environment variables.
 
+## Security Warning
+This software is under active development and has not undergone a full independent security review. Deploy at your own risk. Do not store production‑critical secrets or funds in connected wallets unless you understand the risks and have performed your own assessment. If you discover a potential vulnerability, please report it privately to the maintainers rather than opening a public issue.
+
 ## Features
 
 - **Authentication/Authorization**:
@@ -193,3 +196,14 @@ Protecting API routes
 - CloudFront signer: if Node 22/ OpenSSL rejects `RSA-SHA1` in `lib/cloudFrontSigner.ts`, switch to `@aws-sdk/cloudfront-signer` (SHA256) or update the signing logic accordingly.
 - Amplify deploy: redeploy with Node 22 and confirm SSR/API routes, SIWE sign-in, Unlock checkout, and `/api/content/[file]` return signed URLs.
 - Rollback plan: keep a branch with Node 20 configs to revert quickly if needed.
+
+## License
+All code in this workspace is licensed under either of
+
+- Apache License, Version 2.0 (see `LICENSE-APACHE` or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license (see `LICENSE-MIT` or http://opensource.org/licenses/MIT)
+
+at your option.
+
+## Contribution
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache‑2.0 license, shall be dual licensed as above, without any additional terms or conditions.

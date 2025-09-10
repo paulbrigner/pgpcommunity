@@ -7,11 +7,13 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
 import { networks } from "@unlock-protocol/networks";
+import { BrowserProvider, Contract } from "ethers";
 import {
   LOCK_ADDRESS,
   BASE_NETWORK_ID,
   BASE_RPC_URL,
   UNLOCK_ADDRESS,
+  USDC_ADDRESS,
 } from "@/lib/config"; // Environment-specific constants
 import { checkMembership as fetchMembership, getMembershipExpiration } from "@/lib/membership"; // Helper functions for membership logic
 import { Button } from "@/components/ui/button";
@@ -73,6 +75,7 @@ export default function Home() {
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [autoRenewOptIn, setAutoRenewOptIn] = useState(false);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
@@ -88,6 +91,31 @@ export default function Home() {
       },
     });
   }, [BASE_NETWORK_ID, BASE_RPC_URL]);
+
+  // Ensure wallet is on Base before any post‑purchase approvals
+  const ensureBaseNetwork = async (eth: any) => {
+    const chainHex = `0x${Number(BASE_NETWORK_ID || 8453).toString(16)}`;
+    try {
+      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainHex }] });
+    } catch (err: any) {
+      if (err?.code === 4902) {
+        await eth.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: chainHex,
+              chainName: "Base",
+              rpcUrls: [BASE_RPC_URL || "https://mainnet.base.org"],
+              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+              blockExplorerUrls: ["https://basescan.org"],
+            },
+          ],
+        });
+      } else {
+        throw err;
+      }
+    }
+  };
 
   // Check on-chain whether the session wallet has a valid membership
   const refreshMembership = async () => {
@@ -237,6 +265,24 @@ export default function Home() {
       const checkoutConfig = { ...PAYWALL_CONFIG } as any;
       delete checkoutConfig.redirectUri;
       await paywall.loadCheckoutModal(checkoutConfig);
+      // Optional: enable ongoing auto‑renew by approving unlimited USDC to the lock
+      if (autoRenewOptIn && USDC_ADDRESS && LOCK_ADDRESS) {
+        try {
+          await ensureBaseNetwork(provider);
+          const bp = new BrowserProvider(provider, Number(BASE_NETWORK_ID || 8453));
+          const signer = await bp.getSigner();
+          const erc20 = new Contract(
+            USDC_ADDRESS,
+            [ 'function approve(address spender, uint256 amount) returns (bool)' ],
+            signer
+          );
+          const max = (2n ** 256n) - 1n;
+          const tx = await erc20.approve(LOCK_ADDRESS, max);
+          await tx.wait();
+        } catch (e) {
+          console.error('Auto‑renew approval failed:', e);
+        }
+      }
       // After the modal closes, clear any cached membership and sign out to force a clean session
       try { localStorage.removeItem('membershipCache'); } catch {}
       await signOut({ callbackUrl: '/' });
@@ -424,7 +470,7 @@ export default function Home() {
                       : 'Active'}
                   </p>
                 <p className="text-xs text-muted-foreground">
-                  This membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from Settings → Profile.
+                  Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
                 </p>
                 </div>
 
@@ -548,6 +594,14 @@ export default function Home() {
             <div className="text-xs text-muted-foreground">
               Note: If your wallet has sufficient USDC and a bit of ETH for gas when your current period ends, the membership can renew automatically.
             </div>
+            <label className="flex items-center gap-2 text-sm mt-2">
+              <input
+                type="checkbox"
+                checked={autoRenewOptIn}
+                onChange={(e) => setAutoRenewOptIn(e.target.checked)}
+              />
+              Enable auto‑renew after purchase (approve USDC to the lock)
+            </label>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

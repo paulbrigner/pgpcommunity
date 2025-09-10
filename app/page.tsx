@@ -73,6 +73,7 @@ export default function Home() {
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
@@ -394,75 +395,95 @@ export default function Home() {
             </p>
           </div>
           {walletLinked && profileComplete ? (
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* Membership Card */}
-              <div className="rounded-lg border p-4 space-y-2">
-                <h2 className="text-lg font-semibold">Membership</h2>
-                <p className="text-sm text-muted-foreground">
-                  {typeof membershipExpiry === 'number' && membershipExpiry > 0
-                    ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
-                    : 'Active'}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  This membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas.
-                </p>
-              </div>
-
-              {/* Member Tools */}
-              <div className="rounded-lg border p-4 space-y-3">
-                <h2 className="text-lg font-semibold">Member Tools</h2>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    asChild
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      const url = await getContentUrl("index.html");
-                      window.open(url, "_blank");
-                    }}
-                  >
-                    <a href="#">View Home</a>
-                  </Button>
-                  <Button
-                    asChild
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      const url = await getContentUrl("guide.html");
-                      window.open(url, "_blank");
-                    }}
-                  >
-                    <a href="#">View Guide</a>
-                  </Button>
-                  <Button
-                    asChild
-                    onClick={async (e) => {
-                      e.preventDefault();
-                      const url = await getContentUrl("faq.html");
-                      window.open(url, "_blank");
-                    }}
-                  >
-                    <a href="#">View FAQ</a>
-                  </Button>
+            viewerUrl ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Inline Viewer Only */}
+                <div className="rounded-lg border md:col-span-2 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2 border-b bg-background">
+                    <div className="text-sm text-muted-foreground truncate">Member Content Viewer</div>
+                    <Button size="sm" variant="outline" onClick={() => setViewerUrl(null)}>
+                      Close
+                    </Button>
+                  </div>
+                  <iframe
+                    title="Member content"
+                    src={viewerUrl}
+                    className="w-full h-[70vh]"
+                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                  />
                 </div>
               </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Membership Card */}
+                <div className="rounded-lg border p-4 space-y-2">
+                  <h2 className="text-lg font-semibold">Membership</h2>
+                  <p className="text-sm text-muted-foreground">
+                    {typeof membershipExpiry === 'number' && membershipExpiry > 0
+                      ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                      : 'Active'}
+                  </p>
+                <p className="text-xs text-muted-foreground">
+                  This membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from Settings → Profile.
+                </p>
+                </div>
 
-              {/* Donations (placeholder) */}
-              <div className="rounded-lg border p-4 space-y-2">
-                <h2 className="text-lg font-semibold">Donations</h2>
-                <p className="text-sm text-muted-foreground">Support the PGP Community. Donation options coming soon.</p>
-              </div>
+                {/* Member Tools */}
+                <div className="rounded-lg border p-4 space-y-3">
+                  <h2 className="text-lg font-semibold">Member Tools</h2>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      asChild
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        const url = await getContentUrl("index.html");
+                        setViewerUrl(url);
+                      }}
+                    >
+                      <a href="#">View Home</a>
+                    </Button>
+                    <Button
+                      asChild
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        const url = await getContentUrl("guide.html");
+                        setViewerUrl(url);
+                      }}
+                    >
+                      <a href="#">View Guide</a>
+                    </Button>
+                    <Button
+                      asChild
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        const url = await getContentUrl("faq.html");
+                        setViewerUrl(url);
+                      }}
+                    >
+                      <a href="#">View FAQ</a>
+                    </Button>
+                  </div>
+                </div>
 
-              {/* NFT/POAPs (placeholder) */}
-              <div className="rounded-lg border p-4 space-y-2">
-                <h2 className="text-lg font-semibold">NFT / POAPs</h2>
-                <p className="text-sm text-muted-foreground">Your collected meeting NFTs/POAPs will appear here.</p>
-              </div>
+                {/* Donations (placeholder) */}
+                <div className="rounded-lg border p-4 space-y-2">
+                  <h2 className="text-lg font-semibold">Donations</h2>
+                  <p className="text-sm text-muted-foreground">Support the PGP Community. Donation options coming soon.</p>
+                </div>
 
-              {/* News / Updates (placeholder) */}
-              <div className="rounded-lg border p-4 space-y-2 md:col-span-2">
-                <h2 className="text-lg font-semibold">News & Updates</h2>
-                <p className="text-sm text-muted-foreground">Member announcements and updates will appear here.</p>
+                {/* NFT/POAPs (placeholder) */}
+                <div className="rounded-lg border p-4 space-y-2">
+                  <h2 className="text-lg font-semibold">NFT / POAPs</h2>
+                  <p className="text-sm text-muted-foreground">Your collected meeting NFTs/POAPs will appear here.</p>
+                </div>
+
+                {/* News / Updates (placeholder) */}
+                <div className="rounded-lg border p-4 space-y-2 md:col-span-2">
+                  <h2 className="text-lg font-semibold">News & Updates</h2>
+                  <p className="text-sm text-muted-foreground">Member announcements and updates will appear here.</p>
+                </div>
               </div>
-            </div>
+            )
           ) : (
             <OnboardingChecklist
               walletLinked={walletLinked}
@@ -534,6 +555,7 @@ export default function Home() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      
     </div>
   );
 }

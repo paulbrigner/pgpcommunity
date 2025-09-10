@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
+import { Contract, BrowserProvider } from "ethers";
+import { LOCK_ADDRESS, USDC_ADDRESS } from "@/lib/config";
 
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
@@ -22,6 +24,10 @@ export default function ProfileSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [initial, setInitial] = useState<{ firstName: string; lastName: string; xHandle: string; linkedinUrl: string } | null>(null);
   const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
+  const [canceling, setCanceling] = useState(false);
+  const [autoRenewChecking, setAutoRenewChecking] = useState(false);
+  const [autoRenewEnabled, setAutoRenewEnabled] = useState<boolean | null>(null);
+  const [autoRenewPrice, setAutoRenewPrice] = useState<bigint | null>(null);
 
   useEffect(() => {
     if (!authenticated) return;
@@ -37,6 +43,47 @@ export default function ProfileSettingsPage() {
       linkedinUrl: (u.linkedinUrl as string) || "",
     });
   }, [authenticated, session]);
+
+  // Check current USDC allowance vs. current key price to infer auto-renew readiness
+  useEffect(() => {
+    if (!authenticated) return;
+    (async () => {
+      setAutoRenewChecking(true);
+      try {
+        if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
+        const eth = (globalThis as any).ethereum;
+        if (!eth) throw new Error("No wallet found in browser");
+        const provider = new BrowserProvider(eth);
+        const signer = await provider.getSigner();
+        const owner = await signer.getAddress();
+        const erc20 = new Contract(
+          USDC_ADDRESS,
+          [
+            'function allowance(address owner, address spender) view returns (uint256)',
+            'function decimals() view returns (uint8)'
+          ],
+          signer
+        );
+        const lock = new Contract(
+          LOCK_ADDRESS,
+          [
+            'function keyPrice() view returns (uint256)'
+          ],
+          signer
+        );
+        // Fetch price and allowance
+        let price: bigint = 0n;
+        try { price = await lock.keyPrice(); } catch { price = 100000n; } // fallback 0.10 USDC (6 decimals)
+        const allowance: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+        setAutoRenewPrice(price);
+        setAutoRenewEnabled(allowance >= price && price > 0n);
+      } catch {
+        setAutoRenewEnabled(null);
+      } finally {
+        setAutoRenewChecking(false);
+      }
+    })();
+  }, [authenticated]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,6 +214,103 @@ export default function ProfileSettingsPage() {
           <Button type="submit" disabled={submitting}>{submitting ? "Saving…" : "Save changes"}</Button>
         </div>
       </form>
+      <div className="space-y-3">
+        <h2 className="text-xl font-semibold">Membership</h2>
+        <p className="text-sm text-muted-foreground">
+          To stop automatic renewals, you can revoke the USDC approval granted to the membership lock.
+          This prevents future renewals; your current period remains active until it expires.
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC
+        </p>
+        <div className="text-sm">
+          {autoRenewChecking ? (
+            <span className="text-muted-foreground">Checking auto‑renew status…</span>
+          ) : autoRenewEnabled === null ? (
+            <span className="text-muted-foreground">Auto‑renew status unavailable.</span>
+          ) : autoRenewEnabled ? (
+            <span className="text-green-600 dark:text-green-400">Auto‑renew is enabled for the current membership price.</span>
+          ) : (
+            <span className="text-amber-600 dark:text-amber-400">Auto‑renew is off for the current membership price.</span>
+          )}
+        </div>
+        <div>
+          <Button
+            variant="outline"
+            disabled={canceling || wallets.length === 0 || autoRenewChecking || autoRenewEnabled !== true}
+            onClick={async () => {
+              setError(null);
+              setMessage(null);
+              setCanceling(true);
+              try {
+                if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
+                const eth = (globalThis as any).ethereum;
+                if (!eth) throw new Error("No wallet found in browser");
+                const provider = new BrowserProvider(eth);
+                const signer = await provider.getSigner();
+                const owner = await signer.getAddress();
+                const erc20 = new Contract(
+                  USDC_ADDRESS,
+                  [
+                    'function allowance(address owner, address spender) view returns (uint256)',
+                    'function approve(address spender, uint256 amount) returns (bool)'
+                  ],
+                  signer
+                );
+                const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+                if (current === 0n) {
+                  setMessage("Auto-renew is already disabled (no active approval).");
+                  setAutoRenewEnabled(false);
+                } else {
+                  const tx = await erc20.approve(LOCK_ADDRESS, 0n);
+                  await tx.wait();
+                  setMessage("Auto-renew disabled. Future renewals will not occur.");
+                  setAutoRenewEnabled(false);
+                }
+              } catch (e: any) {
+                setError(e?.message || "Failed to update approval");
+              } finally {
+                setCanceling(false);
+              }
+            }}
+          >
+            {canceling ? "Disabling…" : "Stop Auto‑Renew (revoke USDC approval)"}
+          </Button>
+        </div>
+        {!autoRenewChecking && autoRenewEnabled === false && (
+          <div>
+            <Button
+              disabled={wallets.length === 0}
+              onClick={async () => {
+                setError(null);
+                setMessage(null);
+                try {
+                  if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
+                  const price = autoRenewPrice ?? 0n;
+                  if (price <= 0n) throw new Error("Unknown membership price");
+                  const eth = (globalThis as any).ethereum;
+                  if (!eth) throw new Error("No wallet found in browser");
+                  const provider = new BrowserProvider(eth);
+                  const signer = await provider.getSigner();
+                  const erc20 = new Contract(
+                    USDC_ADDRESS,
+                    [ 'function approve(address spender, uint256 amount) returns (bool)' ],
+                    signer
+                  );
+                  const tx = await erc20.approve(LOCK_ADDRESS, price);
+                  await tx.wait();
+                  setMessage("Auto‑renew enabled for the current membership price.");
+                  setAutoRenewEnabled(true);
+                } catch (e: any) {
+                  setError(e?.message || "Failed to enable auto‑renew");
+                }
+              }}
+            >
+              Enable Auto‑Renew
+            </Button>
+          </div>
+        )}
+      </div>
       <div className="space-y-3">
         <h2 className="text-xl font-semibold">Wallets</h2>
         {wallets.length === 0 ? (

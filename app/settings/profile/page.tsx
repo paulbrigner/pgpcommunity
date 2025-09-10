@@ -6,8 +6,8 @@ import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
-import { Contract, BrowserProvider } from "ethers";
-import { LOCK_ADDRESS, USDC_ADDRESS } from "@/lib/config";
+import { Contract, BrowserProvider, JsonRpcProvider } from "ethers";
+import { LOCK_ADDRESS, USDC_ADDRESS, BASE_NETWORK_ID, BASE_RPC_URL } from "@/lib/config";
 
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
@@ -51,39 +51,38 @@ export default function ProfileSettingsPage() {
       setAutoRenewChecking(true);
       try {
         if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
-        const eth = (globalThis as any).ethereum;
-        if (!eth) throw new Error("No wallet found in browser");
-        const provider = new BrowserProvider(eth);
-        const signer = await provider.getSigner();
-        const owner = await signer.getAddress();
+        const owner = (session?.user as any)?.walletAddress || (wallets && wallets[0]) || null;
+        if (!owner) {
+          // No linked wallet → cannot determine
+          setAutoRenewEnabled(null);
+          setAutoRenewPrice(null);
+          return;
+        }
+        const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
         const erc20 = new Contract(
           USDC_ADDRESS,
-          [
-            'function allowance(address owner, address spender) view returns (uint256)',
-            'function decimals() view returns (uint8)'
-          ],
-          signer
+          [ 'function allowance(address owner, address spender) view returns (uint256)' ],
+          provider
         );
         const lock = new Contract(
           LOCK_ADDRESS,
-          [
-            'function keyPrice() view returns (uint256)'
-          ],
-          signer
+          [ 'function keyPrice() view returns (uint256)' ],
+          provider
         );
-        // Fetch price and allowance
+        // Fetch price and allowance via read-only RPC
         let price: bigint = 0n;
-        try { price = await lock.keyPrice(); } catch { price = 100000n; } // fallback 0.10 USDC (6 decimals)
+        try { price = await lock.keyPrice(); } catch { price = 100000n; }
         const allowance: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
         setAutoRenewPrice(price);
-        setAutoRenewEnabled(allowance >= price && price > 0n);
+        setAutoRenewEnabled(price > 0n ? allowance >= price : null);
       } catch {
         setAutoRenewEnabled(null);
+        setAutoRenewPrice(null);
       } finally {
         setAutoRenewChecking(false);
       }
     })();
-  }, [authenticated]);
+  }, [authenticated, session, wallets]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

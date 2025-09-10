@@ -11,6 +11,12 @@ frontend:
         - npm ci
     build:
       commands:
+        # Expose client-side config (inlined at build time)
+        - env | grep -e NEXT_PUBLIC_LOCK_ADDRESS >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_UNLOCK_ADDRESS >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_BASE_NETWORK_ID >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_BASE_RPC_URL >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_USDC_ADDRESS >> .env.production || true
         - env | grep -e NEXTAUTH_TABLE >> .env.production
         - env | grep -e NEXTAUTH_URL >> .env.production
         - env | grep -e NEXTAUTH_SECRET >> .env.production

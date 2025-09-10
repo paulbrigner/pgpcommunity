@@ -84,6 +84,39 @@ export default function ProfileSettingsPage() {
     })();
   }, [authenticated, session, wallets]);
 
+  // Ensure the user's wallet is on Base before sending transactions
+  const ensureBaseNetwork = async (eth: any) => {
+    const targetHex = (() => {
+      const n = Number(BASE_NETWORK_ID || 8453);
+      return `0x${n.toString(16)}`;
+    })();
+    try {
+      await eth.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: targetHex }],
+      });
+    } catch (err: any) {
+      // If chain not added, request add + switch
+      const code = err?.code ?? err?.data?.originalError?.code;
+      if (code === 4902) {
+        await eth.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: targetHex,
+              chainName: "Base",
+              rpcUrls: [BASE_RPC_URL || "https://mainnet.base.org"],
+              nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+              blockExplorerUrls: ["https://basescan.org"],
+            },
+          ],
+        });
+      } else {
+        throw err;
+      }
+    }
+  };
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
@@ -245,7 +278,8 @@ export default function ProfileSettingsPage() {
                 if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
                 const eth = (globalThis as any).ethereum;
                 if (!eth) throw new Error("No wallet found in browser");
-                const provider = new BrowserProvider(eth);
+                await ensureBaseNetwork(eth);
+                const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
                 const signer = await provider.getSigner();
                 const owner = await signer.getAddress();
                 const erc20 = new Contract(
@@ -289,7 +323,8 @@ export default function ProfileSettingsPage() {
                   if (price <= 0n) throw new Error("Unknown membership price");
                   const eth = (globalThis as any).ethereum;
                   if (!eth) throw new Error("No wallet found in browser");
-                  const provider = new BrowserProvider(eth);
+                  await ensureBaseNetwork(eth);
+                  const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
                   const signer = await provider.getSigner();
                   const erc20 = new Contract(
                     USDC_ADDRESS,

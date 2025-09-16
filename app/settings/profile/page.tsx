@@ -9,6 +9,8 @@ import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Contract, BrowserProvider, JsonRpcProvider } from "ethers";
 import { LOCK_ADDRESS, USDC_ADDRESS, BASE_NETWORK_ID, BASE_RPC_URL } from "@/lib/config";
 
+const MAX_AUTO_RENEW_MONTHS = 12;
+
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
   const router = useRouter();
@@ -26,8 +28,13 @@ export default function ProfileSettingsPage() {
   const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
   const [canceling, setCanceling] = useState(false);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
-  const [autoRenewEnabled, setAutoRenewEnabled] = useState<boolean | null>(null);
   const [autoRenewPrice, setAutoRenewPrice] = useState<bigint | null>(null);
+  const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
+  const [enablingAutoRenew, setEnablingAutoRenew] = useState(false);
+
+  const maxMonthsLabel = `${MAX_AUTO_RENEW_MONTHS} ${MAX_AUTO_RENEW_MONTHS === 1 ? "month" : "months"}`;
+  const yearText = MAX_AUTO_RENEW_MONTHS === 12 ? "1 year" : null;
+  const maxMonthsWithYear = yearText ? `${maxMonthsLabel} (${yearText})` : maxMonthsLabel;
 
   useEffect(() => {
     if (!authenticated) return;
@@ -53,9 +60,8 @@ export default function ProfileSettingsPage() {
         if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
         const owner = (session?.user as any)?.walletAddress || (wallets && wallets[0]) || null;
         if (!owner) {
-          // No linked wallet → cannot determine
-          setAutoRenewEnabled(null);
           setAutoRenewPrice(null);
+          setAutoRenewMonths(null);
           return;
         }
         const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
@@ -72,12 +78,18 @@ export default function ProfileSettingsPage() {
         // Fetch price and allowance via read-only RPC
         let price: bigint = 0n;
         try { price = await lock.keyPrice(); } catch { price = 100000n; }
+        if (price <= 0n) {
+          setAutoRenewPrice(null);
+          setAutoRenewMonths(null);
+          return;
+        }
         const allowance: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+        const months = Number(allowance / price);
         setAutoRenewPrice(price);
-        setAutoRenewEnabled(price > 0n ? allowance >= price : null);
+        setAutoRenewMonths(months);
       } catch {
-        setAutoRenewEnabled(null);
         setAutoRenewPrice(null);
+        setAutoRenewMonths(null);
       } finally {
         setAutoRenewChecking(false);
       }
@@ -258,18 +270,22 @@ export default function ProfileSettingsPage() {
         <div className="text-sm">
           {autoRenewChecking ? (
             <span className="text-muted-foreground">Checking auto‑renew status…</span>
-          ) : autoRenewEnabled === null ? (
+          ) : autoRenewMonths === null ? (
             <span className="text-muted-foreground">Auto‑renew status unavailable.</span>
-          ) : autoRenewEnabled ? (
-            <span className="text-green-600 dark:text-green-400">Auto‑renew is enabled for the current membership price.</span>
+          ) : autoRenewMonths > 0 ? (
+            <span className={autoRenewMonths >= MAX_AUTO_RENEW_MONTHS ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}>
+              {autoRenewMonths >= MAX_AUTO_RENEW_MONTHS
+                ? `Auto-renew is enabled for up to ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} at the current price${autoRenewMonths === MAX_AUTO_RENEW_MONTHS && yearText ? ` (${yearText} maximum).` : "."}`
+                : `Auto-renew approvals cover ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} (less than the ${MAX_AUTO_RENEW_MONTHS}-month maximum).`}
+            </span>
           ) : (
-            <span className="text-amber-600 dark:text-amber-400">Auto‑renew is off for the current membership price.</span>
+            <span className="text-amber-600 dark:text-amber-400">Auto‑renew is off for the current membership price (0 months approved).</span>
           )}
         </div>
         <div>
           <Button
             variant="outline"
-            disabled={canceling || wallets.length === 0 || autoRenewChecking || autoRenewEnabled !== true}
+            disabled={canceling || wallets.length === 0 || autoRenewChecking || (autoRenewMonths ?? 0) === 0}
             onClick={async () => {
               setError(null);
               setMessage(null);
@@ -293,12 +309,12 @@ export default function ProfileSettingsPage() {
                 const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
                 if (current === 0n) {
                   setMessage("Auto-renew is already disabled (no active approval).");
-                  setAutoRenewEnabled(false);
+                  setAutoRenewMonths(0);
                 } else {
                   const tx = await erc20.approve(LOCK_ADDRESS, 0n);
                   await tx.wait();
                   setMessage("Auto-renew disabled. Future renewals will not occur.");
-                  setAutoRenewEnabled(false);
+                  setAutoRenewMonths(0);
                 }
               } catch (e: any) {
                 setError(e?.message || "Failed to update approval");
@@ -310,13 +326,14 @@ export default function ProfileSettingsPage() {
             {canceling ? "Disabling…" : "Stop Auto‑Renew (revoke USDC approval)"}
           </Button>
         </div>
-        {!autoRenewChecking && autoRenewEnabled === false && (
+        {!autoRenewChecking && autoRenewPrice !== null && autoRenewPrice > 0n && autoRenewMonths !== null && autoRenewMonths < MAX_AUTO_RENEW_MONTHS && (
           <div>
             <Button
-              disabled={wallets.length === 0}
+              disabled={wallets.length === 0 || enablingAutoRenew}
               onClick={async () => {
                 setError(null);
                 setMessage(null);
+                setEnablingAutoRenew(true);
                 try {
                   if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
                   const price = autoRenewPrice ?? 0n;
@@ -326,21 +343,39 @@ export default function ProfileSettingsPage() {
                   await ensureBaseNetwork(eth);
                   const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
                   const signer = await provider.getSigner();
+                  const owner = await signer.getAddress();
                   const erc20 = new Contract(
                     USDC_ADDRESS,
-                    [ 'function approve(address spender, uint256 amount) returns (bool)' ],
+                    [
+                      'function allowance(address owner, address spender) view returns (uint256)',
+                      'function approve(address spender, uint256 amount) returns (bool)'
+                    ],
                     signer
                   );
-                  const tx = await erc20.approve(LOCK_ADDRESS, price);
-                  await tx.wait();
-                  setMessage("Auto‑renew enabled for the current membership price.");
-                  setAutoRenewEnabled(true);
+                  const desired = price * BigInt(MAX_AUTO_RENEW_MONTHS);
+                  const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+                  if (current === desired) {
+                    setMessage(`Auto-renew is already approved for ${maxMonthsWithYear}.`);
+                  } else {
+                    const tx = await erc20.approve(LOCK_ADDRESS, desired);
+                    await tx.wait();
+                    setMessage((autoRenewMonths ?? 0) > 0
+                      ? `Auto-renew approvals topped up to ${maxMonthsWithYear}.`
+                      : `Auto-renew enabled for ${maxMonthsWithYear}.`);
+                  }
+                  setAutoRenewMonths(MAX_AUTO_RENEW_MONTHS);
                 } catch (e: any) {
                   setError(e?.message || "Failed to enable auto‑renew");
+                } finally {
+                  setEnablingAutoRenew(false);
                 }
               }}
             >
-              Enable Auto‑Renew
+              {enablingAutoRenew
+                ? "Approving…"
+                : (autoRenewMonths ?? 0) > 0
+                ? `Top up auto‑renew to ${maxMonthsWithYear}`
+                : `Enable auto‑renew (approve ${maxMonthsLabel}${yearText ? ` / ${yearText}` : ""})`}
             </Button>
           </div>
         )}

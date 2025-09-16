@@ -4,10 +4,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react"; // React helpers for state and lifecycle
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { useSession, signOut } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
 import { networks } from "@unlock-protocol/networks";
-import { BrowserProvider, Contract } from "ethers";
+import { BrowserProvider, Contract, JsonRpcProvider } from "ethers";
 import {
   LOCK_ADDRESS,
   BASE_NETWORK_ID,
@@ -21,6 +21,13 @@ import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, CalendarClock, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+
+type MembershipSnapshot = {
+  status: 'active' | 'expired' | 'none';
+  expiry: number | null;
+};
+
+let lastKnownMembership: MembershipSnapshot | null = null;
 
 const PAYWALL_CONFIG = {
   icon: "",
@@ -72,6 +79,8 @@ export default function Home() {
   const [isPurchasing, setIsPurchasing] = useState(false);
   
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
+  const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
+  const [autoRenewChecking, setAutoRenewChecking] = useState(false);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -80,6 +89,12 @@ export default function Home() {
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!authenticated) {
+      lastKnownMembership = null;
+    }
+  }, [authenticated]);
 
   // Paywall instance configured for the Base network
   const paywall = useMemo(() => {
@@ -159,6 +174,7 @@ export default function Home() {
           localStorage.setItem('membershipCache', JSON.stringify(cache));
         } catch {}
         prevStatusRef.current = effectiveStatus;
+        lastKnownMembership = { status: effectiveStatus, expiry: preservedExpiry ?? null };
       } else {
         // stale refresh, ignore
       }
@@ -182,21 +198,38 @@ export default function Home() {
       setMembershipStatus('none');
       setMembershipExpiry(null);
       setCheckedMembership(true);
+      lastKnownMembership = { status: 'none', expiry: null };
       return;
     }
 
     if (su.membershipStatus) {
-      setMembershipStatus(su.membershipStatus);
-      setMembershipExpiry(typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null);
+      const sessionStatus = su.membershipStatus as 'active' | 'expired' | 'none';
+      const sessionExpiry = typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null;
+      const fallback = lastKnownMembership;
+
+      if (sessionStatus === 'active') {
+        setMembershipStatus('active');
+        setMembershipExpiry(sessionExpiry);
+        lastKnownMembership = { status: 'active', expiry: sessionExpiry };
+        setCheckedMembership(true);
+        try { prevStatusRef.current = 'active'; } catch {}
+        try {
+          const cache = { status: 'active', expiry: sessionExpiry ?? null, at: Math.floor(Date.now()/1000), addresses: addressesKey };
+          localStorage.setItem('membershipCache', JSON.stringify(cache));
+        } catch {}
+        return;
+      }
+
+      if (fallback?.status === 'active') {
+        // Keep showing the last confirmed active state while we re-verify.
+        setMembershipStatus('active');
+        setMembershipExpiry(fallback.expiry ?? null);
+      } else {
+        // Unknown while we re-check to avoid flashing onboarding prematurely.
+        setMembershipStatus('unknown');
+        setMembershipExpiry(sessionExpiry);
+      }
       setCheckedMembership(true);
-      // Remember last known good status to avoid transient downgrades
-      try { if (su.membershipStatus !== 'none') { prevStatusRef.current = su.membershipStatus; } } catch {}
-      // Prime client cache
-      try {
-        const cache = { status: su.membershipStatus, expiry: su.membershipExpiry ?? null, at: Math.floor(Date.now()/1000), addresses: addressesKey };
-        localStorage.setItem('membershipCache', JSON.stringify(cache));
-      } catch {}
-      return;
     }
 
     // Try client cache (5 min TTL)
@@ -211,6 +244,7 @@ export default function Home() {
           setCheckedMembership(true);
           // Preserve last known good status to prevent transient downgrades
           try { if (cache.status !== 'none') { prevStatusRef.current = cache.status; } } catch {}
+          lastKnownMembership = { status: cache.status, expiry: typeof cache.expiry === 'number' ? cache.expiry : null };
           // Background refresh without changing checked flag
           refreshMembership();
           return;
@@ -221,6 +255,95 @@ export default function Home() {
     // No session value and no usable cache: do a foreground fetch once
     refreshMembership();
   }, [ready, authenticated, (session as any)?.user?.membershipStatus, (session as any)?.user?.membershipExpiry, walletAddress, wallets]);
+
+  useEffect(() => {
+    if (!authenticated || !walletLinked || membershipStatus !== 'active') {
+      setAutoRenewMonths(null);
+      setAutoRenewChecking(false);
+      return;
+    }
+    if (!USDC_ADDRESS || !LOCK_ADDRESS) {
+      setAutoRenewMonths(null);
+      setAutoRenewChecking(false);
+      return;
+    }
+    const addresses = (wallets && wallets.length
+      ? wallets
+      : walletAddress
+      ? [walletAddress]
+      : []
+    )
+      .map((a) => String(a).toLowerCase())
+      .filter(Boolean);
+    if (!addresses.length) {
+      setAutoRenewMonths(null);
+      setAutoRenewChecking(false);
+      return;
+    }
+
+    const rpcUrl = BASE_RPC_URL || "https://mainnet.base.org";
+    const networkId = Number(BASE_NETWORK_ID || 8453);
+    if (!Number.isFinite(networkId)) {
+      setAutoRenewMonths(null);
+      setAutoRenewChecking(false);
+      return;
+    }
+
+    let cancelled = false;
+    setAutoRenewChecking(true);
+    (async () => {
+      try {
+        const provider = new JsonRpcProvider(rpcUrl, networkId);
+        const erc20 = new Contract(
+          USDC_ADDRESS,
+          ['function allowance(address owner, address spender) view returns (uint256)'],
+          provider
+        );
+        const lock = new Contract(
+          LOCK_ADDRESS,
+          ['function keyPrice() view returns (uint256)'],
+          provider
+        );
+        let price: bigint = 0n;
+        try {
+          price = await lock.keyPrice();
+        } catch {}
+        if (price <= 0n) {
+          price = 100000n;
+        }
+        if (price <= 0n) {
+          if (!cancelled) setAutoRenewMonths(null);
+          return;
+        }
+
+        let maxAllowance = 0n;
+        for (const addr of addresses) {
+          try {
+            const allowance: bigint = await erc20.allowance(addr, LOCK_ADDRESS);
+            if (allowance > maxAllowance) {
+              maxAllowance = allowance;
+            }
+          } catch {}
+        }
+        if (cancelled) return;
+
+        if (maxAllowance >= price) {
+          const months = Number(maxAllowance / price);
+          setAutoRenewMonths(months);
+        } else {
+          setAutoRenewMonths(0);
+        }
+      } catch {
+        if (!cancelled) setAutoRenewMonths(null);
+      } finally {
+        if (!cancelled) setAutoRenewChecking(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, walletLinked, walletAddress, wallets, membershipStatus]);
 
   // After email sign-in, apply any locally saved profile to the server and refresh session
   useEffect(() => {
@@ -260,12 +383,7 @@ export default function Home() {
     try {
       const provider = (window as any)?.ethereum;
       if (!provider) throw new Error("No Ethereum provider available");
-      await paywall.connect(provider);
-      // Prevent Unlock from navigating; we'll control refresh ourselves.
-      const checkoutConfig = { ...PAYWALL_CONFIG } as any;
-      delete checkoutConfig.redirectUri;
-      await paywall.loadCheckoutModal(checkoutConfig);
-      // Optional: enable ongoing auto‑renew by approving unlimited USDC to the lock
+      // If opted‑in, pre‑approve up to 12 periods BEFORE opening checkout so checkout only needs a single tx
       if (autoRenewOptIn && USDC_ADDRESS && LOCK_ADDRESS) {
         try {
           await ensureBaseNetwork(provider);
@@ -276,16 +394,68 @@ export default function Home() {
             [ 'function approve(address spender, uint256 amount) returns (bool)' ],
             signer
           );
-          const max = (2n ** 256n) - 1n;
-          const tx = await erc20.approve(LOCK_ADDRESS, max);
-          await tx.wait();
+          const erc20Reader = new Contract(
+            USDC_ADDRESS,
+            [ 'function allowance(address owner, address spender) view returns (uint256)' ],
+            bp
+          );
+          const lock = new Contract(
+            LOCK_ADDRESS,
+            [ 'function keyPrice() view returns (uint256)' ],
+            bp
+          );
+          // Fetch current key price and compute one‑year cap
+          let price: bigint = 0n;
+          try { price = await lock.keyPrice(); } catch {}
+          if (price <= 0n) price = 100000n; // 0.10 USDC default
+          const targetAllowance = price * 12n;
+          const owner = await signer.getAddress();
+          const current: bigint = await erc20Reader.allowance(owner, LOCK_ADDRESS);
+          if (current < targetAllowance) {
+            const tx = await erc20.approve(LOCK_ADDRESS, targetAllowance);
+            await tx.wait();
+          }
         } catch (e) {
-          console.error('Auto‑renew approval failed:', e);
+          console.error('Pre‑checkout auto‑renew approval failed:', e);
+          // Continue to checkout anyway; user can still purchase without the higher allowance
         }
       }
-      // After the modal closes, clear any cached membership and sign out to force a clean session
-      try { localStorage.removeItem('membershipCache'); } catch {}
-      await signOut({ callbackUrl: '/' });
+
+      await paywall.connect(provider);
+      // Prevent Unlock from navigating; we'll control refresh ourselves.
+      const checkoutConfig = { ...PAYWALL_CONFIG } as any;
+      delete checkoutConfig.redirectUri;
+      await paywall.loadCheckoutModal(checkoutConfig);
+
+      // After the modal closes, verify purchase succeeded on-chain (retry briefly)
+      const addresses = (wallets && wallets.length
+        ? wallets
+        : walletAddress
+        ? [walletAddress]
+        : []
+      ).map((a) => String(a).toLowerCase());
+      let purchased = false;
+      if (addresses.length) {
+        for (let i = 0; i < 5; i++) {
+          try {
+            const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(','))}`, { cache: 'no-store' });
+            if (resp.ok) {
+              const { status, expiry } = await resp.json();
+              const nowSec = Math.floor(Date.now() / 1000);
+              if (status === 'active' || (typeof expiry === 'number' && expiry > nowSec)) {
+                purchased = true;
+                break;
+              }
+            }
+          } catch {}
+          // small delay before retry
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+      }
+      // After the modal closes, refresh membership status in-place (no logout)
+      try {
+        await refreshMembership();
+      } catch {}
       return;
     } catch (error) {
       console.error("Purchase failed:", error);
@@ -469,9 +639,16 @@ export default function Home() {
                       ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                       : 'Active'}
                   </p>
-                <p className="text-xs text-muted-foreground">
-                  Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
-                </p>
+                  {autoRenewChecking ? (
+                    <p className="text-sm text-muted-foreground">Checking auto-renew allowance…</p>
+                  ) : typeof autoRenewMonths === 'number' && autoRenewMonths > 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}.
+                    </p>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">
+                    Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
+                  </p>
                 </div>
 
                 {/* Member Tools */}
@@ -600,8 +777,13 @@ export default function Home() {
                 checked={autoRenewOptIn}
                 onChange={(e) => setAutoRenewOptIn(e.target.checked)}
               />
-              Enable auto‑renew after purchase (approve USDC to the lock)
+              Enable auto‑renew (authorize up to one year of renewals)
             </label>
+            {autoRenewOptIn && (
+              <div className="text-xs text-muted-foreground">
+                When enabled, you may see an approval prompt before checkout so the purchase can complete in a single transaction.
+              </div>
+            )}
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

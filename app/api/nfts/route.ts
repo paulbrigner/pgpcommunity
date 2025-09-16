@@ -8,12 +8,15 @@ type AlchemyNFT = {
   title?: string | null;
   description?: string | null;
   tokenType?: string | null;
+  metadata?: { name?: string | null; [key: string]: any } | null;
+  raw?: { metadata?: { name?: string | null; [key: string]: any } | null } | null;
   image?: {
     cachedUrl?: string | null;
     thumbnailUrl?: string | null;
     originalUrl?: string | null;
   } | null;
   collection?: { name?: string | null } | null;
+  contractMetadata?: { name?: string | null } | null;
 };
 
 type AlchemyNFTResponse = {
@@ -207,20 +210,42 @@ export async function GET(req: NextRequest) {
           const contractAddress = nft.contract?.address?.toLowerCase();
           if (!contractAddress) continue;
 
+          const fallbackTitle =
+            nft.title?.trim()?.length
+              ? nft.title
+              : nft.collection?.name?.trim()?.length
+              ? nft.collection?.name
+              : nft.metadata?.name?.trim()?.length
+              ? nft.metadata?.name
+              : (nft as any)?.raw?.metadata?.name?.trim()?.length
+              ? (nft as any).raw.metadata.name
+              : 'Untitled NFT';
+
+          const fallbackCollection =
+            nft.collection?.name?.trim()?.length
+              ? nft.collection?.name
+              : nft.contractMetadata?.name?.trim()?.length
+              ? nft.contractMetadata?.name
+              : nft.metadata?.description?.trim()?.length
+              ? nft.metadata?.description
+              : (nft as any)?.raw?.metadata?.description?.trim()?.length
+              ? (nft as any).raw.metadata.description
+              : null;
+
           if (contractAddress === lockAddress) {
             // Always include assets directly from the membership lock.
             collected.push({
               owner,
               contractAddress,
               tokenId: nft.tokenId,
-              title: nft.title || nft.collection?.name || 'Untitled NFT',
-              description: nft.description || null,
+              title: fallbackTitle,
+              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
               image:
                 nft.image?.thumbnailUrl ||
                 nft.image?.cachedUrl ||
                 nft.image?.originalUrl ||
                 null,
-              collectionName: nft.collection?.name || null,
+              collectionName: fallbackCollection,
               tokenType: nft.tokenType || null,
             });
             continue;
@@ -233,14 +258,14 @@ export async function GET(req: NextRequest) {
               owner,
               contractAddress,
               tokenId: nft.tokenId,
-              title: nft.title || nft.collection?.name || 'Untitled NFT',
-              description: nft.description || null,
+              title: fallbackTitle,
+              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
               image:
                 nft.image?.thumbnailUrl ||
                 nft.image?.cachedUrl ||
                 nft.image?.originalUrl ||
                 null,
-              collectionName: nft.collection?.name || null,
+              collectionName: fallbackCollection,
               tokenType: nft.tokenType || null,
             });
             continue;
@@ -251,14 +276,14 @@ export async function GET(req: NextRequest) {
               owner,
               contractAddress,
               tokenId: nft.tokenId,
-              title: nft.title || nft.collection?.name || 'Untitled NFT',
-              description: nft.description || null,
+              title: fallbackTitle,
+              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
               image:
                 nft.image?.thumbnailUrl ||
                 nft.image?.cachedUrl ||
                 nft.image?.originalUrl ||
                 null,
-              collectionName: nft.collection?.name || null,
+              collectionName: fallbackCollection,
               tokenType: nft.tokenType || null,
             });
             continue;
@@ -269,14 +294,14 @@ export async function GET(req: NextRequest) {
               owner,
               contractAddress,
               tokenId: nft.tokenId,
-              title: nft.title || nft.collection?.name || 'Untitled NFT',
-              description: nft.description || null,
+              title: fallbackTitle,
+              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
               image:
                 nft.image?.thumbnailUrl ||
                 nft.image?.cachedUrl ||
                 nft.image?.originalUrl ||
                 null,
-              collectionName: nft.collection?.name || null,
+              collectionName: fallbackCollection,
               tokenType: nft.tokenType || null,
             });
             continue;
@@ -289,14 +314,14 @@ export async function GET(req: NextRequest) {
                 owner,
                 contractAddress,
                 tokenId: nft.tokenId,
-                title: nft.title || nft.collection?.name || 'Untitled NFT',
-                description: nft.description || null,
+                title: fallbackTitle,
+                description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
                 image:
                   nft.image?.thumbnailUrl ||
                   nft.image?.cachedUrl ||
                   nft.image?.originalUrl ||
                   null,
-                collectionName: nft.collection?.name || null,
+                collectionName: fallbackCollection,
                 tokenType: nft.tokenType || null,
               });
               continue;

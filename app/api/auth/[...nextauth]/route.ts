@@ -3,12 +3,8 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import EmailProvider from "next-auth/providers/email";
 import { SiweMessage } from "siwe";
 import { DynamoDBAdapter } from "@next-auth/dynamodb-adapter";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocument } from "@aws-sdk/lib-dynamodb";
 import {
-  AWS_REGION,
   NEXTAUTH_SECRET,
-  NEXTAUTH_TABLE,
   NEXTAUTH_URL,
   EMAIL_SERVER,
   EMAIL_FROM,
@@ -20,18 +16,68 @@ import {
   BASE_RPC_URL
 } from "@/lib/config";
 import { getStatusAndExpiry } from "@/lib/membership-server";
+import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
+
+const PENDING_SIGNUP_PREFIX = "PENDING_SIGNUP#";
+
+async function consumePendingSignup(email: string | null | undefined, userId: string, adapter: any) {
+  if (!email || !userId) return null;
+  const normalizedEmail = email.trim().toLowerCase();
+  const key = `${PENDING_SIGNUP_PREFIX}${normalizedEmail}`;
+  const pending = await documentClient.get({
+    TableName: TABLE_NAME,
+    Key: { pk: key, sk: key },
+  });
+  const item = pending.Item as any;
+  const wallet = item?.wallet ? String(item.wallet).toLowerCase() : null;
+  if (!wallet) {
+    if (item) {
+      await documentClient.delete({ TableName: TABLE_NAME, Key: { pk: key, sk: key } });
+    }
+    return null;
+  }
+
+  try {
+    const existing = await adapter.getUserByAccount({
+      provider: "ethereum",
+      providerAccountId: wallet,
+    });
+    if (existing && existing.id && existing.id !== userId) {
+      await documentClient.delete({ TableName: TABLE_NAME, Key: { pk: key, sk: key } });
+      return null;
+    }
+    if (!existing) {
+      await adapter.linkAccount({
+        userId,
+        type: "credentials",
+        provider: "ethereum",
+        providerAccountId: wallet,
+      });
+    }
+
+    const user = await adapter.getUser(userId);
+    const current = Array.isArray((user as any)?.wallets)
+      ? ((user as any).wallets as string[])
+      : [];
+    if (!current.includes(wallet)) {
+      await adapter.updateUser({ id: userId, wallets: [...current, wallet] });
+    }
+  } catch (err) {
+    console.error("Failed to consume pending signup", err);
+  }
+
+  await documentClient.delete({ TableName: TABLE_NAME, Key: { pk: key, sk: key } });
+  return wallet;
+}
 
 // Ensure NextAuth sees a base URL for callbacks (used by Email provider)
 if (!process.env.NEXTAUTH_URL && NEXTAUTH_URL) {
   process.env.NEXTAUTH_URL = NEXTAUTH_URL;
 }
 
-const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
-const documentClient = DynamoDBDocument.from(dynamoClient);
-
 const authOptions = {
   adapter: DynamoDBAdapter(documentClient as any, {
-    tableName: NEXTAUTH_TABLE || "NextAuth",
+    tableName: TABLE_NAME,
   }),
   session: { strategy: "jwt" as const },
   providers: [
@@ -102,7 +148,7 @@ const authOptions = {
             const address = siwe.address.toLowerCase();
             // Only allow sign-in if this address is already linked to a user
             const adapter: any = DynamoDBAdapter(documentClient as any, {
-              tableName: NEXTAUTH_TABLE || "NextAuth",
+              tableName: TABLE_NAME,
             });
             const existingUser = await adapter.getUserByAccount({
               provider: "ethereum",
@@ -149,7 +195,7 @@ const authOptions = {
         const stale = !last || nowSec - last > 300;
         if (stale && token?.sub) {
           const adapter: any = DynamoDBAdapter(documentClient as any, {
-            tableName: NEXTAUTH_TABLE || "NextAuth",
+            tableName: TABLE_NAME,
           });
           const userRecord = await adapter.getUser(token.sub);
           const wallets: string[] = Array.isArray((userRecord as any)?.wallets)
@@ -183,9 +229,13 @@ const authOptions = {
       try {
         if (token?.sub) {
           const adapter: any = DynamoDBAdapter(documentClient as any, {
-            tableName: NEXTAUTH_TABLE || "NextAuth",
+            tableName: TABLE_NAME,
           });
-          const userRecord = await adapter.getUser(token.sub);
+          let userRecord = await adapter.getUser(token.sub);
+          if (userRecord?.email) {
+            await consumePendingSignup((userRecord as any).email as string, token.sub, adapter);
+            userRecord = await adapter.getUser(token.sub);
+          }
           const wallets = Array.isArray((userRecord as any)?.wallets)
             ? ((userRecord as any).wallets as string[])
             : [];

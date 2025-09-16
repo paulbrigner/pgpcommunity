@@ -41,7 +41,7 @@ async function getNextAuthCsrfToken(): Promise<string | undefined> {
   return undefined;
 }
 
-export async function signInWithSiwe(): Promise<{ ok: boolean; error?: string }>{
+export async function signInWithSiwe(): Promise<{ ok: boolean; error?: string; address?: string }>{
   try {
     const eth = (globalThis as any).ethereum;
     if (!eth) return { ok: false, error: "No injected wallet found" };
@@ -103,7 +103,7 @@ export async function signInWithSiwe(): Promise<{ ok: boolean; error?: string }>
     if (errStr && errStr.trim() === "[object Object]") {
       errStr = "Unknown error";
     }
-    return { ok: !rawErr, error: errStr };
+    return { ok: !rawErr, error: errStr, address };
   } catch (e: any) {
     const msg =
       typeof e?.message === "string"

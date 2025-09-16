@@ -2,17 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { SiweMessage } from "siwe";
 import { DynamoDBAdapter } from "@next-auth/dynamodb-adapter";
-import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocument } from "@aws-sdk/lib-dynamodb";
-import {
-  AWS_REGION,
-  NEXTAUTH_SECRET,
-  NEXTAUTH_TABLE,
-  NEXTAUTH_URL,
-} from "@/lib/config";
-
-const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
-const documentClient = DynamoDBDocument.from(dynamoClient);
+import { NEXTAUTH_SECRET, NEXTAUTH_URL } from "@/lib/config";
+import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
 
 export async function POST(request: NextRequest) {
   try {
@@ -46,7 +37,7 @@ export async function POST(request: NextRequest) {
     const address = siwe.address.toLowerCase();
 
     const adapter: any = DynamoDBAdapter(documentClient as any, {
-      tableName: NEXTAUTH_TABLE || "NextAuth",
+      tableName: TABLE_NAME,
     });
 
     // Check if this wallet is already linked to a user

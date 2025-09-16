@@ -26,15 +26,27 @@ export default function ProfileSettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [initial, setInitial] = useState<{ firstName: string; lastName: string; xHandle: string; linkedinUrl: string } | null>(null);
   const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
+  const walletAddress = (session?.user as any)?.walletAddress as string | undefined;
   const [canceling, setCanceling] = useState(false);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
   const [autoRenewPrice, setAutoRenewPrice] = useState<bigint | null>(null);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [enablingAutoRenew, setEnablingAutoRenew] = useState(false);
+  const [membershipStatus, setMembershipStatus] = useState<'active' | 'expired' | 'none' | 'unknown'>('unknown');
+  const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
+  const [membershipChecking, setMembershipChecking] = useState(false);
 
   const maxMonthsLabel = `${MAX_AUTO_RENEW_MONTHS} ${MAX_AUTO_RENEW_MONTHS === 1 ? "month" : "months"}`;
   const yearText = MAX_AUTO_RENEW_MONTHS === 12 ? "1 year" : null;
   const maxMonthsWithYear = yearText ? `${maxMonthsLabel} (${yearText})` : maxMonthsLabel;
+  const formattedMembershipExpiry =
+    typeof membershipExpiry === 'number' && membershipExpiry > 0
+      ? new Date(membershipExpiry * 1000).toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric',
+        })
+      : null;
 
   useEffect(() => {
     if (!authenticated) return;
@@ -51,6 +63,43 @@ export default function ProfileSettingsPage() {
     });
   }, [authenticated, session]);
 
+  // Load membership status/expiry for status messaging
+  useEffect(() => {
+    if (!authenticated) return;
+    const su: any = session?.user || {};
+    const addresses = (wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : [])
+      .map((a) => String(a).toLowerCase())
+      .filter(Boolean);
+
+    if (!addresses.length) {
+      setMembershipStatus('none');
+      setMembershipExpiry(null);
+      setMembershipChecking(false);
+      return;
+    }
+
+    if (su.membershipStatus) {
+      setMembershipStatus(su.membershipStatus as 'active' | 'expired' | 'none');
+      setMembershipExpiry(typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null);
+    }
+
+    setMembershipChecking(true);
+    (async () => {
+      try {
+        const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(','))}`, { cache: 'no-store' });
+        if (resp.ok) {
+          const { status, expiry } = await resp.json();
+          setMembershipStatus(status ?? 'none');
+          setMembershipExpiry(typeof expiry === 'number' ? expiry : null);
+        }
+      } catch (e) {
+        console.error('Membership check failed:', e);
+      } finally {
+        setMembershipChecking(false);
+      }
+    })();
+  }, [authenticated, session, wallets, walletAddress]);
+
   // Check current USDC allowance vs. current key price to infer auto-renew readiness
   useEffect(() => {
     if (!authenticated) return;
@@ -58,7 +107,7 @@ export default function ProfileSettingsPage() {
       setAutoRenewChecking(true);
       try {
         if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
-        const owner = (session?.user as any)?.walletAddress || (wallets && wallets[0]) || null;
+        const owner = walletAddress || (wallets && wallets[0]) || null;
         if (!owner) {
           setAutoRenewPrice(null);
           setAutoRenewMonths(null);
@@ -94,7 +143,7 @@ export default function ProfileSettingsPage() {
         setAutoRenewChecking(false);
       }
     })();
-  }, [authenticated, session, wallets]);
+  }, [authenticated, session, wallets, walletAddress]);
 
   // Ensure the user's wallet is on Base before sending transactions
   const ensureBaseNetwork = async (eth: any) => {
@@ -265,7 +314,24 @@ export default function ProfileSettingsPage() {
           This prevents future renewals; your current period remains active until it expires.
         </p>
         <p className="text-sm text-muted-foreground">
-          Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC
+          Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC per month
+        </p>
+        <p className="text-sm text-muted-foreground">
+          {membershipChecking ? (
+            'Checking membership status…'
+          ) : membershipStatus === 'active' ? (
+            formattedMembershipExpiry
+              ? `Membership active until ${formattedMembershipExpiry}.`
+              : 'Membership is currently active.'
+          ) : membershipStatus === 'expired' ? (
+            formattedMembershipExpiry
+              ? `Membership expired on ${formattedMembershipExpiry}.`
+              : 'Membership has expired.'
+          ) : membershipStatus === 'none' ? (
+            'You do not have an active membership yet.'
+          ) : (
+            'Membership status unavailable.'
+          )}
         </p>
         <div className="text-sm">
           {autoRenewChecking ? (

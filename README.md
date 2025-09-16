@@ -10,6 +10,7 @@ This software is under active development and has not undergone a full independe
 
 - **Authentication/Authorization**:
   - NextAuth for email sign-in and SIWE wallet linking
+  - Wallet-first sign-up flow that guides new users through wallet connection, email verification, and automatic wallet linking after verification
   - Unlock Protocol for membership gating
   - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
 - **Secure Content Delivery**:
@@ -17,6 +18,9 @@ This software is under active development and has not undergone a full independe
   - **Origin Access Control (OAC)** restricts S3 bucket access to CloudFront only
   - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts`
   - Private key provided via server env var `PRIVATE_KEY_SECRET`
+- **Creator NFT collection**:
+  - `/api/nfts` fetches member-held ERC-721s on Base created by the membership lock or its owner, consolidating metadata from Alchemy
+  - Home page shows “Your PGP NFT Collection” with manual refresh option
 - **Secrets Management**:
   - Server environment variables store sensitive credentials including:
     - CloudFront private key for signed URL generation (`PRIVATE_KEY_SECRET`)
@@ -68,11 +72,18 @@ Notes:
   - Credentials provider to verify SIWE messages
   - DynamoDB adapter for User/Account/VerificationToken persistence
 - Session fields: `session.user.id`, `session.user.email`, and `session.user.walletAddress`.
-- Client helper: `lib/siwe/client.ts` exposes `signInWithSiwe()` to trigger SIWE sign-in.
-- Email sign-in page: `app/(auth)/signin/page.tsx`.
+- Client helper: `lib/siwe/client.ts` exposes `signInWithSiwe()` (returns `{ ok, error, address }`).
+- Sign-in page: `app/(auth)/signin/page.tsx` handles both wallet-first sign-up and legacy email sign-in flows.
+
+#### Sign-up Flow
+- Visiting `/signin?reason=signup` presents a wallet-first wizard:
+  1. **Connect wallet** – Attempts SIWE. If the wallet is already linked, the user is signed in instantly. Otherwise, the wallet address is captured for the pending signup state.
+  2. **Enter email** – Submitting stores `{ email, wallet }` via `POST /api/signup/pending` and triggers the NextAuth magic-link email.
+  3. **Check email** – Confirmation screen summarises the wallet + email and instructs the user to verify their address.
+- After email verification, the NextAuth session callback consumes the pending record, links the wallet to the user, and clears the temporary entry so the home page immediately recognises the wallet as linked.
 
 Email-first UX and wallet linking
-- Unlinked wallet sign-ins redirect to `/signin` with a helpful banner and `callbackUrl` back to where the user started.
+- Legacy email-first flows still redirect to `/signin` with a helpful banner and `callbackUrl` back to where the user started.
 - Authenticated users without a wallet see a “Link Wallet” action on the home page.
 - Wallets are linked to the current user via `POST /api/auth/link-wallet` and shown as `session.user.wallets`.
 
@@ -85,6 +96,10 @@ Unlinking a wallet
 - API route: `app/api/auth/unlink-wallet/route.ts` removes a linked wallet for the current user.
 - UI: See the Wallets section on `Settings → Profile` to unlink addresses.
 
+Pending signup storage
+- API route: `app/api/signup/pending/route.ts` persists `{ email, wallet }` pairs during wallet-first signup until the user verifies their email.
+- The NextAuth session callback calls `consumePendingSignup()` to link the stored wallet as soon as the verification completes, then deletes the pending record.
+
 Profile collection
 - Sign-in page collects `firstName` (required), `lastName` (required), `xHandle` (optional), and `linkedinUrl` (optional) along with email.
 - Client validation ensures required fields and basic URL format.
@@ -92,7 +107,8 @@ Profile collection
 - Session exposes `session.user.firstName`, `lastName`, `xHandle`, `linkedinUrl`, and the UI greets the user by first name.
 
 Protecting API routes
-- Use NextAuth’s JWT: in a route handler, import `getToken` from `next-auth/jwt` and require a valid token before serving content. Example in `app/api/content/[file]/route.ts`.
+- Use NextAuth’s JWT: in a route handler, import `getToken` from `next-auth/jwt` and require a valid token before serving content (see `app/api/content/[file]/route.ts`).
+- Member-only endpoints should also verify Unlock membership before returning data.
 
 ## Deployment
 ### CI/CD (GitHub + AWS Amplify)

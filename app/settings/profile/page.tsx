@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -252,9 +252,9 @@ export default function ProfileSettingsPage() {
   }
 
   return (
-    <div className="max-w-xl mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-semibold">Profile Settings</h1>
-      <div>
+    <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-3xl font-semibold">Profile Settings</h1>
         <Button
           variant="outline"
           onClick={() => {
@@ -270,6 +270,9 @@ export default function ProfileSettingsPage() {
           ← Back to Home
         </Button>
       </div>
+      <p className="text-muted-foreground text-sm">
+        Manage your profile details, membership renewals, and linked wallets from one place.
+      </p>
       {message && (
         <Alert>
           <CheckCircle2 className="h-4 w-4" />
@@ -284,126 +287,96 @@ export default function ProfileSettingsPage() {
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label htmlFor="firstName" className="text-sm font-medium">First name</label>
-            <input id="firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} required className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
+      <div className="space-y-6">
+        <section className="rounded-lg border p-6 shadow-sm space-y-6">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Profile information</h2>
+            <p className="text-sm text-muted-foreground">
+              Keep your contact information current so we can share community updates.
+            </p>
           </div>
-          <div className="space-y-2">
-            <label htmlFor="lastName" className="text-sm font-medium">Last name</label>
-            <input id="lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} required className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label htmlFor="firstName" className="text-sm font-medium">First name</label>
+                <input id="firstName" value={firstName} onChange={(e) => setFirstName(e.target.value)} required className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
+              </div>
+              <div className="space-y-2">
+                <label htmlFor="lastName" className="text-sm font-medium">Last name</label>
+                <input id="lastName" value={lastName} onChange={(e) => setLastName(e.target.value)} required className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="xHandle" className="text-sm font-medium">X handle (optional)</label>
+              <input id="xHandle" value={xHandle} onChange={(e) => setXHandle(e.target.value)} placeholder="@handle" className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="linkedin" className="text-sm font-medium">LinkedIn URL (optional)</label>
+              <input id="linkedin" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} placeholder="https://www.linkedin.com/in/username" className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit" disabled={submitting}>{submitting ? "Saving…" : "Save changes"}</Button>
+            </div>
+          </form>
+        </section>
+
+        <section className="rounded-lg border p-6 shadow-sm space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Membership</h2>
+            <p className="text-sm text-muted-foreground">
+              Check your current Unlock membership status and manage auto-renewal approvals.
+            </p>
           </div>
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="xHandle" className="text-sm font-medium">X handle (optional)</label>
-          <input id="xHandle" value={xHandle} onChange={(e) => setXHandle(e.target.value)} placeholder="@handle" className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="linkedin" className="text-sm font-medium">LinkedIn URL (optional)</label>
-          <input id="linkedin" value={linkedinUrl} onChange={(e) => setLinkedinUrl(e.target.value)} placeholder="https://www.linkedin.com/in/username" className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input" />
-        </div>
-        <div className="flex gap-2">
-          <Button type="submit" disabled={submitting}>{submitting ? "Saving…" : "Save changes"}</Button>
-        </div>
-      </form>
-      <div className="space-y-3">
-        <h2 className="text-xl font-semibold">Membership</h2>
-        <p className="text-sm text-muted-foreground">
-          To stop automatic renewals, you can revoke the USDC approval granted to the membership lock.
-          This prevents future renewals; your current period remains active until it expires.
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC per month
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {membershipChecking ? (
-            'Checking membership status…'
-          ) : membershipStatus === 'active' ? (
-            formattedMembershipExpiry
-              ? `Membership active until ${formattedMembershipExpiry}.`
-              : 'Membership is currently active.'
-          ) : membershipStatus === 'expired' ? (
-            formattedMembershipExpiry
-              ? `Membership expired on ${formattedMembershipExpiry}.`
-              : 'Membership has expired.'
-          ) : membershipStatus === 'none' ? (
-            'You do not have an active membership yet.'
-          ) : (
-            'Membership status unavailable.'
-          )}
-        </p>
-        <div className="text-sm">
-          {autoRenewChecking ? (
-            <span className="text-muted-foreground">Checking auto‑renew status…</span>
-          ) : autoRenewMonths === null ? (
-            <span className="text-muted-foreground">Auto‑renew status unavailable.</span>
-          ) : autoRenewMonths > 0 ? (
-            <span className={autoRenewMonths >= MAX_AUTO_RENEW_MONTHS ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}>
-              {autoRenewMonths >= MAX_AUTO_RENEW_MONTHS
-                ? `Auto-renew is enabled for up to ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} at the current price${autoRenewMonths === MAX_AUTO_RENEW_MONTHS && yearText ? ` (${yearText} maximum).` : "."}`
-                : `Auto-renew approvals cover ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} (less than the ${MAX_AUTO_RENEW_MONTHS}-month maximum).`}
-            </span>
-          ) : (
-            <span className="text-amber-600 dark:text-amber-400">Auto‑renew is off for the current membership price (0 months approved).</span>
-          )}
-        </div>
-        <div>
-          <Button
-            variant="outline"
-            disabled={canceling || wallets.length === 0 || autoRenewChecking || (autoRenewMonths ?? 0) === 0}
-            onClick={async () => {
-              setError(null);
-              setMessage(null);
-              setCanceling(true);
-              try {
-                if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
-                const eth = (globalThis as any).ethereum;
-                if (!eth) throw new Error("No wallet found in browser");
-                await ensureBaseNetwork(eth);
-                const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
-                const signer = await provider.getSigner();
-                const owner = await signer.getAddress();
-                const erc20 = new Contract(
-                  USDC_ADDRESS,
-                  [
-                    'function allowance(address owner, address spender) view returns (uint256)',
-                    'function approve(address spender, uint256 amount) returns (bool)'
-                  ],
-                  signer
-                );
-                const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
-                if (current === 0n) {
-                  setMessage("Auto-renew is already disabled (no active approval).");
-                  setAutoRenewMonths(0);
-                } else {
-                  const tx = await erc20.approve(LOCK_ADDRESS, 0n);
-                  await tx.wait();
-                  setMessage("Auto-renew disabled. Future renewals will not occur.");
-                  setAutoRenewMonths(0);
-                }
-              } catch (e: any) {
-                setError(e?.message || "Failed to update approval");
-              } finally {
-                setCanceling(false);
-              }
-            }}
-          >
-            {canceling ? "Disabling…" : "Stop Auto‑Renew (revoke USDC approval)"}
-          </Button>
-        </div>
-        {!autoRenewChecking && autoRenewPrice !== null && autoRenewPrice > 0n && autoRenewMonths !== null && autoRenewMonths < MAX_AUTO_RENEW_MONTHS && (
-          <div>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC per month
+            </p>
+            <p>
+              {membershipChecking ? (
+                'Checking membership status…'
+              ) : membershipStatus === 'active' ? (
+                formattedMembershipExpiry
+                  ? `Membership active until ${formattedMembershipExpiry}.`
+                  : 'Membership is currently active.'
+              ) : membershipStatus === 'expired' ? (
+                formattedMembershipExpiry
+                  ? `Membership expired on ${formattedMembershipExpiry}.`
+                  : 'Membership has expired.'
+              ) : membershipStatus === 'none' ? (
+                'You do not have an active membership yet.'
+              ) : (
+                'Membership status unavailable.'
+              )}
+            </p>
+            <p>
+              To stop automatic renewals, revoke the USDC approval granted to the membership lock. This prevents future renewals; your current period remains active until it expires.
+            </p>
+          </div>
+          <div className="text-sm">
+            {autoRenewChecking ? (
+              <span className="text-muted-foreground">Checking auto‑renew status…</span>
+            ) : autoRenewMonths === null ? (
+              <span className="text-muted-foreground">Auto‑renew status unavailable.</span>
+            ) : autoRenewMonths > 0 ? (
+              <span className={autoRenewMonths >= MAX_AUTO_RENEW_MONTHS ? "text-green-600 dark:text-green-400" : "text-amber-600 dark:text-amber-400"}>
+                {autoRenewMonths >= MAX_AUTO_RENEW_MONTHS
+                  ? `Auto-renew is enabled for up to ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} at the current price${autoRenewMonths === MAX_AUTO_RENEW_MONTHS && yearText ? ` (${yearText} maximum).` : "."}`
+                  : `Auto-renew approvals cover ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} (less than the ${MAX_AUTO_RENEW_MONTHS}-month maximum).`}
+              </span>
+            ) : (
+              <span className="text-amber-600 dark:text-amber-400">Auto‑renew is off for the current membership price (0 months approved).</span>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
             <Button
-              disabled={wallets.length === 0 || enablingAutoRenew}
+              variant="outline"
+              disabled={canceling || wallets.length === 0 || autoRenewChecking || (autoRenewMonths ?? 0) === 0}
               onClick={async () => {
                 setError(null);
                 setMessage(null);
-                setEnablingAutoRenew(true);
+                setCanceling(true);
                 try {
                   if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
-                  const price = autoRenewPrice ?? 0n;
-                  if (price <= 0n) throw new Error("Unknown membership price");
                   const eth = (globalThis as any).ethereum;
                   if (!eth) throw new Error("No wallet found in browser");
                   await ensureBaseNetwork(eth);
@@ -418,70 +391,121 @@ export default function ProfileSettingsPage() {
                     ],
                     signer
                   );
-                  const desired = price * BigInt(MAX_AUTO_RENEW_MONTHS);
                   const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
-                  if (current === desired) {
-                    setMessage(`Auto-renew is already approved for ${maxMonthsWithYear}.`);
+                  if (current === 0n) {
+                    setMessage("Auto-renew is already disabled (no active approval).");
+                    setAutoRenewMonths(0);
                   } else {
-                    const tx = await erc20.approve(LOCK_ADDRESS, desired);
+                    const tx = await erc20.approve(LOCK_ADDRESS, 0n);
                     await tx.wait();
-                    setMessage((autoRenewMonths ?? 0) > 0
-                      ? `Auto-renew approvals topped up to ${maxMonthsWithYear}.`
-                      : `Auto-renew enabled for ${maxMonthsWithYear}.`);
+                    setMessage("Auto-renew disabled. Future renewals will not occur.");
+                    setAutoRenewMonths(0);
                   }
-                  setAutoRenewMonths(MAX_AUTO_RENEW_MONTHS);
                 } catch (e: any) {
-                  setError(e?.message || "Failed to enable auto‑renew");
+                  setError(e?.message || "Failed to update approval");
                 } finally {
-                  setEnablingAutoRenew(false);
+                  setCanceling(false);
                 }
               }}
             >
-              {enablingAutoRenew
-                ? "Approving…"
-                : (autoRenewMonths ?? 0) > 0
-                ? `Top up auto‑renew to ${maxMonthsWithYear}`
-                : `Enable auto‑renew (approve ${maxMonthsLabel}${yearText ? ` / ${yearText}` : ""})`}
+              {canceling ? "Disabling…" : "Stop Auto‑Renew"}
             </Button>
-          </div>
-        )}
-      </div>
-      <div className="space-y-3">
-        <h2 className="text-xl font-semibold">Wallets</h2>
-        {wallets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No wallets linked.</p>
-        ) : (
-          <ul className="space-y-2">
-            {wallets.map((w) => (
-              <li key={w} className="flex items-center justify-between gap-3 rounded-md border p-3">
-                <code className="text-xs break-all">{w}</code>
-                <Button
-                  variant="outline"
-                  onClick={async () => {
-                    if (!confirm("Unlink this wallet? You may lose access to gated content until you link again.")) return;
-                    try {
-                      const res = await fetch("/api/auth/unlink-wallet", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ address: w }),
-                      });
-                      if (!res.ok) {
-                        let detail: any = undefined;
-                        try { detail = await res.json(); } catch {}
-                        throw new Error(detail?.error || res.statusText || "Unlink failed");
-                      }
-                      await update({});
-                    } catch (e: any) {
-                      alert(e?.message || "Unlink failed");
+            {!autoRenewChecking && autoRenewPrice !== null && autoRenewPrice > 0n && autoRenewMonths !== null && autoRenewMonths < MAX_AUTO_RENEW_MONTHS && (
+              <Button
+                disabled={wallets.length === 0 || enablingAutoRenew}
+                onClick={async () => {
+                  setError(null);
+                  setMessage(null);
+                  setEnablingAutoRenew(true);
+                  try {
+                    if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
+                    const price = autoRenewPrice ?? 0n;
+                    if (price <= 0n) throw new Error("Unknown membership price");
+                    const eth = (globalThis as any).ethereum;
+                    if (!eth) throw new Error("No wallet found in browser");
+                    await ensureBaseNetwork(eth);
+                    const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
+                    const signer = await provider.getSigner();
+                    const owner = await signer.getAddress();
+                    const erc20 = new Contract(
+                      USDC_ADDRESS,
+                      [
+                        'function allowance(address owner, address spender) view returns (uint256)',
+                        'function approve(address spender, uint256 amount) returns (bool)'
+                      ],
+                      signer
+                    );
+                    const desired = price * BigInt(MAX_AUTO_RENEW_MONTHS);
+                    const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+                    if (current === desired) {
+                      setMessage(`Auto-renew is already approved for ${maxMonthsWithYear}.`);
+                    } else {
+                      const tx = await erc20.approve(LOCK_ADDRESS, desired);
+                      await tx.wait();
+                      setMessage((autoRenewMonths ?? 0) > 0
+                        ? `Auto-renew approvals topped up to ${maxMonthsWithYear}.`
+                        : `Auto-renew enabled for ${maxMonthsWithYear}.`);
                     }
-                  }}
-                >
-                  Unlink
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
+                    setAutoRenewMonths(MAX_AUTO_RENEW_MONTHS);
+                  } catch (e: any) {
+                    setError(e?.message || "Failed to enable auto‑renew");
+                  } finally {
+                    setEnablingAutoRenew(false);
+                  }
+                }}
+              >
+                {enablingAutoRenew
+                  ? "Approving…"
+                  : (autoRenewMonths ?? 0) > 0
+                  ? `Top up auto‑renew to ${maxMonthsWithYear}`
+                  : `Enable auto‑renew (approve ${maxMonthsLabel}${yearText ? ` / ${yearText}` : ""})`}
+              </Button>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-lg border p-6 shadow-sm space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-lg font-semibold">Linked wallets</h2>
+            <p className="text-sm text-muted-foreground">
+              Connected wallets grant access to gated content and enable on-chain renewals.
+            </p>
+          </div>
+          {wallets.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No wallets linked.</p>
+          ) : (
+            <ul className="space-y-2">
+              {wallets.map((w) => (
+                <li key={w} className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm">
+                  <code className="text-xs break-all">{w}</code>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      if (!confirm("Unlink this wallet? You may lose access to gated content until you link again.")) return;
+                      try {
+                        const res = await fetch("/api/auth/unlink-wallet", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ address: w }),
+                        });
+                        if (!res.ok) {
+                          let detail: any = undefined;
+                          try { detail = await res.json(); } catch {}
+                          throw new Error(detail?.error || res.statusText || "Unlink failed");
+                        }
+                        await update({});
+                      } catch (e: any) {
+                        alert(e?.message || "Unlink failed");
+                      }
+                    }}
+                  >
+                    Unlink
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Contract, BrowserProvider, JsonRpcProvider } from "ethers";
 import { LOCK_ADDRESS, USDC_ADDRESS, BASE_NETWORK_ID, BASE_RPC_URL } from "@/lib/config";
 
-const MAX_AUTO_RENEW_MONTHS = 12;
+const MAX_AUTO_RENEW_MONTHS: number = 12;
 
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();

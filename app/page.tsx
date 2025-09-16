@@ -2,7 +2,7 @@
 // so it needs to run on the client side rather than on the server.
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react"; // React helpers for state and lifecycle
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"; // React helpers for state and lifecycle
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useSession } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
@@ -81,14 +81,38 @@ export default function Home() {
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
+  const [creatorNfts, setCreatorNfts] = useState<Array<{
+    owner: string;
+    contractAddress: string;
+    tokenId: string;
+    title: string;
+    description: string | null;
+    image: string | null;
+    collectionName: string | null;
+    tokenType: string | null;
+  }> | null>(null);
+  const [creatorNftsLoading, setCreatorNftsLoading] = useState(false);
+  const [creatorNftsError, setCreatorNftsError] = useState<string | null>(null);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
+  const nftFetchSeq = useRef(0);
+  const lastFetchedAddresses = useRef<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [autoRenewOptIn, setAutoRenewOptIn] = useState(false);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
+
+  const addressList = useMemo(() => {
+    const raw = wallets && wallets.length
+      ? wallets
+      : walletAddress
+      ? [walletAddress]
+      : [];
+    return raw.map((a) => String(a).toLowerCase()).filter(Boolean);
+  }, [wallets, walletAddress]);
+  const addressesKey = useMemo(() => addressList.join(','), [addressList]);
 
   useEffect(() => {
     if (!authenticated) {
@@ -190,7 +214,7 @@ export default function Home() {
     // Prefer server-provided membership data via session; fall back to client cache; otherwise fetch in background
     if (!ready || !authenticated) return;
     const su: any = session?.user || {};
-    const addresses = (wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : []).map((a) => String(a).toLowerCase());
+    const addresses = addressList;
     const addressesKey = addresses.join(',');
 
     // If no linked wallets yet, we know membership cannot be verified; show onboarding immediately.
@@ -254,12 +278,46 @@ export default function Home() {
 
     // No session value and no usable cache: do a foreground fetch once
     refreshMembership();
-  }, [ready, authenticated, (session as any)?.user?.membershipStatus, (session as any)?.user?.membershipExpiry, walletAddress, wallets]);
+  }, [ready, authenticated, (session as any)?.user?.membershipStatus, (session as any)?.user?.membershipExpiry, addressList, addressesKey]);
+
+  const loadCreatorNfts = useCallback(
+    async (key: string, force = false) => {
+      if (!key) return;
+      if (!force && lastFetchedAddresses.current === key) {
+        return;
+      }
+      const seq = ++nftFetchSeq.current;
+      setCreatorNftsLoading(true);
+      setCreatorNftsError(null);
+      try {
+        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(key)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (nftFetchSeq.current !== seq) return;
+        setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
+        setCreatorNftsError(typeof data?.error === 'string' && data.error.length ? data.error : null);
+        lastFetchedAddresses.current = key;
+      } catch (err: any) {
+        if (nftFetchSeq.current !== seq) return;
+        setCreatorNftsError(err?.message || 'Failed to load NFTs');
+        setCreatorNfts([]);
+        lastFetchedAddresses.current = key;
+      } finally {
+        if (nftFetchSeq.current === seq) {
+          setCreatorNftsLoading(false);
+        }
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active') {
       setAutoRenewMonths(null);
       setAutoRenewChecking(false);
+      setCreatorNfts(null);
+      setCreatorNftsLoading(false);
+      setCreatorNftsError(null);
+      lastFetchedAddresses.current = null;
       return;
     }
     if (!USDC_ADDRESS || !LOCK_ADDRESS) {
@@ -267,17 +325,12 @@ export default function Home() {
       setAutoRenewChecking(false);
       return;
     }
-    const addresses = (wallets && wallets.length
-      ? wallets
-      : walletAddress
-      ? [walletAddress]
-      : []
-    )
-      .map((a) => String(a).toLowerCase())
-      .filter(Boolean);
+    const addresses = addressList;
     if (!addresses.length) {
       setAutoRenewMonths(null);
       setAutoRenewChecking(false);
+      setCreatorNfts(null);
+      setCreatorNftsLoading(false);
       return;
     }
 
@@ -343,7 +396,13 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, walletLinked, walletAddress, wallets, membershipStatus]);
+  }, [authenticated, walletLinked, addressList, addressesKey, membershipStatus]);
+
+  useEffect(() => {
+    if (!authenticated || !walletLinked || membershipStatus !== 'active') return;
+    if (!addressesKey) return;
+    loadCreatorNfts(addressesKey);
+  }, [authenticated, walletLinked, membershipStatus, addressesKey, loadCreatorNfts]);
 
   // After email sign-in, apply any locally saved profile to the server and refresh session
   useEffect(() => {
@@ -688,16 +747,70 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Donations (placeholder) */}
-                <div className="rounded-lg border p-4 space-y-2">
-                  <h2 className="text-lg font-semibold">Donations</h2>
-                  <p className="text-sm text-muted-foreground">Support the PGP Community. Donation options coming soon.</p>
-                </div>
-
                 {/* NFT/POAPs (placeholder) */}
-                <div className="rounded-lg border p-4 space-y-2">
-                  <h2 className="text-lg font-semibold">NFT / POAPs</h2>
-                  <p className="text-sm text-muted-foreground">Your collected meeting NFTs/POAPs will appear here.</p>
+                <div className="rounded-lg border p-4 space-y-3 md:col-span-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-lg font-semibold">Your PGP NFT Collection</h2>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => addressesKey && loadCreatorNfts(addressesKey, true)}
+                      disabled={creatorNftsLoading || !addressesKey}
+                    >
+                      Refresh
+                    </Button>
+                  </div>
+                  {creatorNftsLoading ? (
+                    <p className="text-sm text-muted-foreground">Loading your collection…</p>
+                  ) : creatorNftsError ? (
+                    <p className="text-sm text-red-600 dark:text-red-400">{creatorNftsError}</p>
+                  ) : creatorNfts && creatorNfts.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {creatorNfts.map((nft) => {
+                        const displayId = nft.tokenId?.startsWith('0x')
+                          ? (() => {
+                              try {
+                                return BigInt(nft.tokenId).toString();
+                              } catch {
+                                return nft.tokenId;
+                              }
+                            })()
+                          : nft.tokenId;
+                        const explorerUrl = `https://basescan.org/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`;
+                        return (
+                          <div key={`${nft.contractAddress}-${nft.tokenId}-${nft.owner}`} className="flex gap-3 rounded-md border p-3">
+                            {nft.image ? (
+                              <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
+                              </div>
+                            ) : (
+                              <div className="h-20 w-20 shrink-0 rounded-md bg-muted" />
+                            )}
+                            <div className="min-w-0 space-y-1">
+                              <div className="font-medium truncate">{nft.title}</div>
+                              {nft.collectionName ? (
+                                <div className="text-xs text-muted-foreground truncate">{nft.collectionName}</div>
+                              ) : null}
+                              <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
+                              <a
+                                href={explorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-primary hover:underline"
+                              >
+                                View on BaseScan
+                              </a>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No creator NFTs or POAPs detected yet. Join community events to start collecting!
+                    </p>
+                  )}
                 </div>
 
                 {/* News / Updates (placeholder) */}

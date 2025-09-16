@@ -2,6 +2,23 @@ import { BrowserProvider, JsonRpcProvider, Contract, parseUnits } from 'ethers';
 import { WalletService, Web3Service } from '@unlock-protocol/unlock-js';
 import { UNLOCK_ADDRESS } from '@/lib/config';
 
+const web3ServiceCache = new Map<string, Web3Service>();
+
+function getWeb3(rpcUrl: string, networkId: number) {
+  const key = `${networkId}:${rpcUrl}`;
+  let service = web3ServiceCache.get(key);
+  if (!service) {
+    service = new Web3Service({
+      [networkId]: {
+        provider: rpcUrl,
+        unlockAddress: UNLOCK_ADDRESS,
+      },
+    } as any);
+    web3ServiceCache.set(key, service);
+  }
+  return service;
+}
+
 export const UNLOCK_ERRORS: Record<string, string> = {
   '0x17ed8646': 'Membership sold out or max keys reached.',
   '0x31af6951': 'Lock sold out.',
@@ -19,84 +36,28 @@ export async function checkMembership(
   networkId: number,
   lockAddress: string
 ): Promise<'active' | 'expired' | 'none'> {
-  const provider = new JsonRpcProvider(rpcUrl, networkId);
-  const lock = new Contract(
-    lockAddress,
-    [
-      'function getHasValidKey(address _owner) view returns (bool)',
-      'function totalKeys(address _owner) view returns (uint256)',
-      'function keyExpirationTimestampFor(address _owner) view returns (uint256)',
-      'function balanceOf(address _owner) view returns (uint256)',
-      'function tokenOfOwnerByIndex(address _owner, uint256 _index) view returns (uint256)',
-      'function keyExpirationTimestampFor(uint256 _tokenId) view returns (uint256)',
-      'function tokenExpirationTimestamp(uint256 _tokenId) view returns (uint256)',
-      'function expirationTimestampFor(uint256 _tokenId) view returns (uint256)',
-    ],
-    provider
-  );
-
-  const now = BigInt(Math.floor(Date.now() / 1000));
-  // no-op
-
-  const tryTokenExpiry = async (tokenId: bigint): Promise<bigint | null> => {
-    const sigs = [
-      'keyExpirationTimestampFor(uint256)',
-      'tokenExpirationTimestamp(uint256)',
-      'expirationTimestampFor(uint256)'
-    ];
-    for (const sig of sigs) {
-      try {
-        const f = lock.getFunction(sig);
-        const ts: bigint = await f(tokenId);
-        return ts;
-      } catch {}
-    }
-    return null;
-  };
+  const web3 = getWeb3(rpcUrl, networkId);
+  const now = Math.floor(Date.now() / 1000);
+  let best = 0;
 
   for (const w of wallets) {
     const addr = (w as any)?.address || (typeof w === 'string' ? w : undefined);
     if (!addr) continue;
-    // no-op
-    // 1) If contract says it's valid, we're done
     try {
-      const has = await lock.getHasValidKey(addr);
-      if (has) { return 'active'; }
-    } catch {}
-
-    // 2) If key exists but not valid -> expired
-    let hadAnyKey = false;
-    try {
-      const total: bigint = await lock.totalKeys(addr);
-      if (total > 0n) hadAnyKey = true;
-    } catch {}
-
-    // 3) Try address-based expiration
-    try {
-      const fn = lock.getFunction('keyExpirationTimestampFor(address)');
-      const ts: bigint = await fn(addr);
-      if (ts > 0n) {
-        if (ts > now) { return 'active'; }
-        return 'expired';
+      const raw = await web3.getKeyExpirationByLockForOwner(
+        lockAddress,
+        addr,
+        networkId
+      );
+      const expiration = typeof raw === 'bigint' ? Number(raw) : Number(raw);
+      if (Number.isFinite(expiration) && expiration > best) {
+        best = expiration;
       }
     } catch {}
-
-    // 4) Try by token id via enumerable
-    try {
-      const bal: bigint = await lock.balanceOf(addr);
-      if (bal > 0n) {
-        hadAnyKey = true;
-        const tokenId: bigint = await lock.tokenOfOwnerByIndex(addr, 0n);
-        const ts = await tryTokenExpiry(tokenId);
-        if (ts && ts > 0n) {
-          if (ts > now) { return 'active'; }
-          return 'expired';
-        }
-      }
-    } catch {}
-
-    if (hadAnyKey) { return 'expired'; }
   }
+
+  if (best > now) return 'active';
+  if (best > 0) return 'expired';
   return 'none';
 }
 
@@ -106,117 +67,28 @@ export async function getMembershipExpiration(
   networkId: number,
   lockAddress: string
 ): Promise<number | null> {
-  const provider = new JsonRpcProvider(rpcUrl, networkId);
-  // Prefer Unlock's Web3Service which handles ABI differences across versions
-  const web3 = new Web3Service({
-    [networkId]: {
-      provider: rpcUrl,
-      unlockAddress: UNLOCK_ADDRESS,
-    },
-  } as any);
-  // no-op
-  // Include multiple ABIs to support various PublicLock versions
-  const lock = new Contract(
-    lockAddress,
-    [
-      'function keyExpirationTimestampFor(address _owner) view returns (uint256)',
-      'function keyExpirationTimestampFor(uint256 _tokenId) view returns (uint256)',
-      'function keyExpirationTimestampFor(uint _tokenId) view returns (uint256)',
-      'function tokenExpirationTimestamp(uint256 _tokenId) view returns (uint256)',
-      'function tokenExpirationTimestamp(uint _tokenId) view returns (uint256)',
-      'function expirationTimestampFor(uint256 _tokenId) view returns (uint256)',
-      'function expirationTimestampFor(uint _tokenId) view returns (uint256)',
-      'function balanceOf(address _owner) view returns (uint256)',
-      'function tokenOfOwnerByIndex(address _owner, uint256 _index) view returns (uint256)',
-      'function getTokenIdFor(address _owner) view returns (uint256)'
-    ],
-    provider
+  const web3 = getWeb3(rpcUrl, networkId);
+  const expirations = await Promise.all(
+    wallets
+      .map((w) => (w as any)?.address || (typeof w === 'string' ? w : undefined))
+      .filter(Boolean)
+      .map(async (addr) => {
+        try {
+          const raw = await web3.getKeyExpirationByLockForOwner(
+            lockAddress,
+            addr as string,
+            networkId
+          );
+          const value = typeof raw === 'bigint' ? Number(raw) : Number(raw);
+          return Number.isFinite(value) ? value : 0;
+        } catch {
+          return 0;
+        }
+      })
   );
 
-  let maxTs = 0n;
-
-  const tryForAddress = async (addr: string) => {
-    // no-op
-    // 0) Try via Unlock Web3Service (works across lock versions)
-    try {
-      const tsAny: any = await web3.getKeyExpirationByLockForOwner(
-        lockAddress,
-        addr,
-        networkId
-      );
-      const n = typeof tsAny === 'bigint'
-        ? Number(tsAny)
-        : typeof tsAny === 'string'
-        ? Number(tsAny)
-        : Number(tsAny?.toString?.() ?? tsAny);
-      if (Number.isFinite(n) && n > 0) {
-        const b = BigInt(Math.floor(n));
-        if (b > maxTs) maxTs = b;
-        return;
-      }
-    } catch (e) { }
-
-    // Try address-based expiry first (some locks expose this)
-    try {
-      const fn = lock.getFunction('keyExpirationTimestampFor(address)');
-      const ts: bigint = await fn(addr);
-      if (ts > maxTs) maxTs = ts;
-      return;
-    } catch (e) { }
-    // Try via getTokenIdFor + keyExpirationTimestampFor(uint256)
-    try {
-      const getId = lock.getFunction('getTokenIdFor(address)');
-      const tokenId: bigint = await getId(addr);
-      if (tokenId && tokenId > 0n) {
-        const tsFn = lock.getFunction('keyExpirationTimestampFor(uint256)');
-        const ts: bigint = await tsFn(tokenId);
-        if (ts > maxTs) maxTs = ts;
-        return;
-      }
-    } catch (e) { }
-    // Fallback: use ERC721Enumerable balance + tokenOfOwnerByIndex
-    try {
-      const bal: bigint = await lock.balanceOf(addr);
-      if (bal > 0n) {
-        const tokenId: bigint = await lock.tokenOfOwnerByIndex(addr, 0n);
-        // Try a variety of potential function signatures for expiration-by-tokenId
-        const tryTokenTs = async (): Promise<bigint | null> => {
-          const sigs = [
-            'keyExpirationTimestampFor(uint256)',
-            'keyExpirationTimestampFor(uint)',
-            'tokenExpirationTimestamp(uint256)',
-            'tokenExpirationTimestamp(uint)',
-            'expirationTimestampFor(uint256)',
-            'expirationTimestampFor(uint)',
-          ];
-          for (const sig of sigs) {
-            try {
-              const f = lock.getFunction(sig);
-              const r: bigint = await f(tokenId);
-              return r;
-            } catch {}
-          }
-          return null;
-        };
-        const tsMaybe = await tryTokenTs();
-        const ts: bigint = tsMaybe ?? 0n;
-        if (ts > maxTs) maxTs = ts;
-      }
-    } catch (e) { }
-  };
-
-  for (const w of wallets) {
-    const addr = (w as any)?.address || (typeof w === 'string' ? w : undefined);
-    if (!addr) continue;
-    await tryForAddress(addr);
-  }
-
-  if (maxTs === 0n) return null;
-  try {
-    return Number(maxTs);
-  } catch {
-    return null;
-  }
+  const max = expirations.reduce((acc, cur) => (cur > acc ? cur : acc), 0);
+  return max > 0 ? max : null;
 }
 
 async function prepareSigner(

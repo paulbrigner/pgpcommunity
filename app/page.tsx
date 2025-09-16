@@ -87,6 +87,7 @@ export default function Home() {
     tokenId: string;
     title: string;
     description: string | null;
+    subtitle?: string | null;
     image: string | null;
     collectionName: string | null;
     tokenType: string | null;
@@ -777,6 +778,15 @@ export default function Home() {
                             })()
                           : nft.tokenId;
                         const explorerUrl = `https://basescan.org/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`;
+                        const subtitle = (() => {
+                          const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
+                          if (!text) return null;
+                          const normalizedTitle = nft.title?.trim().toLowerCase();
+                          const normalizedText = text.toLowerCase();
+                          if (normalizedTitle && normalizedTitle === normalizedText) return null;
+                          if (text.length > 80) return null;
+                          return text;
+                        })();
                         return (
                           <div key={`${nft.contractAddress}-${nft.tokenId}-${nft.owner}`} className="flex gap-3 rounded-md border p-3">
                             {nft.image ? (
@@ -789,8 +799,8 @@ export default function Home() {
                             )}
                             <div className="min-w-0 space-y-1">
                               <div className="font-medium truncate">{nft.title}</div>
-                              {nft.collectionName ? (
-                                <div className="text-xs text-muted-foreground truncate">{nft.collectionName}</div>
+                              {subtitle ? (
+                                <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
                               ) : null}
                               <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
                               <a

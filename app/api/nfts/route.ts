@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { LOCK_ADDRESS, BASE_RPC_URL } from '@/lib/config';
+import { LOCK_ADDRESS, BASE_RPC_URL, BASE_NETWORK_ID } from '@/lib/config';
 import { JsonRpcProvider, Contract } from 'ethers';
 
 type AlchemyNFT = {
@@ -8,8 +8,8 @@ type AlchemyNFT = {
   title?: string | null;
   description?: string | null;
   tokenType?: string | null;
-  metadata?: { name?: string | null; [key: string]: any } | null;
-  raw?: { metadata?: { name?: string | null; [key: string]: any } | null } | null;
+  metadata?: { name?: string | null; image?: string | null; image_url?: string | null; imageUrl?: string | null; image_uri?: string | null; imageUri?: string | null; [key: string]: any } | null;
+  raw?: { metadata?: { name?: string | null; image?: string | null; image_url?: string | null; imageUrl?: string | null; image_uri?: string | null; imageUri?: string | null; [key: string]: any } | null } | null;
   image?: {
     cachedUrl?: string | null;
     thumbnailUrl?: string | null;
@@ -53,6 +53,37 @@ const provider = (() => {
   }
 })();
 
+const normalizeImageUrl = (value: string | null | undefined): string | null => {
+  if (!value || typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith('ipfs://')) {
+    const path = trimmed.slice('ipfs://'.length);
+    return `https://cloudflare-ipfs.com/ipfs/${path}`;
+  }
+  return trimmed;
+};
+
+const extractAttributes = (nft: AlchemyNFT): Array<any> => {
+  if (Array.isArray(nft.metadata?.attributes)) return nft.metadata!.attributes!;
+  if (Array.isArray(nft.raw?.metadata?.attributes)) return nft.raw!.metadata!.attributes!;
+  return [];
+};
+
+const getAttributeValue = (attributes: Array<any>, candidates: string[]): string | null => {
+  const lowered = candidates.map((c) => c.toLowerCase());
+  for (const attr of attributes) {
+    const trait = (attr?.trait_type || attr?.traitType || attr?.type || attr?.name || '').toLowerCase();
+    if (trait && lowered.includes(trait)) {
+      const val = attr?.value || attr?.display_value || attr?.displayValue;
+      if (typeof val === 'string' && val.trim().length) {
+        return val.trim();
+      }
+    }
+  }
+  return null;
+};
+
 async function getLockOwner(): Promise<string | null> {
   if (cachedLockOwner) return cachedLockOwner;
   if (!provider || !lockAddress) return null;
@@ -92,6 +123,34 @@ async function getNftContractOwner(address: string): Promise<string | null> {
     return normalized;
   } catch (err) {
     contractOwnerCache.set(key, null);
+    return null;
+  }
+}
+
+
+
+
+const locksmithMetadataCache = new Map<string, any>();
+const LOCKSMITH_BASE = process.env.NEXT_PUBLIC_LOCKSMITH_BASE || 'https://locksmith.unlock-protocol.com';
+const NETWORK_ID = Number(Number.isFinite(BASE_NETWORK_ID) && !Number.isNaN(BASE_NETWORK_ID) ? BASE_NETWORK_ID : (process.env.NEXT_PUBLIC_BASE_NETWORK_ID ? Number(process.env.NEXT_PUBLIC_BASE_NETWORK_ID) : 0));
+
+async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
+  const key = `${lockAddress}:${tokenId}`;
+  if (locksmithMetadataCache.has(key)) {
+    return locksmithMetadataCache.get(key);
+  }
+  try {
+    const url = `${LOCKSMITH_BASE}/v2/api/metadata/${NETWORK_ID}/locks/${lockAddress}/keys/${encodeURIComponent(tokenId)}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      locksmithMetadataCache.set(key, null);
+      return null;
+    }
+    const data = await res.json();
+    locksmithMetadataCache.set(key, data);
+    return data;
+  } catch (err) {
+    locksmithMetadataCache.set(key, null);
     return null;
   }
 }
@@ -210,8 +269,22 @@ export async function GET(req: NextRequest) {
           const contractAddress = nft.contract?.address?.toLowerCase();
           if (!contractAddress) continue;
 
+          const tokenIdDecimal = (() => {
+            const raw = nft.tokenId;
+            if (!raw) return null;
+            if (typeof raw === 'string' && raw.startsWith('0x')) {
+              try { return BigInt(raw).toString(); } catch { return raw; }
+            }
+            return typeof raw === 'string' ? raw : String(raw);
+          })();
+
+          const locksmithResponse = tokenIdDecimal ? await fetchLocksmithMetadata(contractAddress, tokenIdDecimal) : null;
+          const locksmithMetadata = locksmithResponse?.metadata || locksmithResponse || null;
+
           const fallbackTitle =
-            nft.title?.trim()?.length
+            locksmithMetadata?.name?.trim()?.length
+              ? locksmithMetadata.name
+              : nft.title?.trim()?.length
               ? nft.title
               : nft.collection?.name?.trim()?.length
               ? nft.collection?.name
@@ -222,7 +295,9 @@ export async function GET(req: NextRequest) {
               : 'Untitled NFT';
 
           const fallbackCollection =
-            nft.collection?.name?.trim()?.length
+            locksmithMetadata?.description?.trim()?.length
+              ? locksmithMetadata.description
+              : nft.collection?.name?.trim()?.length
               ? nft.collection?.name
               : nft.contractMetadata?.name?.trim()?.length
               ? nft.contractMetadata?.name
@@ -232,98 +307,76 @@ export async function GET(req: NextRequest) {
               ? (nft as any).raw.metadata.description
               : null;
 
-          if (contractAddress === lockAddress) {
-            // Always include assets directly from the membership lock.
-            collected.push({
-              owner,
-              contractAddress,
-              tokenId: nft.tokenId,
-              title: fallbackTitle,
-              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
-              image:
-                nft.image?.thumbnailUrl ||
-                nft.image?.cachedUrl ||
-                nft.image?.originalUrl ||
-                null,
-              collectionName: fallbackCollection,
-              tokenType: nft.tokenType || null,
-            });
-            continue;
-          }
+          const attributes = [
+            ...extractAttributes(nft),
+            ...(Array.isArray(locksmithMetadata?.attributes) ? locksmithMetadata.attributes : []),
+          ];
+          const attrEventName = getAttributeValue(attributes, ['event_name', 'eventName', 'event']);
+          const attrTicketName = getAttributeValue(attributes, ['ticket_name', 'ticketName']);
+          const attrSubtitle = getAttributeValue(attributes, ['subtitle', 'tagline', 'ticket_description', 'ticketDescription']);
+
+          const displayTitle = attrEventName || attrTicketName || fallbackTitle;
+          const subtitleSource =
+            attrSubtitle ||
+            locksmithMetadata?.description?.trim() ||
+            fallbackCollection ||
+            nft.metadata?.description ||
+            (nft as any)?.raw?.metadata?.description ||
+            nft.description ||
+            null;
+          const trimmedSubtitle = subtitleSource?.trim()?.length ? subtitleSource.trim() : null;
+
+          const fallbackImage =
+            normalizeImageUrl(locksmithMetadata?.image) ||
+            normalizeImageUrl(locksmithMetadata?.image_url) ||
+            normalizeImageUrl(locksmithMetadata?.imageUrl) ||
+            normalizeImageUrl(locksmithMetadata?.image_uri) ||
+            normalizeImageUrl(locksmithMetadata?.imageUri) ||
+            normalizeImageUrl(nft.image?.thumbnailUrl) ||
+            normalizeImageUrl(nft.image?.cachedUrl) ||
+            normalizeImageUrl(nft.image?.originalUrl) ||
+            normalizeImageUrl(nft.metadata?.image_url) ||
+            normalizeImageUrl(nft.metadata?.imageUrl) ||
+            normalizeImageUrl(nft.metadata?.image_uri) ||
+            normalizeImageUrl(nft.metadata?.imageUri) ||
+            normalizeImageUrl(nft.metadata?.image) ||
+            normalizeImageUrl(nft.raw?.metadata?.image_url) ||
+            normalizeImageUrl(nft.raw?.metadata?.imageUrl) ||
+            normalizeImageUrl(nft.raw?.metadata?.image_uri) ||
+            normalizeImageUrl(nft.raw?.metadata?.imageUri) ||
+            normalizeImageUrl(nft.raw?.metadata?.image) ||
+            null;
+
+          const baseItem = {
+            owner,
+            contractAddress,
+            tokenId: nft.tokenId,
+            title: displayTitle,
+            description: trimmedSubtitle,
+            subtitle: trimmedSubtitle,
+            image: fallbackImage,
+            collectionName: fallbackCollection,
+            tokenType: nft.tokenType || null,
+          };
 
           const deployer = await getContractDeployer(contractAddress, deployerCache);
           const normalizedDeployer = deployer?.toLowerCase() || null;
-          if (normalizedDeployer === lockAddress) {
-            collected.push({
-              owner,
-              contractAddress,
-              tokenId: nft.tokenId,
-              title: fallbackTitle,
-              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
-              image:
-                nft.image?.thumbnailUrl ||
-                nft.image?.cachedUrl ||
-                nft.image?.originalUrl ||
-                null,
-              collectionName: fallbackCollection,
-              tokenType: nft.tokenType || null,
-            });
-            continue;
-          }
 
-          if (lockDeployer && normalizedDeployer === lockDeployer.toLowerCase()) {
-            collected.push({
-              owner,
-              contractAddress,
-              tokenId: nft.tokenId,
-              title: fallbackTitle,
-              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
-              image:
-                nft.image?.thumbnailUrl ||
-                nft.image?.cachedUrl ||
-                nft.image?.originalUrl ||
-                null,
-              collectionName: fallbackCollection,
-              tokenType: nft.tokenType || null,
-            });
-            continue;
-          }
+          const includeByDeployer =
+            contractAddress === lockAddress ||
+            normalizedDeployer === lockAddress ||
+            (lockDeployer && normalizedDeployer === lockDeployer.toLowerCase()) ||
+            (lockOwner && normalizedDeployer === lockOwner);
 
-          if (lockOwner && normalizedDeployer === lockOwner) {
-            collected.push({
-              owner,
-              contractAddress,
-              tokenId: nft.tokenId,
-              title: fallbackTitle,
-              description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
-              image:
-                nft.image?.thumbnailUrl ||
-                nft.image?.cachedUrl ||
-                nft.image?.originalUrl ||
-                null,
-              collectionName: fallbackCollection,
-              tokenType: nft.tokenType || null,
-            });
+          if (includeByDeployer) {
+            collected.push(baseItem);
             continue;
           }
 
           if (lockOwner) {
             const contractOwner = await getNftContractOwner(contractAddress);
             if (contractOwner && contractOwner === lockOwner) {
-              collected.push({
-                owner,
-                contractAddress,
-                tokenId: nft.tokenId,
-                title: fallbackTitle,
-                description: nft.description || nft.metadata?.description || (nft as any)?.raw?.metadata?.description || null,
-                image:
-                  nft.image?.thumbnailUrl ||
-                  nft.image?.cachedUrl ||
-                  nft.image?.originalUrl ||
-                  null,
-                collectionName: fallbackCollection,
-                tokenType: nft.tokenType || null,
-              });
+              collected.push(baseItem);
               continue;
             }
           }

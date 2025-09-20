@@ -13,7 +13,9 @@ import {
   EMAIL_SERVER_USER,
   EMAIL_SERVER_PASSWORD,
   EMAIL_SERVER_SECURE,
-  BASE_RPC_URL
+  BASE_RPC_URL,
+  BASE_NETWORK_ID,
+  LOCK_ADDRESS,
 } from "@/lib/config";
 import { getStatusAndExpiry } from "@/lib/membership-server";
 import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
@@ -207,15 +209,15 @@ const authOptions = {
             const { status, expiry } = await getStatusAndExpiry(
               addresses,
               BASE_RPC_URL,
-              Number(process.env.NEXT_PUBLIC_BASE_NETWORK_ID || 0),
-              process.env.NEXT_PUBLIC_LOCK_ADDRESS as string
+              BASE_NETWORK_ID,
+              LOCK_ADDRESS
             );
             (token as any).membershipStatus = status;
             (token as any).membershipExpiry = expiry ?? null;
             (token as any).membershipCheckedAt = nowSec;
           }
         }
-      } catch (e) {
+      } catch (_err) {
         // ignore membership enrichment errors
       }
       return token;

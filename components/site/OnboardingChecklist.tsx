@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CheckCircle2, Circle, Crown, UserRound, Wallet } from "lucide-react";
+import { CheckCircle2, Circle } from "lucide-react";
 import { LinkWalletButton } from "./LinkWalletButton";
 
 type MembershipStatus = "active" | "expired" | "none";

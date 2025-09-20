@@ -1,13 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Contract, BrowserProvider, JsonRpcProvider } from "ethers";
-import { LOCK_ADDRESS, USDC_ADDRESS, BASE_NETWORK_ID, BASE_RPC_URL } from "@/lib/config";
+import {
+  LOCK_ADDRESS,
+  USDC_ADDRESS,
+  BASE_NETWORK_ID,
+  BASE_RPC_URL,
+  BASE_CHAIN_ID_HEX,
+  BASE_BLOCK_EXPLORER_URL,
+} from "@/lib/config";
 
 const MAX_AUTO_RENEW_MONTHS: number = 12;
 
@@ -25,8 +32,12 @@ export default function ProfileSettingsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [initial, setInitial] = useState<{ firstName: string; lastName: string; xHandle: string; linkedinUrl: string } | null>(null);
-  const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
-  const walletAddress = (session?.user as any)?.walletAddress as string | undefined;
+  const sessionUser = session?.user as any | undefined;
+  const wallets = useMemo(() => {
+    const list = sessionUser?.wallets;
+    return Array.isArray(list) ? list.map((item) => String(item)) : [];
+  }, [sessionUser]);
+  const walletAddress = sessionUser?.walletAddress as string | undefined;
   const [canceling, setCanceling] = useState(false);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
   const [autoRenewPrice, setAutoRenewPrice] = useState<bigint | null>(null);
@@ -49,8 +60,8 @@ export default function ProfileSettingsPage() {
       : null;
 
   useEffect(() => {
-    if (!authenticated) return;
-    const u: any = session?.user || {};
+    if (!authenticated || !sessionUser) return;
+    const u: any = sessionUser || {};
     setFirstName(u.firstName || "");
     setLastName(u.lastName || "");
     setXHandle(u.xHandle || "");
@@ -61,12 +72,12 @@ export default function ProfileSettingsPage() {
       xHandle: (u.xHandle as string) || "",
       linkedinUrl: (u.linkedinUrl as string) || "",
     });
-  }, [authenticated, session]);
+  }, [authenticated, sessionUser]);
 
   // Load membership status/expiry for status messaging
   useEffect(() => {
     if (!authenticated) return;
-    const su: any = session?.user || {};
+    const su: any = sessionUser || {};
     const addresses = (wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : [])
       .map((a) => String(a).toLowerCase())
       .filter(Boolean);
@@ -98,7 +109,7 @@ export default function ProfileSettingsPage() {
         setMembershipChecking(false);
       }
     })();
-  }, [authenticated, session, wallets, walletAddress]);
+  }, [authenticated, sessionUser, wallets, walletAddress]);
 
   // Check current USDC allowance vs. current key price to infer auto-renew readiness
   useEffect(() => {
@@ -143,14 +154,11 @@ export default function ProfileSettingsPage() {
         setAutoRenewChecking(false);
       }
     })();
-  }, [authenticated, session, wallets, walletAddress]);
+  }, [authenticated, sessionUser, wallets, walletAddress]);
 
   // Ensure the user's wallet is on Base before sending transactions
   const ensureBaseNetwork = async (eth: any) => {
-    const targetHex = (() => {
-      const n = Number(BASE_NETWORK_ID || 8453);
-      return `0x${n.toString(16)}`;
-    })();
+    const targetHex = BASE_CHAIN_ID_HEX;
     try {
       await eth.request({
         method: "wallet_switchEthereumChain",
@@ -166,9 +174,9 @@ export default function ProfileSettingsPage() {
             {
               chainId: targetHex,
               chainName: "Base",
-              rpcUrls: [BASE_RPC_URL || "https://mainnet.base.org"],
+              rpcUrls: [BASE_RPC_URL],
               nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              blockExplorerUrls: ["https://basescan.org"],
+              blockExplorerUrls: [BASE_BLOCK_EXPLORER_URL],
             },
           ],
         });
@@ -380,7 +388,7 @@ export default function ProfileSettingsPage() {
                   const eth = (globalThis as any).ethereum;
                   if (!eth) throw new Error("No wallet found in browser");
                   await ensureBaseNetwork(eth);
-                  const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
+                  const provider = new BrowserProvider(eth, BASE_NETWORK_ID);
                   const signer = await provider.getSigner();
                   const owner = await signer.getAddress();
                   const erc20 = new Contract(
@@ -424,7 +432,7 @@ export default function ProfileSettingsPage() {
                     const eth = (globalThis as any).ethereum;
                     if (!eth) throw new Error("No wallet found in browser");
                     await ensureBaseNetwork(eth);
-                    const provider = new BrowserProvider(eth, Number(BASE_NETWORK_ID || 8453));
+                    const provider = new BrowserProvider(eth, BASE_NETWORK_ID);
                     const signer = await provider.getSigner();
                     const owner = await signer.getAddress();
                     const erc20 = new Contract(

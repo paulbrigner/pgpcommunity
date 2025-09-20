@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe, linkWalletWithSiwe } from "@/lib/siwe/client";
 
@@ -15,7 +15,7 @@ type IdentitySuccess = {
 type IdentityResponse = IdentitySuccess | { error: string };
 
 export default function IdentityTestPage() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();

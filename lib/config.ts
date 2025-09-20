@@ -1,8 +1,23 @@
+const DEFAULT_BASE_NETWORK_ID = 8453;
+
+const parseNumber = (value: string | undefined): number | null => {
+  if (!value) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export const UNLOCK_ADDRESS = process.env.NEXT_PUBLIC_UNLOCK_ADDRESS as string;
 export const LOCK_ADDRESS = process.env.NEXT_PUBLIC_LOCK_ADDRESS as string;
-export const BASE_NETWORK_ID = Number(process.env.NEXT_PUBLIC_BASE_NETWORK_ID);
-export const BASE_RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL as string;
+const resolvedBaseNetworkId = parseNumber(process.env.NEXT_PUBLIC_BASE_NETWORK_ID);
+export const BASE_NETWORK_ID = resolvedBaseNetworkId && resolvedBaseNetworkId > 0 ? resolvedBaseNetworkId : DEFAULT_BASE_NETWORK_ID;
+export const BASE_CHAIN_ID_HEX = `0x${BASE_NETWORK_ID.toString(16)}`;
+export const BASE_RPC_URL = process.env.NEXT_PUBLIC_BASE_RPC_URL || "https://mainnet.base.org";
+export const BASE_BLOCK_EXPLORER_URL = process.env.NEXT_PUBLIC_BASE_BLOCK_EXPLORER_URL || "https://basescan.org";
 export const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as string;
+export const UNLOCK_SUBGRAPH_URL = process.env.NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL as string | undefined;
+export const UNLOCK_SUBGRAPH_ID = process.env.UNLOCK_SUBGRAPH_ID as string | undefined;
+export const UNLOCK_SUBGRAPH_API_KEY = process.env.UNLOCK_SUBGRAPH_API_KEY as string | undefined;
+export const LOCKSMITH_BASE_URL = process.env.NEXT_PUBLIC_LOCKSMITH_BASE || "https://locksmith.unlock-protocol.com";
 export const PRIVATE_KEY_SECRET = (process.env.PRIVATE_KEY_SECRET || "").replace(/\\n/g, "\n") as string;
 export const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN as string;
 export const KEY_PAIR_ID = process.env.KEY_PAIR_ID as string;

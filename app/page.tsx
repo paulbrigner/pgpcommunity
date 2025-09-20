@@ -14,11 +14,12 @@ import {
   BASE_RPC_URL,
   UNLOCK_ADDRESS,
   USDC_ADDRESS,
+  BASE_CHAIN_ID_HEX,
+  BASE_BLOCK_EXPLORER_URL,
 } from "@/lib/config"; // Environment-specific constants
-import { checkMembership as fetchMembership, getMembershipExpiration } from "@/lib/membership"; // Helper functions for membership logic
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
-import { BadgeCheck, BellRing, CalendarClock, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
+import { BadgeCheck, BellRing, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 
@@ -60,21 +61,28 @@ export default function Home() {
   const searchParams = useSearchParams();
   const authenticated = status === "authenticated";
   const ready = status !== "loading";
-  const walletAddress = (session?.user as any)?.walletAddress as
+  const sessionUser = session?.user as any | undefined;
+  const walletAddress = sessionUser?.walletAddress as
     | string
     | undefined;
-  const wallets = ((session?.user as any)?.wallets as string[] | undefined) || [];
-  const firstName = (session?.user as any)?.firstName as string | undefined;
-  const lastName = (session?.user as any)?.lastName as string | undefined;
+  const wallets = useMemo(() => {
+    const list = sessionUser?.wallets;
+    return Array.isArray(list) ? list.map((item) => String(item)) : [];
+  }, [sessionUser]);
+  const firstName = sessionUser?.firstName as string | undefined;
+  const lastName = sessionUser?.lastName as string | undefined;
+  const sessionMembershipStatus = sessionUser?.membershipStatus as
+    | 'active'
+    | 'expired'
+    | 'none'
+    | undefined;
+  const sessionMembershipExpiry = sessionUser?.membershipExpiry as number | null | undefined;
   const profileComplete = !!(firstName && lastName);
   const walletLinked = !!(walletAddress || wallets.length > 0);
   // Membership state; 'unknown' avoids UI flicker until we hydrate from session/cache
   const [membershipStatus, setMembershipStatus] = useState<
     "active" | "expired" | "none" | "unknown"
   >("unknown");
-  // Indicates whether we are currently checking membership status
-  const [loadingMembership, setLoadingMembership] = useState(false);
-  const [checkedMembership, setCheckedMembership] = useState(false);
   // Flags to show when purchase/renewal or funding actions are running
   const [isPurchasing, setIsPurchasing] = useState(false);
   
@@ -130,11 +138,11 @@ export default function Home() {
         provider: BASE_RPC_URL,
       },
     });
-  }, [BASE_NETWORK_ID, BASE_RPC_URL]);
+  }, []);
 
   // Ensure wallet is on Base before any post‑purchase approvals
   const ensureBaseNetwork = async (eth: any) => {
-    const chainHex = `0x${Number(BASE_NETWORK_ID || 8453).toString(16)}`;
+    const chainHex = BASE_CHAIN_ID_HEX;
     try {
       await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainHex }] });
     } catch (err: any) {
@@ -145,9 +153,9 @@ export default function Home() {
             {
               chainId: chainHex,
               chainName: "Base",
-              rpcUrls: [BASE_RPC_URL || "https://mainnet.base.org"],
+              rpcUrls: [BASE_RPC_URL],
               nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
-              blockExplorerUrls: ["https://basescan.org"],
+              blockExplorerUrls: [BASE_BLOCK_EXPLORER_URL],
             },
           ],
         });
@@ -158,13 +166,12 @@ export default function Home() {
   };
 
   // Check on-chain whether the session wallet has a valid membership
-  const refreshMembership = async () => {
+  const refreshMembership = useCallback(async () => {
     if (!ready || !authenticated || !(walletAddress || (wallets && wallets.length > 0))) {
       // Not enough info to check yet; preserve current state
       return;
     }
 
-    setLoadingMembership(true);
     const seq = ++refreshSeq.current;
     try {
       const addresses = wallets && wallets.length
@@ -205,38 +212,31 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Membership check failed:", error);
-    } finally {
-      setLoadingMembership(false);
-      setCheckedMembership(true);
     }
-  };
+  }, [ready, authenticated, walletAddress, wallets, membershipExpiry]);
 
   useEffect(() => {
     // Prefer server-provided membership data via session; fall back to client cache; otherwise fetch in background
     if (!ready || !authenticated) return;
-    const su: any = session?.user || {};
     const addresses = addressList;
-    const addressesKey = addresses.join(',');
 
     // If no linked wallets yet, we know membership cannot be verified; show onboarding immediately.
     if (!addresses.length) {
       setMembershipStatus('none');
       setMembershipExpiry(null);
-      setCheckedMembership(true);
       lastKnownMembership = { status: 'none', expiry: null };
       return;
     }
 
-    if (su.membershipStatus) {
-      const sessionStatus = su.membershipStatus as 'active' | 'expired' | 'none';
-      const sessionExpiry = typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null;
+    if (sessionMembershipStatus) {
+      const sessionStatus = sessionMembershipStatus;
+      const sessionExpiry = typeof sessionMembershipExpiry === 'number' ? sessionMembershipExpiry : null;
       const fallback = lastKnownMembership;
 
       if (sessionStatus === 'active') {
         setMembershipStatus('active');
         setMembershipExpiry(sessionExpiry);
         lastKnownMembership = { status: 'active', expiry: sessionExpiry };
-        setCheckedMembership(true);
         try { prevStatusRef.current = 'active'; } catch {}
         try {
           const cache = { status: 'active', expiry: sessionExpiry ?? null, at: Math.floor(Date.now()/1000), addresses: addressesKey };
@@ -254,7 +254,6 @@ export default function Home() {
         setMembershipStatus('unknown');
         setMembershipExpiry(sessionExpiry);
       }
-      setCheckedMembership(true);
     }
 
     // Try client cache (5 min TTL)
@@ -266,20 +265,27 @@ export default function Home() {
         if (cache?.addresses === addressesKey && age < 300 && cache?.status) {
           setMembershipStatus(cache.status);
           setMembershipExpiry(typeof cache.expiry === 'number' ? cache.expiry : null);
-          setCheckedMembership(true);
           // Preserve last known good status to prevent transient downgrades
           try { if (cache.status !== 'none') { prevStatusRef.current = cache.status; } } catch {}
           lastKnownMembership = { status: cache.status, expiry: typeof cache.expiry === 'number' ? cache.expiry : null };
           // Background refresh without changing checked flag
-          refreshMembership();
+          void refreshMembership();
           return;
         }
       }
     } catch {}
 
     // No session value and no usable cache: do a foreground fetch once
-    refreshMembership();
-  }, [ready, authenticated, (session as any)?.user?.membershipStatus, (session as any)?.user?.membershipExpiry, addressList, addressesKey]);
+    void refreshMembership();
+  }, [
+    ready,
+    authenticated,
+    sessionMembershipStatus,
+    sessionMembershipExpiry,
+    addressList,
+    addressesKey,
+    refreshMembership,
+  ]);
 
   const loadCreatorNfts = useCallback(
     async (key: string, force = false) => {
@@ -335,8 +341,8 @@ export default function Home() {
       return;
     }
 
-    const rpcUrl = BASE_RPC_URL || "https://mainnet.base.org";
-    const networkId = Number(BASE_NETWORK_ID || 8453);
+    const rpcUrl = BASE_RPC_URL;
+    const networkId = BASE_NETWORK_ID;
     if (!Number.isFinite(networkId)) {
       setAutoRenewMonths(null);
       setAutoRenewChecking(false);
@@ -447,7 +453,7 @@ export default function Home() {
       if (autoRenewOptIn && USDC_ADDRESS && LOCK_ADDRESS) {
         try {
           await ensureBaseNetwork(provider);
-          const bp = new BrowserProvider(provider, Number(BASE_NETWORK_ID || 8453));
+          const bp = new BrowserProvider(provider, BASE_NETWORK_ID);
           const signer = await bp.getSigner();
           const erc20 = new Contract(
             USDC_ADDRESS,
@@ -494,7 +500,6 @@ export default function Home() {
         ? [walletAddress]
         : []
       ).map((a) => String(a).toLowerCase());
-      let purchased = false;
       if (addresses.length) {
         for (let i = 0; i < 5; i++) {
           try {
@@ -503,7 +508,6 @@ export default function Home() {
               const { status, expiry } = await resp.json();
               const nowSec = Math.floor(Date.now() / 1000);
               if (status === 'active' || (typeof expiry === 'number' && expiry > nowSec)) {
-                purchased = true;
                 break;
               }
             }
@@ -777,7 +781,8 @@ export default function Home() {
                               }
                             })()
                           : nft.tokenId;
-                        const explorerUrl = `https://basescan.org/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`;
+                        const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
+                        const explorerUrl = `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`;
                         const subtitle = (() => {
                           const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
                           if (!text) return null;

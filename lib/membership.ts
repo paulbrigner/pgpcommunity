@@ -1,6 +1,6 @@
 import { BrowserProvider, JsonRpcProvider, Contract, parseUnits } from 'ethers';
 import { WalletService, Web3Service } from '@unlock-protocol/unlock-js';
-import { UNLOCK_ADDRESS } from '@/lib/config';
+import { UNLOCK_ADDRESS, BASE_CHAIN_ID_HEX, BASE_RPC_URL, BASE_BLOCK_EXPLORER_URL } from '@/lib/config';
 
 const web3ServiceCache = new Map<string, Web3Service>();
 
@@ -100,7 +100,7 @@ async function prepareSigner(
   try {
     await eip1193.request({
       method: 'wallet_switchEthereumChain',
-      params: [{ chainId: '0x2105' }],
+      params: [{ chainId: BASE_CHAIN_ID_HEX }],
     });
   } catch (switchError: any) {
     if (switchError.code === 4902) {
@@ -108,11 +108,11 @@ async function prepareSigner(
         method: 'wallet_addEthereumChain',
         params: [
           {
-            chainId: '0x2105',
+            chainId: BASE_CHAIN_ID_HEX,
             chainName: 'Base',
-            rpcUrls: ['https://mainnet.base.org'],
+            rpcUrls: [BASE_RPC_URL],
             nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-            blockExplorerUrls: ['https://basescan.org'],
+            blockExplorerUrls: [BASE_BLOCK_EXPLORER_URL],
           },
         ],
       });

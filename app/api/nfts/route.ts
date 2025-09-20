@@ -1,5 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { LOCK_ADDRESS, BASE_RPC_URL, BASE_NETWORK_ID } from '@/lib/config';
+import {
+  LOCK_ADDRESS,
+  BASE_RPC_URL,
+  BASE_NETWORK_ID,
+  LOCKSMITH_BASE_URL,
+  UNLOCK_SUBGRAPH_URL,
+  UNLOCK_SUBGRAPH_ID,
+  UNLOCK_SUBGRAPH_API_KEY,
+} from '@/lib/config';
 import unlockNetworks from '@unlock-protocol/networks';
 import { JsonRpcProvider, Contract } from 'ethers';
 
@@ -97,7 +105,7 @@ async function getLockName(address: string): Promise<string | null> {
     const normalized = trimmed.length ? trimmed : null;
     lockNameCache.set(key, normalized);
     return normalized;
-  } catch (err) {
+  } catch (_err) {
     lockNameCache.set(key, null);
     return null;
   }
@@ -107,13 +115,35 @@ async function getLockName(address: string): Promise<string | null> {
 
 
 const locksmithMetadataCache = new Map<string, any>();
-const LOCKSMITH_BASE = process.env.NEXT_PUBLIC_LOCKSMITH_BASE || 'https://locksmith.unlock-protocol.com';
-const NETWORK_ID = Number(Number.isFinite(BASE_NETWORK_ID) && !Number.isNaN(BASE_NETWORK_ID) ? BASE_NETWORK_ID : (process.env.NEXT_PUBLIC_BASE_NETWORK_ID ? Number(process.env.NEXT_PUBLIC_BASE_NETWORK_ID) : 0));
+const LOCKSMITH_BASE = LOCKSMITH_BASE_URL;
+const NETWORK_ID = BASE_NETWORK_ID;
 const NETWORK_CONFIG_COLLECTION = (unlockNetworks as any)?.networks || unlockNetworks;
-const DEFAULT_NETWORK_ID = 8453;
-const RESOLVED_NETWORK_ID = Number.isFinite(NETWORK_ID) && NETWORK_ID > 0 ? NETWORK_ID : DEFAULT_NETWORK_ID;
+const RESOLVED_NETWORK_ID = Number.isFinite(NETWORK_ID) && NETWORK_ID > 0 ? NETWORK_ID : BASE_NETWORK_ID;
 const NETWORK_CONFIG = NETWORK_CONFIG_COLLECTION?.[String(RESOLVED_NETWORK_ID)] || NETWORK_CONFIG_COLLECTION?.[RESOLVED_NETWORK_ID] || null;
-const SUBGRAPH_URL = process.env.NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL || NETWORK_CONFIG?.subgraph?.endpoint || (RESOLVED_NETWORK_ID ? `https://subgraph.unlock-protocol.com/${RESOLVED_NETWORK_ID}` : null);
+
+const GRAPH_GATEWAY_BASE = 'https://gateway.thegraph.com/api/subgraphs/id';
+const RESOLVED_SUBGRAPH_URL =
+  UNLOCK_SUBGRAPH_URL ||
+  (UNLOCK_SUBGRAPH_ID ? `${GRAPH_GATEWAY_BASE}/${UNLOCK_SUBGRAPH_ID}` : NETWORK_CONFIG?.subgraph?.endpoint || (RESOLVED_NETWORK_ID ? `https://subgraph.unlock-protocol.com/${RESOLVED_NETWORK_ID}` : null));
+
+const SUBGRAPH_AUTH_HEADERS = UNLOCK_SUBGRAPH_API_KEY
+  ? { Authorization: `Bearer ${UNLOCK_SUBGRAPH_API_KEY}` }
+  : undefined;
+
+async function fetchSubgraph(body: string) {
+  if (!RESOLVED_SUBGRAPH_URL) {
+    throw new Error('Unlock subgraph URL not configured');
+  }
+  return fetch(RESOLVED_SUBGRAPH_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(SUBGRAPH_AUTH_HEADERS ?? {}),
+    },
+    body,
+    cache: 'no-store',
+  });
+}
 
 type SubgraphKey = {
   tokenId: string;
@@ -144,7 +174,7 @@ async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
     const data = await res.json();
     locksmithMetadataCache.set(key, data);
     return data;
-  } catch (err) {
+  } catch (_err) {
     locksmithMetadataCache.delete(key);
     return null;
   }
@@ -167,9 +197,6 @@ async function fetchFromAlchemy<T>(path: string, params: Record<string, string>)
 }
 
 async function fetchKeysForOwner(owner: string): Promise<SubgraphKey[]> {
-  if (!SUBGRAPH_URL) {
-    throw new Error('Unlock subgraph URL not configured');
-  }
   const results: SubgraphKey[] = [];
   const normalizedOwner = owner.toLowerCase();
   const pageSize = 500;
@@ -197,12 +224,7 @@ async function fetchKeysForOwner(owner: string): Promise<SubgraphKey[]> {
       variables: { owner: normalizedOwner, first: pageSize, skip },
     });
 
-    const res = await fetch(SUBGRAPH_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      cache: 'no-store',
-    });
+    const res = await fetchSubgraph(body);
     if (!res.ok) {
       const detail = await res.text();
       throw new Error(`Subgraph request failed (${res.status}): ${detail}`);
@@ -228,7 +250,7 @@ async function fetchKeysForOwner(owner: string): Promise<SubgraphKey[]> {
 async function getLockDeployer(): Promise<string | null> {
   if (cachedLockDeployer) return cachedLockDeployer;
   if (!lockAddress) return null;
-  if (SUBGRAPH_URL) {
+  if (RESOLVED_SUBGRAPH_URL) {
     try {
       const body = JSON.stringify({
         query: `query Lock($address: String!) {
@@ -238,12 +260,7 @@ async function getLockDeployer(): Promise<string | null> {
         }`,
         variables: { address: lockAddress },
       });
-      const res = await fetch(SUBGRAPH_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        cache: 'no-store',
-      });
+      const res = await fetchSubgraph(body);
       if (res.ok) {
         const json = await res.json();
         const deployer = json?.data?.locks?.[0]?.deployer;
@@ -254,8 +271,8 @@ async function getLockDeployer(): Promise<string | null> {
       } else {
         console.error('Lock deployer subgraph request failed', res.status);
       }
-    } catch (err) {
-      console.error('Failed to load lock deployer from subgraph', err);
+    } catch (_err) {
+      console.error('Failed to load lock deployer from subgraph', _err);
     }
   }
   try {

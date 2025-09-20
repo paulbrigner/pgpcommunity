@@ -14,7 +14,8 @@ export async function POST(request: NextRequest) {
     if (!token?.sub) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json();
-    let { firstName, lastName, xHandle, linkedinUrl } = body || {};
+    const { firstName, lastName } = body || {};
+    let { xHandle, linkedinUrl } = body || {};
 
     // Basic validations
     const err = (msg: string) => NextResponse.json({ error: msg }, { status: 400 });
@@ -57,4 +58,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }
 }
-

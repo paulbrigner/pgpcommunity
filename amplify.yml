@@ -16,6 +16,9 @@ frontend:
         - env | grep -e NEXT_PUBLIC_UNLOCK_ADDRESS >> .env.production || true
         - env | grep -e NEXT_PUBLIC_BASE_NETWORK_ID >> .env.production || true
         - env | grep -e NEXT_PUBLIC_BASE_RPC_URL >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_BASE_BLOCK_EXPLORER_URL >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_LOCKSMITH_BASE >> .env.production || true
+        - env | grep -e NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL >> .env.production || true
         - env | grep -e NEXT_PUBLIC_USDC_ADDRESS >> .env.production || true
         - env | grep -e NEXTAUTH_TABLE >> .env.production
         - env | grep -e NEXTAUTH_URL >> .env.production
@@ -28,6 +31,8 @@ frontend:
         - env | grep -e CLOUDFRONT_DOMAIN >> .env.production
         - env | grep -e KEY_PAIR_ID >> .env.production
         - env | grep -e REGION_AWS >> .env.production
+        - env | grep -e UNLOCK_SUBGRAPH_ID >> .env.production
+        - env | grep -e UNLOCK_SUBGRAPH_API_KEY >> .env.production
         - env | grep -e PRIVATE_KEY_SECRET >> .env.production
         - npm run build
   artifacts:

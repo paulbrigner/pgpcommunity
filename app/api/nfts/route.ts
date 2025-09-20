@@ -147,6 +147,21 @@ async function fetchSubgraph(body: string) {
 }
 
 const LOCK_CREATION_FIELD_CANDIDATES = ['createdAtBlock', 'creationBlock', 'createdAt', 'creationTimestamp'] as const;
+const YOUTUBE_FIELD_CANDIDATES = [
+  'youtube',
+  'youtube_url',
+  'youtubeUrl',
+  'youtube_uri',
+  'youtubeUri',
+  'video',
+  'video_url',
+  'videoUrl',
+  'video_uri',
+  'videoUri',
+  'media_url',
+  'mediaUrl',
+] as const;
+const YOUTUBE_HOST_CANDIDATES = ['youtube.com', 'youtu.be'];
 
 function coerceToNumber(value: unknown): number | null {
   if (value == null) return null;
@@ -157,6 +172,87 @@ function coerceToNumber(value: unknown): number | null {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : null;
   }
+  return null;
+}
+
+function coerceToTrimmedString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function isYoutubeUrl(value: string): boolean {
+  if (!value) return false;
+  try {
+    const url = new URL(value);
+    return YOUTUBE_HOST_CANDIDATES.some((host) => url.host.includes(host));
+  } catch {
+    return YOUTUBE_HOST_CANDIDATES.some((host) => value.includes(host));
+  }
+}
+
+function findYoutubeLinkDeep(value: unknown, depth = 0): string | null {
+  if (depth > 6) return null;
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed && isYoutubeUrl(trimmed)) return trimmed;
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const found = findYoutubeLinkDeep(entry, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (value && typeof value === 'object') {
+    for (const key of Object.keys(value as Record<string, unknown>)) {
+      const found = findYoutubeLinkDeep((value as any)[key], depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function extractYoutubeLinkFromObject(obj: any): string | null {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const field of YOUTUBE_FIELD_CANDIDATES) {
+    const raw = coerceToTrimmedString((obj as any)?.[field]);
+    if (raw && isYoutubeUrl(raw)) return raw;
+  }
+
+  const links = (obj as any)?.links;
+  if (Array.isArray(links)) {
+    for (const candidate of links) {
+      const value = coerceToTrimmedString(candidate);
+      if (value && isYoutubeUrl(value)) return value;
+      if (candidate && typeof candidate === 'object') {
+        const maybeUrl = coerceToTrimmedString((candidate as any)?.url || (candidate as any)?.href);
+        if (maybeUrl && isYoutubeUrl(maybeUrl)) return maybeUrl;
+      }
+    }
+  }
+
+  return null;
+}
+
+function extractYoutubeLink(metadata: any, attributes: Array<any>): string | null {
+  const topLevel = extractYoutubeLinkFromObject(metadata);
+  if (topLevel) return topLevel;
+
+  const nested = extractYoutubeLinkFromObject(metadata?.metadata);
+  if (nested) return nested;
+
+  for (const attr of attributes) {
+    const value = coerceToTrimmedString(attr?.value || attr?.display_value || attr?.displayValue);
+    if (value && isYoutubeUrl(value)) return value;
+    const deep = findYoutubeLinkDeep(attr);
+    if (deep) return deep;
+  }
+
+  const deepFallback = findYoutubeLinkDeep(metadata);
+  if (deepFallback) return deepFallback;
+
   return null;
 }
 
@@ -430,9 +526,17 @@ export async function GET(req: NextRequest) {
         const fallbackCollection =
           locksmithMetadata?.description?.trim()?.length
             ? locksmithMetadata.description
-            : keyData.lock?.name?.trim()?.length
-            ? keyData.lock.name
-            : null;
+          : keyData.lock?.name?.trim()?.length
+          ? keyData.lock.name
+          : null;
+
+        const metadataDescription = (() => {
+          const primary = coerceToTrimmedString(locksmithMetadata?.description);
+          if (primary) return primary;
+          const nested = coerceToTrimmedString(locksmithMetadata?.metadata?.description);
+          if (nested) return nested;
+          return fallbackCollection;
+        })();
 
         const attributes = Array.isArray(locksmithMetadata?.attributes)
           ? locksmithMetadata.attributes
@@ -473,16 +577,19 @@ export async function GET(req: NextRequest) {
           normalizeImageUrl(locksmithMetadata?.metadata?.imageUri) ||
           null;
 
+        const youtubeLink = extractYoutubeLink(locksmithMetadata, attributes);
+
         const baseItem = {
           owner,
           contractAddress,
           tokenId: tokenIdDecimal,
           title: displayTitle,
-          description: trimmedSubtitle,
+          description: metadataDescription,
           subtitle: trimmedSubtitle,
           image: fallbackImage,
           collectionName: fallbackCollection,
           tokenType: null,
+          videoUrl: youtubeLink,
         };
 
         const creationSortValue = await getLockCreationSortKey(contractAddress);

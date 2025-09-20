@@ -34,6 +34,8 @@
     "nodemailer": "^6.10.1",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
     "siwe": "^2.3.2",
     "tailwind-merge": "^3.3.1"
   },

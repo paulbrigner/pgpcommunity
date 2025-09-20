@@ -8,6 +8,8 @@ import { useSession } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
 import { networks } from "@unlock-protocol/networks";
 import { BrowserProvider, Contract, JsonRpcProvider } from "ethers";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import {
   LOCK_ADDRESS,
   BASE_NETWORK_ID,
@@ -29,6 +31,20 @@ type MembershipSnapshot = {
 };
 
 let lastKnownMembership: MembershipSnapshot | null = null;
+
+const stripMarkdown = (value: string): string => {
+  return value
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+    .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g, '$1')
+    .replace(/#{1,6}\s*(.*)/g, '$1')
+    .replace(/^>\s?/gm, '')
+    .replace(/^-\s+/gm, '')
+    .replace(/\r?\n\r?\n/g, '\n')
+    .trim();
+};
 
 const PAYWALL_CONFIG = {
   icon: "",
@@ -99,9 +115,11 @@ export default function Home() {
     image: string | null;
     collectionName: string | null;
     tokenType: string | null;
+    videoUrl?: string | null;
   }> | null>(null);
   const [creatorNftsLoading, setCreatorNftsLoading] = useState(false);
   const [creatorNftsError, setCreatorNftsError] = useState<string | null>(null);
+  const [openDescriptionKey, setOpenDescriptionKey] = useState<string | null>(null);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const nftFetchSeq = useRef(0);
@@ -792,15 +810,52 @@ export default function Home() {
                           if (text.length > 80) return null;
                           return text;
                         })();
+                        const shortenedDescription = (() => {
+                          const source = (() => {
+                            const desc = nft.description?.trim();
+                            if (desc && desc.length) return desc;
+                            const sub = nft.subtitle?.trim();
+                            if (sub && sub.length) return sub;
+                            const collection = nft.collectionName?.trim();
+                            if (collection && collection.length) return collection;
+                            return '';
+                          })();
+                          if (!source) return null;
+                          const plain = stripMarkdown(source);
+                          if (!plain) return null;
+                          const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
+                          const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
+                            // Avoid wrapping existing markdown links
+                            const before = str.slice(0, offset + prefix.length);
+                            if (/\[[^\]]*$/.test(before)) return match;
+                            return `${prefix}[${url}](${url})`;
+                          });
+                          return {
+                            preview,
+                            fullMarkdown: enrichedMarkdown,
+                          } as const;
+                        })();
+                        const descriptionKey = `${nft.contractAddress}-${nft.tokenId}-${nft.owner}-description`;
+                        const isDescriptionOpen = openDescriptionKey === descriptionKey;
                         return (
                           <div key={`${nft.contractAddress}-${nft.tokenId}-${nft.owner}`} className="flex gap-3 rounded-md border p-3">
                             {nft.image ? (
-                              <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
+                              <a
+                                href={explorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted"
+                              >
                                 {/* eslint-disable-next-line @next/next/no-img-element */}
                                 <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
-                              </div>
+                              </a>
                             ) : (
-                              <div className="h-20 w-20 shrink-0 rounded-md bg-muted" />
+                              <a
+                                href={explorerUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="h-20 w-20 shrink-0 rounded-md bg-muted"
+                              />
                             )}
                             <div className="min-w-0 space-y-1">
                               <div className="font-medium truncate">{nft.title}</div>
@@ -808,19 +863,51 @@ export default function Home() {
                                 <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
                               ) : null}
                               <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
-                              <a
-                                href={explorerUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-xs text-primary hover:underline"
-                              >
-                                View on BaseScan
-                              </a>
+                              {shortenedDescription ? (
+                                <div className="text-xs text-muted-foreground">
+                                  {isDescriptionOpen ? (
+                                    <div className="space-y-2">
+                                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                          {shortenedDescription.fullMarkdown}
+                                        </ReactMarkdown>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        className="text-xs text-primary hover:underline focus-visible:outline-none"
+                                        onClick={() => setOpenDescriptionKey(null)}
+                                      >
+                                        Hide description
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="text-left text-xs text-primary hover:underline focus-visible:outline-none"
+                                      onClick={() => setOpenDescriptionKey(descriptionKey)}
+                                    >
+                                      {shortenedDescription.preview}
+                                    </button>
+                                  )}
+                                </div>
+                              ) : null}
+                              {nft.videoUrl ? (
+                                <div>
+                                  <a
+                                    href={nft.videoUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-xs text-primary hover:underline"
+                                  >
+                                    Watch Video
+                                  </a>
+                                </div>
+                              ) : null}
                             </div>
                           </div>
                         );
                       })}
-                    </div>
+            </div>
                   ) : (
                     <p className="text-sm text-muted-foreground">
                       No creator NFTs or POAPs detected yet. Join community events to start collecting!

@@ -84,6 +84,7 @@ async function getLockOwner(): Promise<string | null> {
 }
 
 const lockNameCache = new Map<string, string | null>();
+const lockCreationCache = new Map<string, number | null>();
 
 async function getLockName(address: string): Promise<string | null> {
   const key = address.toLowerCase();
@@ -143,6 +144,60 @@ async function fetchSubgraph(body: string) {
     body,
     cache: 'no-store',
   });
+}
+
+const LOCK_CREATION_FIELD_CANDIDATES = ['createdAtBlock', 'creationBlock', 'createdAt', 'creationTimestamp'] as const;
+
+function coerceToNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+async function fetchLockCreationField(address: string, field: typeof LOCK_CREATION_FIELD_CANDIDATES[number]): Promise<number | null> {
+  const body = JSON.stringify({
+    query: `query LockCreation($address: String!) { locks(first: 1, where: { address: $address }) { ${field} } }`,
+    variables: { address },
+  });
+  const res = await fetchSubgraph(body);
+  if (!res.ok) {
+    throw new Error(`Subgraph request failed (${res.status}) while reading ${field}`);
+  }
+  const json = await res.json();
+  if (json?.errors?.length) {
+    throw new Error(json.errors[0]?.message || `Subgraph error requesting ${field}`);
+  }
+  const value = json?.data?.locks?.[0]?.[field];
+  return coerceToNumber(value);
+}
+
+async function getLockCreationSortKey(address: string): Promise<number | null> {
+  const key = address.toLowerCase();
+  if (lockCreationCache.has(key)) {
+    return lockCreationCache.get(key) ?? null;
+  }
+
+  for (const field of LOCK_CREATION_FIELD_CANDIDATES) {
+    try {
+      const maybeValue = await fetchLockCreationField(key, field);
+      if (maybeValue != null) {
+        lockCreationCache.set(key, maybeValue);
+        return maybeValue;
+      }
+    } catch (_err) {
+      // Try the next candidate field if this one is unsupported
+      continue;
+    }
+  }
+
+  lockCreationCache.set(key, null);
+  return null;
 }
 
 type SubgraphKey = {
@@ -316,7 +371,7 @@ export async function GET(req: NextRequest) {
       getLockDeployer(),
       getLockOwner(),
     ]);
-    const collected: any[] = [];
+    const collected: Array<{ item: any; sortKey: number; tokenId: string; contract: string }> = [];
     let lastError: string | null = null;
 
     for (const owner of addresses) {
@@ -430,11 +485,31 @@ export async function GET(req: NextRequest) {
           tokenType: null,
         };
 
-        collected.push(baseItem);
+        const creationSortValue = await getLockCreationSortKey(contractAddress);
+        const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
+          ? creationSortValue
+          : Number.MAX_SAFE_INTEGER;
+
+        collected.push({ item: baseItem, sortKey: normalizedSortKey, tokenId: tokenIdDecimal, contract: contractAddress });
       }
     }
 
-    return NextResponse.json({ nfts: collected, error: lastError });
+    const ordered = collected
+      .sort((a, b) => {
+        if (a.sortKey !== b.sortKey) return b.sortKey - a.sortKey;
+        if (a.contract !== b.contract) return a.contract.localeCompare(b.contract);
+        try {
+          const aId = BigInt(a.tokenId);
+          const bId = BigInt(b.tokenId);
+          if (aId === bId) return 0;
+          return aId > bId ? -1 : 1;
+        } catch {
+          return b.tokenId.localeCompare(a.tokenId);
+        }
+      })
+      .map((entry) => entry.item);
+
+    return NextResponse.json({ nfts: ordered, error: lastError });
   } catch (error: any) {
     console.error('NFT fetch failed:', error);
     return NextResponse.json({ nfts: [], error: error?.message || 'Unexpected error' });

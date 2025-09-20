@@ -17,6 +17,10 @@ export const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as string;
 export const UNLOCK_SUBGRAPH_URL = process.env.NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL as string | undefined;
 export const UNLOCK_SUBGRAPH_ID = process.env.UNLOCK_SUBGRAPH_ID as string | undefined;
 export const UNLOCK_SUBGRAPH_API_KEY = process.env.UNLOCK_SUBGRAPH_API_KEY as string | undefined;
+export const HIDDEN_UNLOCK_CONTRACTS = (process.env.HIDDEN_UNLOCK_CONTRACTS || '')
+  .split(',')
+  .map((addr) => addr.trim().toLowerCase())
+  .filter((addr) => addr.length > 0);
 export const LOCKSMITH_BASE_URL = process.env.NEXT_PUBLIC_LOCKSMITH_BASE || "https://locksmith.unlock-protocol.com";
 export const PRIVATE_KEY_SECRET = (process.env.PRIVATE_KEY_SECRET || "").replace(/\\n/g, "\n") as string;
 export const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN as string;

@@ -120,6 +120,27 @@ export default function Home() {
   const [creatorNftsLoading, setCreatorNftsLoading] = useState(false);
   const [creatorNftsError, setCreatorNftsError] = useState<string | null>(null);
   const [openDescriptionKey, setOpenDescriptionKey] = useState<string | null>(null);
+  const [missedNfts, setMissedNfts] = useState<Array<{
+    contractAddress: string;
+    tokenId: string;
+    title: string;
+    description: string | null;
+    subtitle?: string | null;
+    image: string | null;
+    collectionName: string | null;
+    tokenType: string | null;
+    videoUrl?: string | null;
+  }> | null>(null);
+  const [upcomingNfts, setUpcomingNfts] = useState<Array<{
+    contractAddress: string;
+    title: string;
+    description: string | null;
+    subtitle?: string | null;
+    image: string | null;
+    registrationUrl: string;
+  }> | null>(null);
+  const [showAllNfts, setShowAllNfts] = useState(false);
+  const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const nftFetchSeq = useRef(0);
@@ -319,6 +340,8 @@ export default function Home() {
         const data = await res.json();
         if (nftFetchSeq.current !== seq) return;
         setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
+        setMissedNfts(Array.isArray(data?.missed) ? data.missed : []);
+        setUpcomingNfts(Array.isArray(data?.upcoming) ? data.upcoming : []);
         setCreatorNftsError(typeof data?.error === 'string' && data.error.length ? data.error : null);
         lastFetchedAddresses.current = key;
       } catch (err: any) {
@@ -770,18 +793,97 @@ export default function Home() {
                   </div>
                 </div>
 
+                {upcomingNfts && upcomingNfts.length > 0 ? (
+                  <div className="rounded-lg border p-4 space-y-3 md:col-span-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <h2 className="text-lg font-semibold">Upcoming PGP Meetings</h2>
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={showUpcomingNfts}
+                          onChange={(e) => setShowUpcomingNfts(e.target.checked)}
+                        />
+                        Show upcoming events
+                      </label>
+                    </div>
+                    {showUpcomingNfts ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {[...upcomingNfts]
+                          .sort((a, b) => {
+                            const titleA = a.title?.toLowerCase() ?? '';
+                            const titleB = b.title?.toLowerCase() ?? '';
+                            if (titleA > titleB) return -1;
+                            if (titleA < titleB) return 1;
+                            return 0;
+                          })
+                          .map((nft) => {
+                            const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
+                            const explorerUrl = `${explorerBase}/address/${nft.contractAddress}`;
+                            return (
+                              <div key={`upcoming-${nft.contractAddress}`} className="rounded-md border bg-muted/40 p-3 space-y-2">
+                                <div className="font-medium">{nft.title}</div>
+                                {nft.description ? (
+                                  <div className="text-xs text-muted-foreground whitespace-pre-wrap">
+                                    {nft.description}
+                                  </div>
+                                ) : null}
+                                <div className="flex flex-wrap items-center gap-2 text-xs">
+                                  <a
+                                    href={explorerUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-primary hover:underline"
+                                  >
+                                    View Contract
+                                  </a>
+                                  <span className="text-muted-foreground">•</span>
+                                  <a
+                                    href={nft.registrationUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-primary hover:underline"
+                                  >
+                                    Register
+                                  </a>
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Turn on to see upcoming meetings available for registration.</p>
+                    )}
+                  </div>
+                ) : null}
+
                 {/* NFT/POAPs (placeholder) */}
                 <div className="rounded-lg border p-4 space-y-3 md:col-span-2">
                   <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-lg font-semibold">Your PGP NFT Collection</h2>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => addressesKey && loadCreatorNfts(addressesKey, true)}
-                      disabled={creatorNftsLoading || !addressesKey}
-                    >
-                      Refresh
-                    </Button>
+                    <h2 className="text-lg font-semibold">
+                      {showAllNfts ? 'All PGP NFTs' : 'Your PGP NFT Collection'}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                      {missedNfts && missedNfts.length > 0 ? (
+                        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={showAllNfts}
+                            onChange={(e) => setShowAllNfts(e.target.checked)}
+                          />
+                          Show meetings you missed
+                        </label>
+                      ) : null}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => addressesKey && loadCreatorNfts(addressesKey, true)}
+                        disabled={creatorNftsLoading || !addressesKey}
+                      >
+                        Refresh
+                      </Button>
+                    </div>
                   </div>
                   {creatorNftsLoading ? (
                     <p className="text-sm text-muted-foreground">Loading your collection…</p>
@@ -789,7 +891,24 @@ export default function Home() {
                     <p className="text-sm text-red-600 dark:text-red-400">{creatorNftsError}</p>
                   ) : creatorNfts && creatorNfts.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-2">
-                      {creatorNfts.map((nft) => {
+                      {(showAllNfts && missedNfts
+                        ? [...creatorNfts, ...missedNfts]
+                            .sort((a, b) => {
+                              const titleA = a.title?.toLowerCase() ?? '';
+                              const titleB = b.title?.toLowerCase() ?? '';
+                              if (titleA > titleB) return -1;
+                              if (titleA < titleB) return 1;
+                              const dateA = a.subtitle?.toLowerCase() ?? '';
+                              const dateB = b.subtitle?.toLowerCase() ?? '';
+                              if (dateA > dateB) return -1;
+                              if (dateA < dateB) return 1;
+                              const idA = a.tokenId?.toLowerCase() ?? '';
+                              const idB = b.tokenId?.toLowerCase() ?? '';
+                              if (idA > idB) return -1;
+                              if (idA < idB) return 1;
+                              return 0;
+                            })
+                        : creatorNfts).map((nft) => {
                         const displayId = nft.tokenId?.startsWith('0x')
                           ? (() => {
                               try {
@@ -801,6 +920,7 @@ export default function Home() {
                           : nft.tokenId;
                         const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
                         const explorerUrl = `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`;
+                        const isOwned = creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
                         const subtitle = (() => {
                           const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
                           if (!text) return null;
@@ -838,7 +958,12 @@ export default function Home() {
                         const descriptionKey = `${nft.contractAddress}-${nft.tokenId}-${nft.owner}-description`;
                         const isDescriptionOpen = openDescriptionKey === descriptionKey;
                         return (
-                          <div key={`${nft.contractAddress}-${nft.tokenId}-${nft.owner}`} className="flex gap-3 rounded-md border p-3">
+                          <div
+                            key={`${nft.contractAddress}-${nft.tokenId}-${nft.owner ?? 'missed'}`}
+                            className={`flex gap-3 rounded-md border p-3 ${
+                              isOwned ? '' : 'bg-slate-100 dark:bg-slate-800'
+                            }`}
+                          >
                             {nft.image ? (
                               <a
                                 href={explorerUrl}

@@ -7,6 +7,7 @@ import {
   UNLOCK_SUBGRAPH_URL,
   UNLOCK_SUBGRAPH_ID,
   UNLOCK_SUBGRAPH_API_KEY,
+  HIDDEN_UNLOCK_CONTRACTS,
 } from '@/lib/config';
 import unlockNetworks from '@unlock-protocol/networks';
 import { JsonRpcProvider, Contract } from 'ethers';
@@ -304,6 +305,13 @@ type SubgraphKey = {
     lockManagers?: string[] | null;
     name?: string | null;
   };
+  expiration?: string | null;
+  cancelled?: boolean | null;
+};
+
+type RelevantLock = {
+  address: string;
+  name?: string | null;
 };
 
 async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
@@ -364,6 +372,8 @@ async function fetchKeysForOwner(owner: string): Promise<SubgraphKey[]> {
           orderDirection: desc
         ) {
           tokenId
+          expiration
+          cancelled
           lock {
             address
             deployer
@@ -396,6 +406,67 @@ async function fetchKeysForOwner(owner: string): Promise<SubgraphKey[]> {
   }
 
   return results;
+}
+
+async function fetchRelevantLocks(lockDeployer: string | null, lockOwner: string | null): Promise<RelevantLock[]> {
+  if (!RESOLVED_SUBGRAPH_URL || (!lockDeployer && !lockOwner)) return [];
+  const queryParts: string[] = [];
+  const variableDecls: string[] = [];
+  const variables: Record<string, string> = {};
+  if (lockDeployer) {
+    variableDecls.push('$deployer: String!');
+    variables.deployer = lockDeployer;
+    queryParts.push(`deployerLocks: locks(first: 200, where: { deployer: $deployer }) {
+      address
+      name
+    }`);
+  }
+  if (lockOwner) {
+    variableDecls.push('$owner: String!');
+    variables.owner = lockOwner;
+    queryParts.push(`managerLocks: locks(first: 200, where: { lockManagers_contains: [$owner] }) {
+      address
+      name
+    }`);
+  }
+  if (!queryParts.length) return [];
+  const query = `query RelevantLocks(${variableDecls.join(', ')}) {
+    ${queryParts.join('\n')}
+  }`;
+  const body = JSON.stringify({ query, variables });
+  const res = await fetchSubgraph(body);
+  if (!res.ok) {
+    return [];
+  }
+  const json = await res.json();
+  const locks: RelevantLock[] = [];
+  const pushLock = (entry: any) => {
+    if (!entry) return;
+    const address = typeof entry.address === 'string' ? entry.address.toLowerCase() : null;
+    if (!address) return;
+    locks.push({ address, name: typeof entry.name === 'string' ? entry.name : null });
+  };
+  (json?.data?.deployerLocks ?? []).forEach(pushLock);
+  (json?.data?.managerLocks ?? []).forEach(pushLock);
+  return locks;
+}
+
+async function fetchSampleTokenForLock(lockAddress: string): Promise<string | null> {
+  const body = JSON.stringify({
+    query: `query LockSample($address: String!) {
+      keys(first: 1, where: { lock: $address }, orderBy: createdAtBlock, orderDirection: desc) {
+        tokenId
+      }
+    }`,
+    variables: { address: lockAddress },
+  });
+  const res = await fetchSubgraph(body);
+  if (!res.ok) {
+    return null;
+  }
+  const json = await res.json();
+  const tokenId = json?.data?.keys?.[0]?.tokenId;
+  return typeof tokenId === 'string' && tokenId.length ? tokenId : null;
 }
 
 async function getLockDeployer(): Promise<string | null> {
@@ -468,6 +539,10 @@ export async function GET(req: NextRequest) {
       getLockOwner(),
     ]);
     const collected: Array<{ item: any; sortKey: number; tokenId: string; contract: string }> = [];
+    const userContracts = new Set<string>();
+    const missed: any[] = [];
+    const upcoming: any[] = [];
+    const missedContracts = new Set<string>();
     let lastError: string | null = null;
 
     for (const owner of addresses) {
@@ -592,12 +667,29 @@ export async function GET(req: NextRequest) {
           videoUrl: youtubeLink,
         };
 
+        const expirationRaw = typeof keyData.expiration === 'string'
+          ? keyData.expiration
+          : typeof keyData.expiration === 'number'
+          ? keyData.expiration
+          : null;
+        const expiration = expirationRaw != null ? Number(expirationRaw) : null;
+        const nowSec = Math.floor(Date.now() / 1000);
+        const cancelled = Boolean(keyData.cancelled);
+        const isActive = !cancelled && (!expiration || !Number.isFinite(expiration) || expiration <= 0 || expiration > nowSec);
+
+        if (!isActive) {
+          missed.push(baseItem);
+          missedContracts.add(contractAddress);
+          continue;
+        }
+
         const creationSortValue = await getLockCreationSortKey(contractAddress);
         const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
           ? creationSortValue
           : Number.MAX_SAFE_INTEGER;
 
         collected.push({ item: baseItem, sortKey: normalizedSortKey, tokenId: tokenIdDecimal, contract: contractAddress });
+        userContracts.add(contractAddress);
       }
     }
 
@@ -616,7 +708,86 @@ export async function GET(req: NextRequest) {
       })
       .map((entry) => entry.item);
 
-    return NextResponse.json({ nfts: ordered, error: lastError });
+    try {
+      const relevantLocks = await fetchRelevantLocks(lockDeployer, lockOwner);
+      const visited = new Set<string>();
+      for (const lock of relevantLocks) {
+        const addr = lock.address.toLowerCase();
+        if (visited.has(addr)) continue;
+        visited.add(addr);
+        if (userContracts.has(addr)) continue;
+        if (missedContracts.has(addr)) continue;
+        if (addr === lockAddress) continue;
+        if (HIDDEN_UNLOCK_CONTRACTS.includes(addr)) continue;
+        const sampleTokenId = await fetchSampleTokenForLock(addr);
+        const onChainLockName = await getLockName(addr);
+        if (!sampleTokenId) {
+          const title = onChainLockName?.length
+            ? onChainLockName
+            : lock.name?.trim()?.length
+            ? lock.name
+            : 'Upcoming Meeting';
+          const registrationUrl = `https://app.unlock-protocol.com/checkout?locks[${addr}][network]=${RESOLVED_NETWORK_ID}`;
+          upcoming.push({
+            contractAddress: addr,
+            title,
+            registrationUrl,
+            description: lock.name || null,
+            image: null,
+            subtitle: null,
+          });
+          continue;
+        }
+        const metadata = await fetchLocksmithMetadata(addr, sampleTokenId);
+        if (!metadata || typeof metadata !== 'object') continue;
+        const fallbackTitle =
+          (metadata as any)?.name?.trim()?.length
+            ? (metadata as any).name
+            : lock.name?.trim()?.length
+            ? lock.name
+            : 'Untitled NFT';
+        const attributes = Array.isArray((metadata as any)?.attributes)
+          ? (metadata as any).attributes
+          : Array.isArray((metadata as any)?.metadata?.attributes)
+          ? (metadata as any).metadata.attributes
+          : [];
+        const attrSubtitle = getAttributeValue(attributes, ['subtitle', 'tagline', 'ticket_description', 'ticketDescription']);
+        const displayTitle = onChainLockName?.length ? onChainLockName : fallbackTitle;
+        const subtitleSource = attrSubtitle || (metadata as any)?.description || (metadata as any)?.metadata?.description || lock.name || null;
+        const trimmedSubtitle = subtitleSource?.trim()?.length ? subtitleSource.trim() : null;
+        const fallbackImage =
+          normalizeImageUrl((metadata as any)?.image) ||
+          normalizeImageUrl((metadata as any)?.image_url) ||
+          normalizeImageUrl((metadata as any)?.imageUrl) ||
+          normalizeImageUrl((metadata as any)?.image_uri) ||
+          normalizeImageUrl((metadata as any)?.imageUri) ||
+          normalizeImageUrl((metadata as any)?.metadata?.image) ||
+          normalizeImageUrl((metadata as any)?.metadata?.image_url) ||
+          normalizeImageUrl((metadata as any)?.metadata?.imageUrl) ||
+          normalizeImageUrl((metadata as any)?.metadata?.image_uri) ||
+          normalizeImageUrl((metadata as any)?.metadata?.imageUri) ||
+          null;
+        const youtubeLink = extractYoutubeLink(metadata as any, attributes);
+        const metadataDescription = coerceToTrimmedString((metadata as any)?.description) ?? coerceToTrimmedString((metadata as any)?.metadata?.description) ?? null;
+        missed.push({
+          owner: null,
+          contractAddress: addr,
+          tokenId: sampleTokenId,
+          title: displayTitle,
+          description: metadataDescription,
+          subtitle: trimmedSubtitle,
+          image: fallbackImage,
+          collectionName: lock.name || null,
+          tokenType: null,
+          videoUrl: youtubeLink,
+        });
+        missedContracts.add(addr);
+      }
+    } catch (err) {
+      console.error('Failed to load missed NFTs', err);
+    }
+
+    return NextResponse.json({ nfts: ordered, missed, upcoming, error: lastError });
   } catch (error: any) {
     console.error('NFT fetch failed:', error);
     return NextResponse.json({ nfts: [], error: error?.message || 'Unexpected error' });

@@ -137,7 +137,7 @@ Protecting API routes
 - Rollbacks & retries: from the Amplify Console, redeploy a previous successful build or retry a failed one without a new commit.
 - IAM & permissions: ensure the Amplify service role has access to required AWS resources (S3/CloudFront for assets, DynamoDB for NextAuth, SES for email).
 
-### Step 5: Configure Origin Access Control (OAC)
+### Configure Origin Access Control (OAC)
 1. **Create OAC Policy** in CloudFront console:
    ```bash
    aws cloudfront create-cloud-front-origin-access-control \

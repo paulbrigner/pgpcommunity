@@ -24,10 +24,16 @@ export const HIDDEN_UNLOCK_CONTRACTS = (process.env.HIDDEN_UNLOCK_CONTRACTS || '
 export const CHECKOUT_CONFIGS = (() => {
   const map: Record<string, string> = {};
   const raw = process.env.CHECKOUT_CONFIGS || '';
-  for (const entry of raw.split(',').map((part) => part.trim()).filter(Boolean)) {
-    const [addr, id] = entry.split(':').map((part) => part.trim());
-    if (addr && id) {
-      map[addr.toLowerCase()] = id;
+  for (const entry of raw
+    .split(/[\n;]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)) {
+    const separatorIndex = entry.indexOf(':');
+    if (separatorIndex === -1) continue;
+    const addr = entry.slice(0, separatorIndex).trim();
+    const value = entry.slice(separatorIndex + 1).trim();
+    if (addr && value) {
+      map[addr.toLowerCase()] = value;
     }
   }
   return map;

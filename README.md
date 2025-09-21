@@ -72,10 +72,10 @@ EMAIL_FROM=PGP Community <no-reply@your-domain>
 `CHECKOUT_CONFIGS` format example:
 
 ```
-CHECKOUT_CONFIGS=0x1111111111111111111111111111111111111111:be523382-e9e9-4f87-8192-81b2f92a8088,0x2222222222222222222222222222222222222222:7837877f-6562-4fe5-bd30-c63779abed2a
+CHECKOUT_CONFIGS=0x1111111111111111111111111111111111111111:{"locks":{"0x1111111111111111111111111111111111111111":{"network":8453}},"title":"Register"};0x2222222222222222222222222222222222222222:{"locks":{"0x2222222222222222222222222222222222222222":{"network":8453}},"title":"Register"}
 ```
 
-Each pair maps a lock address to its Unlock checkout configuration ID. The app uses the mapping to offer a “Quick Register” dialog while leaving the event-detail link untouched.
+Each pair maps a lock address to a JSON Paywall config snippet (as a single-line JSON string). Separate pairs with semicolons. The app merges this with sensible defaults (network, order, etc.) when launching the in-page paywall modal. If an address is omitted, a default config is generated automatically.
 
 Notes:
 - Ensure these server-only env vars are set in Amplify build/deploy environment (not exposed to the client).

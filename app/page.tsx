@@ -142,11 +142,10 @@ export default function Home() {
     location?: string | null;
     image: string | null;
     registrationUrl: string;
-    quickCheckoutUrl: string | null;
+    quickCheckoutConfig: Record<string, unknown> | null;
   }> | null>(null);
   const [showAllNfts, setShowAllNfts] = useState(false);
   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
-  const [quickCheckoutUrl, setQuickCheckoutUrl] = useState<string | null>(null);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const nftFetchSeq = useRef(0);
@@ -184,6 +183,17 @@ export default function Home() {
       },
     });
   }, []);
+
+  const handleQuickRegister = useCallback(
+    async (checkoutConfig: Record<string, unknown>) => {
+      try {
+        await paywall.loadCheckoutModal(checkoutConfig);
+      } catch (err) {
+        console.error('Quick register failed', err);
+      }
+    },
+    [paywall]
+  );
 
   // Ensure wallet is on Base before any post‑purchase approvals
   const ensureBaseNetwork = async (eth: any) => {
@@ -360,7 +370,7 @@ export default function Home() {
                 location: nft.location ?? null,
                 image: nft.image ?? null,
                 registrationUrl: String(nft.registrationUrl ?? ''),
-                quickCheckoutUrl: nft.quickCheckoutUrl ?? null,
+                quickCheckoutConfig: nft.quickCheckoutConfig ?? null,
               }))
             : []
         );
@@ -603,29 +613,6 @@ export default function Home() {
 
   return (
     <div className="mx-auto p-6 space-y-6">
-      <AlertDialog open={!!quickCheckoutUrl} onOpenChange={(open) => { if (!open) setQuickCheckoutUrl(null); }}>
-        <AlertDialogContent className="max-w-3xl">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Quick Registration</AlertDialogTitle>
-            <AlertDialogDescription>
-              Complete your registration without leaving this page.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {quickCheckoutUrl ? (
-            <iframe
-              key={quickCheckoutUrl}
-              src={quickCheckoutUrl}
-              title="Unlock Protocol Checkout"
-              className="h-[600px] w-full rounded-md border"
-              loading="lazy"
-              allow="payment"
-            />
-          ) : null}
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setQuickCheckoutUrl(null)}>Close</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
       <h1 className="text-3xl md:text-4xl font-bold text-center">
         PGP for Crypto Community
       </h1>
@@ -900,12 +887,12 @@ export default function Home() {
                                     >
                                       View event details
                                     </a>
-                                    {nft.quickCheckoutUrl ? (
+                                    {nft.quickCheckoutConfig ? (
                                       <Button
                                         size="sm"
                                         variant="secondary"
                                         className="text-xs"
-                                        onClick={() => setQuickCheckoutUrl(nft.quickCheckoutUrl as string)}
+                                        onClick={() => handleQuickRegister(nft.quickCheckoutConfig as Record<string, unknown>)}
                                       >
                                         Quick Register
                                       </Button>

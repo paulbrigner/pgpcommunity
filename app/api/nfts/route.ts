@@ -741,9 +741,18 @@ export async function GET(req: NextRequest) {
         if (missedContracts.has(addr)) continue;
         if (addr === lockAddress) continue;
         if (HIDDEN_UNLOCK_CONTRACTS.includes(addr)) continue;
+        const overrideCheckoutConfigRaw = CHECKOUT_CONFIGS[addr];
+        let overrideCheckoutConfig: any = null;
+        if (overrideCheckoutConfigRaw) {
+          try {
+            overrideCheckoutConfig = JSON.parse(overrideCheckoutConfigRaw);
+          } catch {
+            overrideCheckoutConfig = null;
+          }
+        }
+
         const sampleTokenId = await fetchSampleTokenForLock(addr);
         const onChainLockName = await getLockName(addr);
-        const overrideCheckoutId = CHECKOUT_CONFIGS[addr];
         if (!sampleTokenId) {
           const lockMetadata = await fetchLockMetadata(addr);
           const slug = coerceToTrimmedString(lockMetadata?.slug);
@@ -759,6 +768,20 @@ export async function GET(req: NextRequest) {
           const timezone = coerceToTrimmedString(lockMetadata?.ticket?.event_timezone);
           const location = coerceToTrimmedString(lockMetadata?.ticket?.event_location || lockMetadata?.ticket?.event_address);
           const imageUrl = normalizeImageUrl(lockMetadata?.image) || null;
+          const quickCheckoutConfig = overrideCheckoutConfig
+            ? {
+                ...overrideCheckoutConfig,
+                locks: {
+                  ...(overrideCheckoutConfig?.locks || {}),
+                  [addr]: {
+                    network: RESOLVED_NETWORK_ID,
+                    order: 0,
+                    ...(overrideCheckoutConfig?.locks?.[addr] || {}),
+                  },
+                },
+              }
+            : null;
+
           upcoming.push({
             contractAddress: addr,
             title,
@@ -770,7 +793,7 @@ export async function GET(req: NextRequest) {
             timezone,
             location,
             image: imageUrl,
-            quickCheckoutUrl: overrideCheckoutId ? `https://app.unlock-protocol.com/checkout?id=${overrideCheckoutId}` : null,
+            quickCheckoutConfig,
           });
           continue;
         }

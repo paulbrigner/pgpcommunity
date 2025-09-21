@@ -315,6 +315,51 @@ type RelevantLock = {
   name?: string | null;
 };
 
+type EventDetails = {
+  subtitle: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  timezone: string | null;
+  location: string | null;
+};
+
+function extractEventDetails(metadata: any, fallbackName: string | null): EventDetails {
+  const subtitle = coerceToTrimmedString(
+    metadata?.ticket?.event_start_date ||
+      metadata?.metadata?.ticket?.event_start_date ||
+      metadata?.event_start_date ||
+      metadata?.metadata?.event_start_date
+  ) || null;
+  const startTime = coerceToTrimmedString(
+    metadata?.ticket?.event_start_time ||
+      metadata?.metadata?.ticket?.event_start_time ||
+      metadata?.event_start_time ||
+      metadata?.metadata?.event_start_time
+  ) || null;
+  const endTime = coerceToTrimmedString(
+    metadata?.ticket?.event_end_time ||
+      metadata?.metadata?.ticket?.event_end_time ||
+      metadata?.event_end_time ||
+      metadata?.metadata?.event_end_time
+  ) || null;
+  const timezone = coerceToTrimmedString(
+    metadata?.ticket?.event_timezone ||
+      metadata?.metadata?.ticket?.event_timezone ||
+      metadata?.event_timezone ||
+      metadata?.metadata?.event_timezone
+  ) || null;
+  const location = coerceToTrimmedString(
+    metadata?.ticket?.event_location ||
+      metadata?.ticket?.event_address ||
+      metadata?.metadata?.ticket?.event_location ||
+      metadata?.metadata?.ticket?.event_address ||
+      metadata?.event_location ||
+      metadata?.event_address
+  ) || fallbackName || null;
+
+  return { subtitle, startTime, endTime, timezone, location };
+}
+
 async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
   const key = `${lockAddress}:${tokenId}`;
   if (locksmithMetadataCache.has(key)) {
@@ -676,18 +721,42 @@ export async function GET(req: NextRequest) {
 
         const youtubeLink = extractYoutubeLink(locksmithMetadata, attributes);
 
+        const eventDetails = extractEventDetails(
+          {
+            ticket: locksmithMetadata?.ticket,
+            metadata: locksmithMetadata?.metadata,
+            event_start_date: locksmithMetadata?.event_start_date,
+            event_start_time: locksmithMetadata?.event_start_time,
+            event_end_time: locksmithMetadata?.event_end_time,
+            event_timezone: locksmithMetadata?.event_timezone,
+            event_location: locksmithMetadata?.event_location,
+            event_address: locksmithMetadata?.event_address,
+          },
+          keyData.lock?.name?.trim() || null
+        );
+
         const baseItem = {
           owner,
           contractAddress,
           tokenId: tokenIdDecimal,
           title: displayTitle,
           description: metadataDescription,
-          subtitle: trimmedSubtitle,
+          subtitle: eventDetails.subtitle || trimmedSubtitle,
+          eventDate: eventDetails.subtitle,
+          startTime: eventDetails.startTime,
+          endTime: eventDetails.endTime,
+          timezone: eventDetails.timezone,
+          location: eventDetails.location,
           image: fallbackImage,
           collectionName: fallbackCollection,
           tokenType: null,
           videoUrl: youtubeLink,
         };
+
+        const creationSortValue = await getLockCreationSortKey(contractAddress);
+        const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
+          ? creationSortValue
+          : Number.MAX_SAFE_INTEGER;
 
         const expirationRaw = typeof keyData.expiration === 'string'
           ? keyData.expiration
@@ -700,17 +769,12 @@ export async function GET(req: NextRequest) {
         const isActive = !cancelled && (!expiration || !Number.isFinite(expiration) || expiration <= 0 || expiration > nowSec);
 
         if (!isActive) {
-          missed.push(baseItem);
+          missed.push({ ...baseItem, sortKey: normalizedSortKey });
           missedContracts.add(contractAddress);
           continue;
         }
 
-        const creationSortValue = await getLockCreationSortKey(contractAddress);
-        const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
-          ? creationSortValue
-          : Number.MAX_SAFE_INTEGER;
-
-        collected.push({ item: baseItem, sortKey: normalizedSortKey, tokenId: tokenIdDecimal, contract: contractAddress });
+        collected.push({ item: { ...baseItem, sortKey: normalizedSortKey }, sortKey: normalizedSortKey, tokenId: tokenIdDecimal, contract: contractAddress });
         userContracts.add(contractAddress);
       }
     }
@@ -741,6 +805,8 @@ export async function GET(req: NextRequest) {
         if (missedContracts.has(addr)) continue;
         if (addr === lockAddress) continue;
         if (HIDDEN_UNLOCK_CONTRACTS.includes(addr)) continue;
+        const sampleTokenId = await fetchSampleTokenForLock(addr);
+        const onChainLockName = await getLockName(addr);
         const overrideCheckoutConfigRaw = CHECKOUT_CONFIGS[addr];
         let overrideCheckoutConfig: any = null;
         if (overrideCheckoutConfigRaw) {
@@ -751,8 +817,6 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        const sampleTokenId = await fetchSampleTokenForLock(addr);
-        const onChainLockName = await getLockName(addr);
         if (!sampleTokenId) {
           const lockMetadata = await fetchLockMetadata(addr);
           const slug = coerceToTrimmedString(lockMetadata?.slug);
@@ -782,6 +846,11 @@ export async function GET(req: NextRequest) {
               }
             : null;
 
+          const creationSortValue = await getLockCreationSortKey(addr);
+          const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
+            ? creationSortValue
+            : Number.MAX_SAFE_INTEGER;
+
           upcoming.push({
             contractAddress: addr,
             title,
@@ -793,8 +862,10 @@ export async function GET(req: NextRequest) {
             timezone,
             location,
             image: imageUrl,
-            quickCheckoutConfig,
-          });
+          quickCheckoutConfig,
+          eventDate: subtitle,
+          sortKey: normalizedSortKey,
+        });
           continue;
         }
         const metadata = await fetchLocksmithMetadata(addr, sampleTokenId);
@@ -828,17 +899,41 @@ export async function GET(req: NextRequest) {
           null;
         const youtubeLink = extractYoutubeLink(metadata as any, attributes);
         const metadataDescription = coerceToTrimmedString((metadata as any)?.description) ?? coerceToTrimmedString((metadata as any)?.metadata?.description) ?? null;
+        const creationSortValue = await getLockCreationSortKey(addr);
+        const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
+          ? creationSortValue
+          : Number.MAX_SAFE_INTEGER;
+        const eventDetails = extractEventDetails(
+          {
+            ticket: (metadata as any)?.ticket,
+            metadata: (metadata as any)?.metadata,
+            event_start_date: (metadata as any)?.event_start_date,
+            event_start_time: (metadata as any)?.event_start_time,
+            event_end_time: (metadata as any)?.event_end_time,
+            event_timezone: (metadata as any)?.event_timezone,
+            event_location: (metadata as any)?.event_location,
+            event_address: (metadata as any)?.event_address,
+          },
+          lock.name?.trim() || null
+        );
+
         missed.push({
           owner: null,
           contractAddress: addr,
           tokenId: sampleTokenId,
           title: displayTitle,
           description: metadataDescription,
-          subtitle: trimmedSubtitle,
+          subtitle: eventDetails.subtitle || trimmedSubtitle,
+          eventDate: eventDetails.subtitle,
+          startTime: eventDetails.startTime,
+          endTime: eventDetails.endTime,
+          timezone: eventDetails.timezone,
+          location: eventDetails.location,
           image: fallbackImage,
           collectionName: lock.name || null,
           tokenType: null,
           videoUrl: youtubeLink,
+          sortKey: normalizedSortKey,
         });
         missedContracts.add(addr);
       }

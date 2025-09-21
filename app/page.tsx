@@ -10,6 +10,8 @@ import { networks } from "@unlock-protocol/networks";
 import { BrowserProvider, Contract, JsonRpcProvider } from "ethers";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { DateTime } from "luxon";
+import { createEvent } from "ics";
 import {
   LOCK_ADDRESS,
   BASE_NETWORK_ID,
@@ -44,6 +46,119 @@ const stripMarkdown = (value: string): string => {
     .replace(/^-\s+/gm, '')
     .replace(/\r?\n\r?\n/g, '\n')
     .trim();
+};
+
+const formatEventDisplay = (
+  date?: string | null,
+  startTime?: string | null,
+  endTime?: string | null,
+  timezone?: string | null
+) => {
+  if (!date) return { dateLabel: null, timeLabel: null };
+  const zone = timezone || 'UTC';
+  const dateObj = DateTime.fromISO(date, { zone });
+  const dateLabel = dateObj.isValid
+    ? dateObj.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)
+    : date;
+
+  let timeLabel: string | null = null;
+  if (startTime) {
+    const startDateTime = DateTime.fromISO(`${date}T${startTime}`, { zone });
+    const startLabel = startDateTime.isValid
+      ? startDateTime.toLocaleString(DateTime.TIME_SIMPLE)
+      : startTime;
+    if (endTime) {
+      const endDateTime = DateTime.fromISO(`${date}T${endTime}`, { zone });
+      const endLabel = endDateTime.isValid
+        ? endDateTime.toLocaleString(DateTime.TIME_SIMPLE)
+        : endTime;
+      timeLabel = `${startLabel} - ${endLabel}`;
+    } else {
+      timeLabel = startLabel;
+    }
+    if (timeLabel && timezone) {
+      timeLabel = `${timeLabel} (${timezone})`;
+    }
+  } else if (endTime) {
+    const endDateTime = DateTime.fromISO(`${date}T${endTime}`, { zone });
+    const endLabel = endDateTime.isValid
+      ? endDateTime.toLocaleString(DateTime.TIME_SIMPLE)
+      : endTime;
+    timeLabel = `Ends at ${endLabel}${timezone ? ` (${timezone})` : ''}`;
+  }
+
+  return { dateLabel, timeLabel };
+};
+
+const buildCalendarLinks = (
+  title: string,
+  date?: string | null,
+  startTime?: string | null,
+  endTime?: string | null,
+  timezone?: string | null,
+  location?: string | null,
+  description?: string | null
+) => {
+  if (!date) return { google: null as string | null, ics: null as string | null };
+
+  const zone = timezone || 'UTC';
+  const start = startTime
+    ? DateTime.fromISO(`${date}T${startTime}`, { zone })
+    : DateTime.fromISO(date, { zone }).startOf('day');
+  if (!start.isValid) {
+    return { google: null, ics: null };
+  }
+
+  const end = endTime
+    ? DateTime.fromISO(`${date}T${endTime}`, { zone })
+    : start.plus({ hours: startTime ? 1 : 24 });
+
+  const googleParams = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: title,
+    details: description || '',
+    location: location || '',
+  });
+
+  const startGoogle = start.toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'");
+  const endGoogle = end.isValid ? end.toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'") : start.plus({ hours: 1 }).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'");
+  googleParams.set('dates', `${startGoogle}/${endGoogle}`);
+
+  let ics: string | null = null;
+  const eventConfig: any = {
+    title,
+    start: [start.year, start.month, start.day, start.hour, start.minute],
+    location: location || undefined,
+    description: description || undefined,
+    productId: 'pgpforcrypto.org',
+  };
+
+  if (end.isValid) {
+    eventConfig.end = [end.year, end.month, end.day, end.hour, end.minute];
+  }
+
+  const { error, value } = createEvent(eventConfig);
+  if (!error && value) {
+    ics = value;
+  }
+
+  return {
+    google: `https://calendar.google.com/calendar/render?${googleParams.toString()}`,
+    ics,
+  };
+};
+
+const downloadIcs = (ics: string, title: string) => {
+  const blob = new Blob([ics], { type: 'text/calendar' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const safeTitle = title.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
+  link.href = url;
+  link.download = `${safeTitle || 'event'}.ics`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 const PAYWALL_CONFIG = {
@@ -106,36 +221,50 @@ export default function Home() {
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
   const [creatorNfts, setCreatorNfts] = useState<Array<{
-    owner: string;
+    owner: string | null;
     contractAddress: string;
     tokenId: string;
     title: string;
     description: string | null;
     subtitle?: string | null;
+    eventDate?: string | null;
+    startTime?: string | null;
+    endTime?: string | null;
+    timezone?: string | null;
+    location?: string | null;
     image: string | null;
     collectionName: string | null;
     tokenType: string | null;
     videoUrl?: string | null;
+    sortKey?: number;
   }> | null>(null);
   const [creatorNftsLoading, setCreatorNftsLoading] = useState(false);
   const [creatorNftsError, setCreatorNftsError] = useState<string | null>(null);
   const [openDescriptionKey, setOpenDescriptionKey] = useState<string | null>(null);
   const [missedNfts, setMissedNfts] = useState<Array<{
+    owner: string | null;
     contractAddress: string;
     tokenId: string;
     title: string;
     description: string | null;
     subtitle?: string | null;
+    eventDate?: string | null;
+    startTime?: string | null;
+    endTime?: string | null;
+    timezone?: string | null;
+    location?: string | null;
     image: string | null;
     collectionName: string | null;
     tokenType: string | null;
     videoUrl?: string | null;
+    sortKey?: number;
   }> | null>(null);
   const [upcomingNfts, setUpcomingNfts] = useState<Array<{
     contractAddress: string;
     title: string;
     description: string | null;
     subtitle?: string | null;
+    eventDate?: string | null;
     startTime?: string | null;
     endTime?: string | null;
     timezone?: string | null;
@@ -143,6 +272,7 @@ export default function Home() {
     image: string | null;
     registrationUrl: string;
     quickCheckoutConfig: Record<string, unknown> | null;
+    sortKey?: number;
   }> | null>(null);
   const [showAllNfts, setShowAllNfts] = useState(false);
   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
@@ -184,15 +314,66 @@ export default function Home() {
     });
   }, []);
 
+  const loadCreatorNfts = useCallback(
+    async (key: string, force = false) => {
+      if (!key) return;
+      if (!force && lastFetchedAddresses.current === key) {
+        return;
+      }
+      const seq = ++nftFetchSeq.current;
+      setCreatorNftsLoading(true);
+      setCreatorNftsError(null);
+      try {
+        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(key)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (nftFetchSeq.current !== seq) return;
+        setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
+        setMissedNfts(Array.isArray(data?.missed) ? data.missed : []);
+        setUpcomingNfts(
+          Array.isArray(data?.upcoming)
+            ? data.upcoming.map((nft: any) => ({
+                contractAddress: String(nft.contractAddress),
+                title: String(nft.title ?? ''),
+                description: nft.description ?? null,
+                subtitle: nft.subtitle ?? null,
+                startTime: nft.startTime ?? null,
+                endTime: nft.endTime ?? null,
+                timezone: nft.timezone ?? null,
+                location: nft.location ?? null,
+                image: nft.image ?? null,
+                registrationUrl: String(nft.registrationUrl ?? ''),
+                quickCheckoutConfig: nft.quickCheckoutConfig ?? null,
+              }))
+            : []
+        );
+        setCreatorNftsError(typeof data?.error === 'string' && data.error.length ? data.error : null);
+        lastFetchedAddresses.current = key;
+      } catch (err: any) {
+        if (nftFetchSeq.current !== seq) return;
+        setCreatorNftsError(err?.message || 'Failed to load NFTs');
+        setCreatorNfts([]);
+        lastFetchedAddresses.current = key;
+      } finally {
+        if (nftFetchSeq.current === seq) {
+          setCreatorNftsLoading(false);
+        }
+      }
+    },
+    []
+  );
+
   const handleQuickRegister = useCallback(
     async (checkoutConfig: Record<string, unknown>) => {
       try {
         await paywall.loadCheckoutModal(checkoutConfig);
+        if (addressesKey) {
+          await loadCreatorNfts(addressesKey, true);
+        }
       } catch (err) {
         console.error('Quick register failed', err);
       }
     },
-    [paywall]
+    [paywall, addressesKey, loadCreatorNfts]
   );
 
   // Ensure wallet is on Base before any post‑purchase approvals
@@ -341,55 +522,6 @@ export default function Home() {
     addressesKey,
     refreshMembership,
   ]);
-
-  const loadCreatorNfts = useCallback(
-    async (key: string, force = false) => {
-      if (!key) return;
-      if (!force && lastFetchedAddresses.current === key) {
-        return;
-      }
-      const seq = ++nftFetchSeq.current;
-      setCreatorNftsLoading(true);
-      setCreatorNftsError(null);
-      try {
-        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(key)}`, { cache: 'no-store' });
-        const data = await res.json();
-        if (nftFetchSeq.current !== seq) return;
-        setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
-        setMissedNfts(Array.isArray(data?.missed) ? data.missed : []);
-        setUpcomingNfts(
-          Array.isArray(data?.upcoming)
-            ? data.upcoming.map((nft: any) => ({
-                contractAddress: String(nft.contractAddress),
-                title: String(nft.title ?? ''),
-                description: nft.description ?? null,
-                subtitle: nft.subtitle ?? null,
-                startTime: nft.startTime ?? null,
-                endTime: nft.endTime ?? null,
-                timezone: nft.timezone ?? null,
-                location: nft.location ?? null,
-                image: nft.image ?? null,
-                registrationUrl: String(nft.registrationUrl ?? ''),
-                quickCheckoutConfig: nft.quickCheckoutConfig ?? null,
-              }))
-            : []
-        );
-        setCreatorNftsError(typeof data?.error === 'string' && data.error.length ? data.error : null);
-        lastFetchedAddresses.current = key;
-      } catch (err: any) {
-        if (nftFetchSeq.current !== seq) return;
-        setCreatorNftsError(err?.message || 'Failed to load NFTs');
-        setCreatorNfts([]);
-        lastFetchedAddresses.current = key;
-      } finally {
-        if (nftFetchSeq.current === seq) {
-          setCreatorNftsLoading(false);
-        }
-      }
-    },
-    []
-  );
-
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active') {
       setAutoRenewMonths(null);
@@ -935,19 +1067,39 @@ export default function Home() {
                     <div className="grid gap-3 sm:grid-cols-2">
                       {(showAllNfts && missedNfts
                         ? [...creatorNfts, ...missedNfts]
+                            .map((nft) => {
+                              const sortValue = (() => {
+                                if (typeof nft.sortKey === 'number' && Number.isFinite(nft.sortKey)) {
+                                  return nft.sortKey;
+                                }
+                                if (nft.startTime && nft.subtitle) {
+                                  const parsed = Date.parse(`${nft.subtitle} ${nft.startTime}`);
+                                  if (Number.isFinite(parsed)) return parsed;
+                                }
+                                if (nft.subtitle) {
+                                  const parsed = Date.parse(nft.subtitle);
+                                  if (Number.isFinite(parsed)) return parsed;
+                                }
+                                if (nft.tokenId) {
+                                  const parsed = Number(nft.tokenId);
+                                  if (Number.isFinite(parsed)) return parsed;
+                                }
+                                return 0;
+                              })();
+                              return { ...nft, sortKey: sortValue };
+                            })
                             .sort((a, b) => {
-                              const titleA = a.title?.toLowerCase() ?? '';
-                              const titleB = b.title?.toLowerCase() ?? '';
+                              if ((a.sortKey ?? 0) !== (b.sortKey ?? 0)) {
+                                return (b.sortKey ?? 0) - (a.sortKey ?? 0);
+                              }
+                              const titleA = (a.title ?? '').toLowerCase();
+                              const titleB = (b.title ?? '').toLowerCase();
                               if (titleA > titleB) return -1;
                               if (titleA < titleB) return 1;
-                              const dateA = a.subtitle?.toLowerCase() ?? '';
-                              const dateB = b.subtitle?.toLowerCase() ?? '';
-                              if (dateA > dateB) return -1;
-                              if (dateA < dateB) return 1;
-                              const idA = a.tokenId?.toLowerCase() ?? '';
-                              const idB = b.tokenId?.toLowerCase() ?? '';
-                              if (idA > idB) return -1;
-                              if (idA < idB) return 1;
+                              const tokenA = (a.tokenId ?? '').toString().toLowerCase();
+                              const tokenB = (b.tokenId ?? '').toString().toLowerCase();
+                              if (tokenA > tokenB) return -1;
+                              if (tokenA < tokenB) return 1;
                               return 0;
                             })
                         : creatorNfts).map((nft) => {
@@ -965,40 +1117,97 @@ export default function Home() {
                           ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
                           : `${explorerBase}/address/${nft.contractAddress}`;
                         const isOwned = creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
-                        const subtitle = (() => {
-                          const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
-                          if (!text) return null;
-                          const normalizedTitle = nft.title?.trim().toLowerCase();
-                          const normalizedText = text.toLowerCase();
-                          if (normalizedTitle && normalizedTitle === normalizedText) return null;
-                          if (text.length > 80) return null;
-                          return text;
+                        const eventStart = (() => {
+                          if (!nft.eventDate) return null;
+                          const zone = nft.timezone || 'UTC';
+                          const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
+                          if (rawDate.isValid) {
+                            if (nft.startTime) {
+                              const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
+                              if (combined.isValid) return combined;
+                            }
+                            if (String(nft.eventDate).includes('T')) {
+                              return rawDate;
+                            }
+                            return rawDate.endOf('day');
+                          }
+                          if (nft.startTime) {
+                            const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
+                            if (fallback.isValid) return fallback;
+                          }
+                          return null;
                         })();
-                        const shortenedDescription = (() => {
-                          const source = (() => {
-                            const desc = nft.description?.trim();
-                            if (desc && desc.length) return desc;
-                            const sub = nft.subtitle?.trim();
-                            if (sub && sub.length) return sub;
-                            const collection = nft.collectionName?.trim();
-                            if (collection && collection.length) return collection;
-                            return '';
-                          })();
-                          if (!source) return null;
-                          const plain = stripMarkdown(source);
-                          if (!plain) return null;
-                          const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
-                          const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
-                            // Avoid wrapping existing markdown links
-                            const before = str.slice(0, offset + prefix.length);
-                            if (/\[[^\]]*$/.test(before)) return match;
-                            return `${prefix}[${url}](${url})`;
-                          });
-                          return {
-                            preview,
-                            fullMarkdown: enrichedMarkdown,
-                          } as const;
+                        const futureTimeMs = (() => {
+                          if (eventStart) return eventStart.toUTC().toMillis();
+                          const dateParsed = nft.eventDate ? Date.parse(String(nft.eventDate)) : NaN;
+                          if (Number.isFinite(dateParsed)) return dateParsed;
+                          const subtitleParsed = nft.subtitle ? Date.parse(String(nft.subtitle)) : NaN;
+                          if (Number.isFinite(subtitleParsed)) return subtitleParsed;
+                          return null;
                         })();
+                        const isFutureMeeting = typeof futureTimeMs === 'number' && futureTimeMs > Date.now();
+                        const isUpcomingRegistration = isFutureMeeting && isOwned;
+                        const eventLabels = formatEventDisplay(
+                          nft.eventDate,
+                          nft.startTime,
+                          nft.endTime,
+                          nft.timezone
+                        );
+                        const showEventDetails = isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
+                        const calendarLinks = showEventDetails
+                          ? buildCalendarLinks(
+                              nft.title ?? 'PGP Event',
+                              nft.eventDate,
+                              nft.startTime,
+                              nft.endTime,
+                              nft.timezone,
+                              nft.location,
+                              nft.description ?? null
+                            )
+                          : { google: null, ics: null };
+                        const subtitle = showEventDetails
+                          ? null
+                          : (() => {
+                              const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
+                              if (!text) return null;
+                              const normalizedTitle = nft.title?.trim().toLowerCase();
+                              const normalizedText = text.toLowerCase();
+                              if (normalizedTitle && normalizedTitle === normalizedText) return null;
+                              if (text.length > 80) return null;
+                              return text;
+                            })();
+                        const shortenedDescription = showEventDetails
+                          ? null
+                          : (() => {
+                              const source = (() => {
+                                const desc = nft.description?.trim();
+                                if (desc && desc.length) return desc;
+                                const sub = nft.subtitle?.trim();
+                                if (sub && sub.length) return sub;
+                                const collection = nft.collectionName?.trim();
+                                if (collection && collection.length) return collection;
+                                return '';
+                              })();
+                              if (!source) return null;
+                              const plain = stripMarkdown(source);
+                              if (!plain) return null;
+                              const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
+                              const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
+                                // Avoid wrapping existing markdown links
+                                const before = str.slice(0, offset + prefix.length);
+                                if (/\[[^\]]*$/.test(before)) return match;
+                                return `${prefix}[${url}](${url})`;
+                              });
+                              return {
+                                preview,
+                                fullMarkdown: enrichedMarkdown,
+                              } as const;
+                            })();
+                        const handleDownloadIcs = () => {
+                          if (calendarLinks.ics) {
+                            downloadIcs(calendarLinks.ics, nft.title || 'PGP Event');
+                          }
+                        };
                         const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
                         const tokenIdKey = nft.tokenId ?? 'upcoming';
                         const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
@@ -1007,7 +1216,11 @@ export default function Home() {
                           <div
                             key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
                             className={`flex gap-3 rounded-md border p-3 ${
-                              isOwned ? '' : 'bg-slate-100 dark:bg-slate-800/40'
+                              isUpcomingRegistration
+                                ? 'bg-amber-50 border-amber-300 dark:bg-amber-900/20 dark:border-amber-600'
+                                : isOwned
+                                ? ''
+                                : 'bg-slate-100 dark:bg-slate-800/40'
                             }`}
                           >
                             {nft.image ? (
@@ -1029,12 +1242,53 @@ export default function Home() {
                               />
                             )}
                             <div className="min-w-0 space-y-1">
-                              <div className="font-medium truncate">{nft.title}</div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <div className="font-medium truncate max-w-full">{nft.title}</div>
+                                {isUpcomingRegistration ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-100">
+                                    <BadgeCheck className="h-3 w-3" /> You&apos;re Registered!
+                                  </span>
+                                ) : null}
+                              </div>
                               {subtitle ? (
                                 <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
                               ) : null}
                               {displayId ? (
                                 <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
+                              ) : null}
+                              {showEventDetails ? (
+                                <div className="space-y-1 text-xs text-muted-foreground">
+                                  {eventLabels.dateLabel ? <div>Date: {eventLabels.dateLabel}</div> : null}
+                                  {eventLabels.timeLabel ? <div>Time: {eventLabels.timeLabel}</div> : null}
+                                  {nft.location ? (
+                                    <div className="whitespace-pre-wrap">Location: {nft.location}</div>
+                                  ) : null}
+                                  {(calendarLinks.google || calendarLinks.ics) ? (
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      {calendarLinks.google ? (
+                                        <Button asChild size="sm" variant="secondary">
+                                          <a
+                                            href={calendarLinks.google}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                          >
+                                            Add to Google Calendar
+                                          </a>
+                                        </Button>
+                                      ) : null}
+                                      {calendarLinks.ics ? (
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="secondary"
+                                          onClick={handleDownloadIcs}
+                                        >
+                                          Download .ics
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  ) : null}
+                                </div>
                               ) : null}
                               {shortenedDescription ? (
                                 <div className="text-xs text-muted-foreground">

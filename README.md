@@ -43,6 +43,8 @@ CLOUDFRONT_DOMAIN=assets.pgpforcrypto.org
 KEY_PAIR_ID=KERO2MLM81YXV
 UNLOCK_SUBGRAPH_ID=
 UNLOCK_SUBGRAPH_API_KEY=
+HIDDEN_UNLOCK_CONTRACTS=
+CHECKOUT_CONFIGS=
 PRIVATE_KEY_SECRET='-----BEGIN RSA PRIVATE KEY-----...'
 REGION_AWS=us-east-1
 
@@ -66,6 +68,14 @@ EMAIL_FROM=PGP Community <no-reply@your-domain>
 # Option B: Single SMTP URL (must URL-encode username/password if they contain special chars)
  # EMAIL_SERVER=smtp://SMTP_USER:SMTP_PASS@email-smtp.us-east-1.amazonaws.com:587
 ```
+
+`CHECKOUT_CONFIGS` format example:
+
+```
+CHECKOUT_CONFIGS=0x1111111111111111111111111111111111111111:be523382-e9e9-4f87-8192-81b2f92a8088,0x2222222222222222222222222222222222222222:7837877f-6562-4fe5-bd30-c63779abed2a
+```
+
+Each pair maps a lock address to its Unlock checkout configuration ID. The app uses the mapping to offer a “Quick Register” dialog while leaving the event-detail link untouched.
 
 Notes:
 - Ensure these server-only env vars are set in Amplify build/deploy environment (not exposed to the client).

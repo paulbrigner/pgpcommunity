@@ -21,6 +21,17 @@ export const HIDDEN_UNLOCK_CONTRACTS = (process.env.HIDDEN_UNLOCK_CONTRACTS || '
   .split(',')
   .map((addr) => addr.trim().toLowerCase())
   .filter((addr) => addr.length > 0);
+export const CHECKOUT_CONFIGS = (() => {
+  const map: Record<string, string> = {};
+  const raw = process.env.CHECKOUT_CONFIGS || '';
+  for (const entry of raw.split(',').map((part) => part.trim()).filter(Boolean)) {
+    const [addr, id] = entry.split(':').map((part) => part.trim());
+    if (addr && id) {
+      map[addr.toLowerCase()] = id;
+    }
+  }
+  return map;
+})();
 export const LOCKSMITH_BASE_URL = process.env.NEXT_PUBLIC_LOCKSMITH_BASE || "https://locksmith.unlock-protocol.com";
 export const PRIVATE_KEY_SECRET = (process.env.PRIVATE_KEY_SECRET || "").replace(/\\n/g, "\n") as string;
 export const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN as string;

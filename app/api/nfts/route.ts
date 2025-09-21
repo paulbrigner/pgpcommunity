@@ -8,6 +8,7 @@ import {
   UNLOCK_SUBGRAPH_ID,
   UNLOCK_SUBGRAPH_API_KEY,
   HIDDEN_UNLOCK_CONTRACTS,
+  CHECKOUT_CONFIGS,
 } from '@/lib/config';
 import unlockNetworks from '@unlock-protocol/networks';
 import { JsonRpcProvider, Contract } from 'ethers';
@@ -335,6 +336,27 @@ async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
     return data;
   } catch (_err) {
     locksmithMetadataCache.delete(key);
+    return null;
+  }
+}
+
+const lockMetadataCache = new Map<string, any>();
+
+async function fetchLockMetadata(lockAddress: string) {
+  const key = lockAddress.toLowerCase();
+  if (lockMetadataCache.has(key)) {
+    return lockMetadataCache.get(key);
+  }
+  try {
+    const url = `${LOCKSMITH_BASE}/v2/api/metadata/${RESOLVED_NETWORK_ID}/locks/${lockAddress}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      return null;
+    }
+    const data = await res.json();
+    lockMetadataCache.set(key, data);
+    return data;
+  } catch {
     return null;
   }
 }
@@ -721,20 +743,34 @@ export async function GET(req: NextRequest) {
         if (HIDDEN_UNLOCK_CONTRACTS.includes(addr)) continue;
         const sampleTokenId = await fetchSampleTokenForLock(addr);
         const onChainLockName = await getLockName(addr);
+        const overrideCheckoutId = CHECKOUT_CONFIGS[addr];
         if (!sampleTokenId) {
+          const lockMetadata = await fetchLockMetadata(addr);
+          const slug = coerceToTrimmedString(lockMetadata?.slug);
+          const externalUrl = coerceToTrimmedString(lockMetadata?.external_url);
           const title = onChainLockName?.length
             ? onChainLockName
-            : lock.name?.trim()?.length
-            ? lock.name
-            : 'Upcoming Meeting';
-          const registrationUrl = `https://app.unlock-protocol.com/checkout?locks[${addr}][network]=${RESOLVED_NETWORK_ID}`;
+            : coerceToTrimmedString(lockMetadata?.name) || lock.name?.trim() || 'Upcoming Meeting';
+          const detailUrl = externalUrl || (slug ? `https://app.unlock-protocol.com/event/${slug}` : `https://app.unlock-protocol.com/checkout?locks[${addr}][network]=${RESOLVED_NETWORK_ID}`);
+          const description = coerceToTrimmedString(lockMetadata?.description) || lock.name || null;
+          const subtitle = coerceToTrimmedString(lockMetadata?.ticket?.event_start_date) || null;
+          const startTime = coerceToTrimmedString(lockMetadata?.ticket?.event_start_time);
+          const endTime = coerceToTrimmedString(lockMetadata?.ticket?.event_end_time);
+          const timezone = coerceToTrimmedString(lockMetadata?.ticket?.event_timezone);
+          const location = coerceToTrimmedString(lockMetadata?.ticket?.event_location || lockMetadata?.ticket?.event_address);
+          const imageUrl = normalizeImageUrl(lockMetadata?.image) || null;
           upcoming.push({
             contractAddress: addr,
             title,
-            registrationUrl,
-            description: lock.name || null,
-            image: null,
-            subtitle: null,
+            registrationUrl: detailUrl,
+            description,
+            subtitle,
+            startTime,
+            endTime,
+            timezone,
+            location,
+            image: imageUrl,
+            quickCheckoutUrl: overrideCheckoutId ? `https://app.unlock-protocol.com/checkout?id=${overrideCheckoutId}` : null,
           });
           continue;
         }

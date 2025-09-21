@@ -136,11 +136,17 @@ export default function Home() {
     title: string;
     description: string | null;
     subtitle?: string | null;
+    startTime?: string | null;
+    endTime?: string | null;
+    timezone?: string | null;
+    location?: string | null;
     image: string | null;
     registrationUrl: string;
+    quickCheckoutUrl: string | null;
   }> | null>(null);
   const [showAllNfts, setShowAllNfts] = useState(false);
   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
+  const [quickCheckoutUrl, setQuickCheckoutUrl] = useState<string | null>(null);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const nftFetchSeq = useRef(0);
@@ -341,7 +347,23 @@ export default function Home() {
         if (nftFetchSeq.current !== seq) return;
         setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
         setMissedNfts(Array.isArray(data?.missed) ? data.missed : []);
-        setUpcomingNfts(Array.isArray(data?.upcoming) ? data.upcoming : []);
+        setUpcomingNfts(
+          Array.isArray(data?.upcoming)
+            ? data.upcoming.map((nft: any) => ({
+                contractAddress: String(nft.contractAddress),
+                title: String(nft.title ?? ''),
+                description: nft.description ?? null,
+                subtitle: nft.subtitle ?? null,
+                startTime: nft.startTime ?? null,
+                endTime: nft.endTime ?? null,
+                timezone: nft.timezone ?? null,
+                location: nft.location ?? null,
+                image: nft.image ?? null,
+                registrationUrl: String(nft.registrationUrl ?? ''),
+                quickCheckoutUrl: nft.quickCheckoutUrl ?? null,
+              }))
+            : []
+        );
         setCreatorNftsError(typeof data?.error === 'string' && data.error.length ? data.error : null);
         lastFetchedAddresses.current = key;
       } catch (err: any) {
@@ -581,6 +603,29 @@ export default function Home() {
 
   return (
     <div className="mx-auto p-6 space-y-6">
+      <AlertDialog open={!!quickCheckoutUrl} onOpenChange={(open) => { if (!open) setQuickCheckoutUrl(null); }}>
+        <AlertDialogContent className="max-w-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Quick Registration</AlertDialogTitle>
+            <AlertDialogDescription>
+              Complete your registration without leaving this page.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {quickCheckoutUrl ? (
+            <iframe
+              key={quickCheckoutUrl}
+              src={quickCheckoutUrl}
+              title="Unlock Protocol Checkout"
+              className="h-[600px] w-full rounded-md border"
+              loading="lazy"
+              allow="payment"
+            />
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setQuickCheckoutUrl(null)}>Close</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <h1 className="text-3xl md:text-4xl font-bold text-center">
         PGP for Crypto Community
       </h1>
@@ -791,6 +836,9 @@ export default function Home() {
                       <a href="#">View FAQ</a>
                     </Button>
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    Experimental preview: these links stream HTML content that normally lives behind our member gate. We only fetch the page when you are logged in, the server-side API confirms your session and active membership, and it returns a short-lived, path-scoped CloudFront URL. That signed URL expires quickly, so the file stays private to authenticated members.
+                  </p>
                 </div>
 
                 {upcomingNfts && upcomingNfts.length > 0 ? (
@@ -818,34 +866,51 @@ export default function Home() {
                             return 0;
                           })
                           .map((nft) => {
-                            const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
-                            const explorerUrl = `${explorerBase}/address/${nft.contractAddress}`;
                             return (
-                              <div key={`upcoming-${nft.contractAddress}`} className="rounded-md border bg-muted/40 p-3 space-y-2">
-                                <div className="font-medium">{nft.title}</div>
-                                {nft.description ? (
-                                  <div className="text-xs text-muted-foreground whitespace-pre-wrap">
-                                    {nft.description}
+                              <div key={`upcoming-${nft.contractAddress}`} className="flex gap-3 rounded-md border bg-muted/40 p-3">
+                                {nft.image ? (
+                                  <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
                                   </div>
-                                ) : null}
-                                <div className="flex flex-wrap items-center gap-2 text-xs">
-                                  <a
-                                    href={explorerUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-primary hover:underline"
-                                  >
-                                    View Contract
-                                  </a>
-                                  <span className="text-muted-foreground">•</span>
-                                  <a
-                                    href={nft.registrationUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-primary hover:underline"
-                                  >
-                                    Register
-                                  </a>
+                                ) : (
+                                  <div className="h-20 w-20 shrink-0 rounded-md bg-muted" />
+                                )}
+                                <div className="min-w-0 space-y-1">
+                                  <div className="font-medium truncate">{nft.title}</div>
+                                  {nft.subtitle ? (
+                                    <div className="text-xs text-muted-foreground">Date: {nft.subtitle}</div>
+                                  ) : null}
+                                  {nft.startTime || nft.endTime ? (
+                                    <div className="text-xs text-muted-foreground">
+                                      Time: {nft.startTime ?? 'TBD'}
+                                      {nft.endTime ? ` - ${nft.endTime}` : ''}
+                                      {nft.timezone ? ` (${nft.timezone})` : ''}
+                                    </div>
+                                  ) : null}
+                                  {nft.location ? (
+                                    <div className="text-xs text-muted-foreground whitespace-pre-wrap">Location: {nft.location}</div>
+                                  ) : null}
+                                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                                    <a
+                                      href={nft.registrationUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-primary hover:underline"
+                                    >
+                                      View event details
+                                    </a>
+                                    {nft.quickCheckoutUrl ? (
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="text-xs"
+                                        onClick={() => setQuickCheckoutUrl(nft.quickCheckoutUrl as string)}
+                                      >
+                                        Quick Register
+                                      </Button>
+                                    ) : null}
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -863,27 +928,17 @@ export default function Home() {
                     <h2 className="text-lg font-semibold">
                       {showAllNfts ? 'All PGP NFTs' : 'Your PGP NFT Collection'}
                     </h2>
-                    <div className="flex items-center gap-2">
-                      {missedNfts && missedNfts.length > 0 ? (
-                        <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={showAllNfts}
-                            onChange={(e) => setShowAllNfts(e.target.checked)}
-                          />
-                          Show meetings you missed
-                        </label>
-                      ) : null}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => addressesKey && loadCreatorNfts(addressesKey, true)}
-                        disabled={creatorNftsLoading || !addressesKey}
-                      >
-                        Refresh
-                      </Button>
-                    </div>
+                    {missedNfts && missedNfts.length > 0 ? (
+                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={showAllNfts}
+                          onChange={(e) => setShowAllNfts(e.target.checked)}
+                        />
+                        Show meetings you missed
+                      </label>
+                    ) : null}
                   </div>
                   {creatorNftsLoading ? (
                     <p className="text-sm text-muted-foreground">Loading your collection…</p>
@@ -917,9 +972,11 @@ export default function Home() {
                                 return nft.tokenId;
                               }
                             })()
-                          : nft.tokenId;
+                          : nft.tokenId ?? '';
                         const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
-                        const explorerUrl = `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`;
+                        const explorerUrl = nft.tokenId
+                          ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
+                          : `${explorerBase}/address/${nft.contractAddress}`;
                         const isOwned = creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
                         const subtitle = (() => {
                           const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
@@ -955,13 +1012,15 @@ export default function Home() {
                             fullMarkdown: enrichedMarkdown,
                           } as const;
                         })();
-                        const descriptionKey = `${nft.contractAddress}-${nft.tokenId}-${nft.owner}-description`;
+                        const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
+                        const tokenIdKey = nft.tokenId ?? 'upcoming';
+                        const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
                         const isDescriptionOpen = openDescriptionKey === descriptionKey;
                         return (
                           <div
-                            key={`${nft.contractAddress}-${nft.tokenId}-${nft.owner ?? 'missed'}`}
+                            key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
                             className={`flex gap-3 rounded-md border p-3 ${
-                              isOwned ? '' : 'bg-slate-100 dark:bg-slate-800'
+                              isOwned ? '' : 'bg-slate-100 dark:bg-slate-800/40'
                             }`}
                           >
                             {nft.image ? (
@@ -987,7 +1046,9 @@ export default function Home() {
                               {subtitle ? (
                                 <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
                               ) : null}
-                              <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
+                              {displayId ? (
+                                <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
+                              ) : null}
                               {shortenedDescription ? (
                                 <div className="text-xs text-muted-foreground">
                                   {isDescriptionOpen ? (

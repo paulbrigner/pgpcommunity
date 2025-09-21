@@ -21,6 +21,8 @@ This software is under active development and has not undergone a full independe
 - **Creator NFT collection**:
   - `/api/nfts` fetches member-held ERC-721s on Base created by the membership lock or its owner, consolidating metadata from Alchemy
   - Home page shows “Your PGP NFT Collection” with manual refresh option
+  - Future meetings that the member has registered for automatically move into the collection, where they render formatted event date, time, timezone, and location instead of the long-form description
+  - Registered future meetings display a “You’re Registered!” indicator plus quick actions to add the event to Google Calendar or download a `.ics` file
 - **Secrets Management**:
   - Server environment variables store sensitive credentials including:
     - CloudFront private key for signed URL generation (`PRIVATE_KEY_SECRET`)
@@ -219,6 +221,10 @@ Protecting API routes
     - Note: adding more shadcn components may add additional `@radix-ui/*` packages.
 - **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`, `@unlock-protocol/paywall`
 - **Security**: CloudFront OAC
+- **Scheduling**:
+  - `luxon` for timezone-aware event formatting on the client
+  - `ics` to generate downloadable calendar files on the fly
+  - `@types/luxon` (dev) to satisfy TypeScript builds in Amplify and locally
 
 ## Node 22 Migration Checklist (Later)
 - Update runtime: change `amplify.yml` to `runtime.nodejs: 22` and use `nvm install 22 && nvm use 22` in preBuild.

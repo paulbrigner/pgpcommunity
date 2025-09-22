@@ -16,7 +16,6 @@ import {
   LOCK_ADDRESS,
   BASE_NETWORK_ID,
   BASE_RPC_URL,
-  UNLOCK_ADDRESS,
   USDC_ADDRESS,
   BASE_CHAIN_ID_HEX,
   BASE_BLOCK_EXPLORER_URL,
@@ -26,6 +25,7 @@ import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 type MembershipSnapshot = {
   status: 'active' | 'expired' | 'none';
@@ -164,24 +164,45 @@ const downloadIcs = (ics: string, title: string) => {
 const PAYWALL_CONFIG = {
   icon: "",
   locks: {
-    [LOCK_ADDRESS]: {
-      name: "PGP Community Membership",
-      order: 0,
+    "0xed16cd934780a48697c2fd89f1b13ad15f0b64e1": {
       network: BASE_NETWORK_ID,
+      name: "Holder",
+      recurringPayments: 12,
+      order: 0,
+      maxRecipients: null,
       recipient: "",
       dataBuilder: "",
       emailRequired: false,
+    },
+    "0xb5d2e305c589b1d7a1873c73637adf9a52724105": {
+      network: BASE_NETWORK_ID,
+      name: "Staker",
+      recurringPayments: 12,
+      order: 1,
       maxRecipients: null,
+      recipient: "",
+      dataBuilder: "",
+      emailRequired: false,
+    },
+    "0xdd7fff4931409e2d1da47be9798fd404cc44e9a9": {
+      network: BASE_NETWORK_ID,
+      name: "Builder",
+      recurringPayments: 12,
+      order: 3,
+      maxRecipients: null,
+      recipient: "",
+      dataBuilder: "",
+      emailRequired: false,
     },
   },
-  title: "Join the PGP* for Crypto Community",
-  referrer: UNLOCK_ADDRESS,
-  skipSelect: true,
-  hideSoldOut: false,
-  pessimistic: false,
-  skipRecipient: true,
-  endingCallToAction: "Join Now!",
+  referrer: "0x76ff49cc68710a0dF27724D46698835D7c7AF2f2",
+  title: "Join PGP* for Crypto!",
+  endingCallToAction: "",
   persistentCheckout: false,
+  hideSoldOut: false,
+  skipRecipient: true,
+  skipSelect: false,
+  pessimistic: false,
 };
 
 export default function Home() {
@@ -220,6 +241,7 @@ export default function Home() {
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
+  const [autoRenewStateReady, setAutoRenewStateReady] = useState(false);
   const [creatorNfts, setCreatorNfts] = useState<Array<{
     owner: string | null;
     contractAddress: string;
@@ -280,8 +302,12 @@ export default function Home() {
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const nftFetchSeq = useRef(0);
   const lastFetchedAddresses = useRef<string | null>(null);
+  const autoRenewClearedRef = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [autoRenewOptIn, setAutoRenewOptIn] = useState(false);
+  const [autoRenewPromptDismissed, setAutoRenewPromptDismissed] = useState(false);
+  const [autoRenewProcessing, setAutoRenewProcessing] = useState(false);
+  const [autoRenewMessage, setAutoRenewMessage] = useState<string | null>(null);
+  const [autoRenewRefreshKey, setAutoRenewRefreshKey] = useState(0);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
@@ -296,12 +322,71 @@ export default function Home() {
     return raw.map((a) => String(a).toLowerCase()).filter(Boolean);
   }, [wallets, walletAddress]);
   const addressesKey = useMemo(() => addressList.join(','), [addressList]);
+  const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
+  const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabled' | 'skipped' | null;
+  const dismissAutoRenewMessage = useCallback(() => {
+    setAutoRenewMessage(null);
+    setAutoRenewPromptDismissed(true);
+  }, []);
+  const persistAutoRenewPreference = useCallback(
+    async (value: 'enabled' | 'skipped' | 'clear') => {
+      try {
+        const resp = await fetch('/api/profile/auto-renew', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preference: value }),
+        });
+        if (!resp.ok) {
+          console.error('Persist auto-renew preference failed', await resp.text());
+        } else {
+          await update({});
+        }
+      } catch (err) {
+        console.error('Persist auto-renew preference error:', err);
+      }
+    },
+    [update]
+  );
+  const autoRenewReady = autoRenewStateReady && membershipStatus === 'active';
+  const needsAutoRenewStep = autoRenewReady && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed;
+  const autoRenewPending = membershipStatus === 'active' && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed && !autoRenewReady;
+  const showAutoRenewAlert = Boolean(autoRenewMessage);
+  const autoRenewMessageNode = showAutoRenewAlert ? (
+    <Alert>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <AlertDescription className="text-sm">{autoRenewMessage}</AlertDescription>
+        <Button size="sm" variant="secondary" onClick={dismissAutoRenewMessage}>
+          {"Let's go!"}
+        </Button>
+      </div>
+    </Alert>
+  ) : null;
 
   useEffect(() => {
     if (!authenticated) {
       lastKnownMembership = null;
     }
   }, [authenticated]);
+
+  useEffect(() => {
+    if (autoRenewPreference === 'enabled' || autoRenewPreference === 'skipped') {
+      setAutoRenewPromptDismissed(true);
+    } else if (autoRenewPreference === null && membershipStatus !== 'active') {
+      setAutoRenewPromptDismissed(false);
+    }
+  }, [autoRenewPreference, membershipStatus]);
+
+  useEffect(() => {
+    if (membershipStatus === 'active') {
+      autoRenewClearedRef.current = false;
+      return;
+    }
+    if (membershipStatus === 'unknown') return;
+    if (autoRenewPreference === null) return;
+    if (autoRenewClearedRef.current) return;
+    autoRenewClearedRef.current = true;
+    void persistAutoRenewPreference('clear');
+  }, [membershipStatus, autoRenewPreference, persistAutoRenewPreference]);
 
   // Paywall instance configured for the Base network
   const paywall = useMemo(() => {
@@ -377,7 +462,7 @@ export default function Home() {
   );
 
   // Ensure wallet is on Base before any post‑purchase approvals
-  const ensureBaseNetwork = async (eth: any) => {
+  const ensureBaseNetwork = useCallback(async (eth: any) => {
     const chainHex = BASE_CHAIN_ID_HEX;
     try {
       await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainHex }] });
@@ -399,7 +484,7 @@ export default function Home() {
         throw err;
       }
     }
-  };
+  }, []);
 
   // Check on-chain whether the session wallet has a valid membership
   const refreshMembership = useCallback(async () => {
@@ -526,6 +611,7 @@ export default function Home() {
     if (!authenticated || !walletLinked || membershipStatus !== 'active') {
       setAutoRenewMonths(null);
       setAutoRenewChecking(false);
+      setAutoRenewStateReady(false);
       setCreatorNfts(null);
       setCreatorNftsLoading(false);
       setCreatorNftsError(null);
@@ -556,6 +642,7 @@ export default function Home() {
 
     let cancelled = false;
     setAutoRenewChecking(true);
+    setAutoRenewStateReady(false);
     (async () => {
       try {
         const provider = new JsonRpcProvider(rpcUrl, networkId);
@@ -601,20 +688,44 @@ export default function Home() {
       } catch {
         if (!cancelled) setAutoRenewMonths(null);
       } finally {
-        if (!cancelled) setAutoRenewChecking(false);
+        if (!cancelled) {
+          setAutoRenewChecking(false);
+          setAutoRenewStateReady(true);
+        }
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [authenticated, walletLinked, addressList, addressesKey, membershipStatus]);
+  }, [authenticated, walletLinked, addressList, addressesKey, membershipStatus, autoRenewRefreshKey]);
 
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active') return;
     if (!addressesKey) return;
     loadCreatorNfts(addressesKey);
   }, [authenticated, walletLinked, membershipStatus, addressesKey, loadCreatorNfts]);
+
+  useEffect(() => {
+    if (!autoRenewReady) return;
+    if (!autoRenewEnabled) return;
+    if (autoRenewPreference !== 'enabled') {
+      void persistAutoRenewPreference('enabled');
+    }
+    if (!autoRenewPromptDismissed) {
+      setAutoRenewPromptDismissed(true);
+    }
+  }, [autoRenewReady, autoRenewEnabled, autoRenewPreference, autoRenewPromptDismissed, persistAutoRenewPreference]);
+
+  useEffect(() => {
+    if (membershipStatus === 'active') return;
+    setAutoRenewProcessing(false);
+    setAutoRenewMessage(null);
+    setAutoRenewStateReady(false);
+    if (membershipStatus === 'none') {
+      setAutoRenewPromptDismissed(false);
+    }
+  }, [membershipStatus]);
 
   // After email sign-in, apply any locally saved profile to the server and refresh session
   useEffect(() => {
@@ -645,6 +756,73 @@ export default function Home() {
   }, [ready, authenticated, update]);
 
   // Open the Unlock Protocol checkout using the existing provider
+  const enableAutoRenew = useCallback(async () => {
+    if (autoRenewProcessing) return;
+    setAutoRenewMessage(null);
+    if (!USDC_ADDRESS || !LOCK_ADDRESS) {
+      setAutoRenewMessage('Auto-renew is unavailable. Missing contract configuration.');
+      return;
+    }
+    const provider = (window as any)?.ethereum;
+    if (!provider) {
+      setAutoRenewMessage('No wallet provider detected. Open this site in a wallet-enabled browser.');
+      return;
+    }
+    setAutoRenewProcessing(true);
+    try {
+      await ensureBaseNetwork(provider);
+      const browserProvider = new BrowserProvider(provider, BASE_NETWORK_ID);
+      const signer = await browserProvider.getSigner();
+      const erc20 = new Contract(
+        USDC_ADDRESS,
+        ['function approve(address spender, uint256 amount) returns (bool)'],
+        signer
+      );
+      const erc20Reader = new Contract(
+        USDC_ADDRESS,
+        ['function allowance(address owner, address spender) view returns (uint256)'],
+        browserProvider
+      );
+      const lock = new Contract(
+        LOCK_ADDRESS,
+        ['function keyPrice() view returns (uint256)'],
+        browserProvider
+      );
+      let price: bigint = 0n;
+      try {
+        price = await lock.keyPrice();
+      } catch {}
+      if (price <= 0n) {
+        price = 100000n;
+      }
+      const owner = await signer.getAddress();
+      const current: bigint = await erc20Reader.allowance(owner, LOCK_ADDRESS);
+      const targetAllowance = price * 12n;
+      if (current >= targetAllowance) {
+        setAutoRenewMessage('Auto-renew is already enabled for up to 12 months at the current price.');
+      } else {
+        const tx = await erc20.approve(LOCK_ADDRESS, targetAllowance);
+        await tx.wait();
+        setAutoRenewMessage('Auto-renew enabled. We will attempt renewals automatically (up to 12 months).');
+      }
+      setAutoRenewPromptDismissed(true);
+      void persistAutoRenewPreference('enabled');
+    } catch (err: any) {
+      console.error('Auto-renew enable failed:', err);
+      const message = err?.message || 'Failed to enable auto-renew. Please try again from Edit Profile later.';
+      setAutoRenewMessage(message);
+    } finally {
+      setAutoRenewProcessing(false);
+      setAutoRenewRefreshKey((value) => value + 1);
+    }
+  }, [autoRenewProcessing, ensureBaseNetwork, persistAutoRenewPreference]);
+
+  const handleSkipAutoRenew = useCallback(() => {
+    setAutoRenewPromptDismissed(true);
+    setAutoRenewMessage('You can enable auto-renew anytime from the Edit Profile page.');
+    void persistAutoRenewPreference('skipped');
+  }, [persistAutoRenewPreference]);
+
   const purchaseMembership = async () => {
     if (!walletAddress) {
       console.error("No wallet connected.");
@@ -654,44 +832,6 @@ export default function Home() {
     try {
       const provider = (window as any)?.ethereum;
       if (!provider) throw new Error("No Ethereum provider available");
-      // If opted‑in, pre‑approve up to 12 periods BEFORE opening checkout so checkout only needs a single tx
-      if (autoRenewOptIn && USDC_ADDRESS && LOCK_ADDRESS) {
-        try {
-          await ensureBaseNetwork(provider);
-          const bp = new BrowserProvider(provider, BASE_NETWORK_ID);
-          const signer = await bp.getSigner();
-          const erc20 = new Contract(
-            USDC_ADDRESS,
-            [ 'function approve(address spender, uint256 amount) returns (bool)' ],
-            signer
-          );
-          const erc20Reader = new Contract(
-            USDC_ADDRESS,
-            [ 'function allowance(address owner, address spender) view returns (uint256)' ],
-            bp
-          );
-          const lock = new Contract(
-            LOCK_ADDRESS,
-            [ 'function keyPrice() view returns (uint256)' ],
-            bp
-          );
-          // Fetch current key price and compute one‑year cap
-          let price: bigint = 0n;
-          try { price = await lock.keyPrice(); } catch {}
-          if (price <= 0n) price = 100000n; // 0.10 USDC default
-          const targetAllowance = price * 12n;
-          const owner = await signer.getAddress();
-          const current: bigint = await erc20Reader.allowance(owner, LOCK_ADDRESS);
-          if (current < targetAllowance) {
-            const tx = await erc20.approve(LOCK_ADDRESS, targetAllowance);
-            await tx.wait();
-          }
-        } catch (e) {
-          console.error('Pre‑checkout auto‑renew approval failed:', e);
-          // Continue to checkout anyway; user can still purchase without the higher allowance
-        }
-      }
-
       await paywall.connect(provider);
       // Prevent Unlock from navigating; we'll control refresh ourselves.
       const checkoutConfig = { ...PAYWALL_CONFIG } as any;
@@ -859,8 +999,9 @@ export default function Home() {
           </section>
         </div>
       ) : membershipStatus === "unknown" ? (
-        // If wallet is not linked yet, show onboarding; otherwise neutral placeholder during hydration
-        !walletLinked ? (
+        !ready ? (
+          <div className="mx-auto max-w-4xl" />
+        ) : !walletLinked && authenticated ? (
           <div className="mx-auto max-w-4xl space-y-6">
             <OnboardingChecklist
               walletLinked={false}
@@ -872,14 +1013,43 @@ export default function Home() {
           <div className="mx-auto max-w-4xl" />
         )
       ) : membershipStatus === "active" ? (
-        // Scenario 1: linked wallet has a valid membership -> authorized
-        <div className="mx-auto max-w-4xl space-y-6">
-          <div className="text-center">
-            <p>
-              Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! You’re a member.
+        autoRenewPending ? (
+          <div className="mx-auto max-w-3xl space-y-6 text-center">
+            <h2 className="text-xl font-semibold">Just a moment…</h2>
+            <p className="text-sm text-muted-foreground">
+              Confirming your membership and renewal options. This should only take a second.
             </p>
           </div>
-          {walletLinked && profileComplete ? (
+        ) : needsAutoRenewStep ? (
+          <div className="mx-auto max-w-4xl space-y-6">
+            <div className="text-center">
+              <p>
+                Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! Your membership is active—finish setup by enabling auto-renew or skip it for now.
+              </p>
+            </div>
+            <OnboardingChecklist
+              walletLinked={walletLinked}
+              profileComplete={!!(firstName && lastName)}
+              membershipStatus={membershipStatus as 'active' | 'expired' | 'none'}
+              autoRenewReady={autoRenewReady}
+              autoRenewEnabled={autoRenewEnabled}
+              autoRenewProcessing={autoRenewProcessing}
+              autoRenewDismissed={autoRenewPromptDismissed}
+              onEnableAutoRenew={enableAutoRenew}
+              onSkipAutoRenew={handleSkipAutoRenew}
+            />
+            {autoRenewMessageNode}
+          </div>
+        ) : (
+          // Scenario 1: linked wallet has a valid membership -> authorized
+          <div className="mx-auto max-w-4xl space-y-6">
+            <div className="text-center">
+              <p>
+                Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! You’re a member.
+              </p>
+            </div>
+            {autoRenewMessageNode}
+            {walletLinked && profileComplete ? (
             viewerUrl ? (
               <div className="grid gap-4 md:grid-cols-2">
                 {/* Inline Viewer Only */}
@@ -1354,9 +1524,16 @@ export default function Home() {
               walletLinked={walletLinked}
               profileComplete={profileComplete}
               membershipStatus="active"
+              autoRenewReady={autoRenewReady}
+              autoRenewEnabled={autoRenewEnabled}
+              autoRenewProcessing={autoRenewProcessing}
+              autoRenewDismissed={autoRenewPromptDismissed}
+              onEnableAutoRenew={enableAutoRenew}
+              onSkipAutoRenew={handleSkipAutoRenew}
             />
           )}
-        </div>
+          </div>
+        )
       ) : !walletLinked ? (
         // Authenticated but wallet not linked (after hydration)
         <div className="mx-auto max-w-4xl space-y-6">
@@ -1411,21 +1588,8 @@ export default function Home() {
             </div>
             <div>That’s it—0.10 USDC for the membership, plus pennies of ETH for gas.</div>
             <div className="text-xs text-muted-foreground">
-              Note: If your wallet has sufficient USDC and a bit of ETH for gas when your current period ends, the membership can renew automatically.
+              Note: After purchase you can enable auto-renew so renewals happen automatically, or skip it and set it up later from Edit Profile.
             </div>
-            <label className="flex items-center gap-2 text-sm mt-2">
-              <input
-                type="checkbox"
-                checked={autoRenewOptIn}
-                onChange={(e) => setAutoRenewOptIn(e.target.checked)}
-              />
-              Enable auto‑renew (authorize up to one year of renewals)
-            </label>
-            {autoRenewOptIn && (
-              <div className="text-xs text-muted-foreground">
-                When enabled, you may see an approval prompt before checkout so the purchase can complete in a single transaction.
-              </div>
-            )}
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

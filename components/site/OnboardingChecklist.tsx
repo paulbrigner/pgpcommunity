@@ -15,19 +15,51 @@ export function OnboardingChecklist({
   membershipStatus,
   onPurchaseMembership,
   purchasing,
+  autoRenewReady = false,
+  autoRenewEnabled = false,
+  autoRenewProcessing = false,
+  autoRenewDismissed = false,
+  onEnableAutoRenew,
+  onSkipAutoRenew,
 }: {
   walletLinked: boolean;
   profileComplete: boolean;
   membershipStatus: MembershipStatus;
   onPurchaseMembership?: () => Promise<void> | void;
   purchasing?: boolean;
+  autoRenewReady?: boolean;
+  autoRenewEnabled?: boolean;
+  autoRenewProcessing?: boolean;
+  autoRenewDismissed?: boolean;
+  onEnableAutoRenew?: () => Promise<void> | void;
+  onSkipAutoRenew?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
 
-  const Item = ({ done, icon, title, description, action }: { done: boolean; icon: React.ReactNode; title: string; description?: string; action?: React.ReactNode }) => (
-    <div className="flex items-start justify-between gap-3 rounded-md border p-3">
+  const Item = ({
+    done,
+    icon,
+    title,
+    description,
+    action,
+    disabled,
+  }: {
+    done: boolean;
+    icon: React.ReactNode;
+    title: string;
+    description?: string;
+    action?: React.ReactNode;
+    disabled?: boolean;
+  }) => (
+    <div className={`flex items-start justify-between gap-3 rounded-md border p-3 ${disabled ? 'opacity-60' : ''}`}>
       <div className="flex items-start gap-3">
-        <div className={`mt-0.5 ${done ? "text-emerald-600" : "text-muted-foreground"}`}>{icon}</div>
+        <div
+          className={`mt-0.5 ${
+            done ? "text-emerald-600" : "text-muted-foreground"
+          } ${disabled ? 'opacity-60' : ''}`}
+        >
+          {icon}
+        </div>
         <div>
           <div className="font-medium text-sm">{title}</div>
           {description ? (
@@ -35,7 +67,9 @@ export function OnboardingChecklist({
           ) : null}
         </div>
       </div>
-      {action}
+      {action ? (
+        <div className={disabled ? 'pointer-events-none opacity-60' : ''}>{action}</div>
+      ) : null}
     </div>
   );
 
@@ -60,9 +94,15 @@ export function OnboardingChecklist({
               : "Add your name and optional info so members know who you are."
           }
           action={
-            <Button asChild variant={profileComplete ? "outline" : "default"} size="sm">
-              <Link href="/settings/profile">Complete Profile</Link>
-            </Button>
+            profileComplete ? (
+              <Button variant="outline" size="sm" disabled>
+                Complete Profile
+              </Button>
+            ) : (
+              <Button asChild variant="default" size="sm">
+                <Link href="/settings/profile">Complete Profile</Link>
+              </Button>
+            )
           }
         />
         <Item
@@ -100,6 +140,35 @@ export function OnboardingChecklist({
               <Button size="sm" onClick={() => onPurchaseMembership?.()} disabled={purchasing}>
                 {purchasing ? "Processing…" : membershipStatus === "expired" ? "Renew Membership" : "Get Membership"}
               </Button>
+            )
+          }
+        />
+        <Item
+          done={autoRenewEnabled}
+          disabled={!autoRenewReady}
+          icon={autoRenewEnabled ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
+          title={autoRenewEnabled ? "Auto-renew enabled" : "Enable auto-renew"}
+          description={
+            autoRenewEnabled
+              ? "We’ll attempt renewals automatically when your balance allows."
+              : "Approve renewals so your membership stays active without manual payments."
+          }
+          action={
+            !autoRenewReady ? (
+              <span className="text-xs text-muted-foreground">Available after membership purchase.</span>
+            ) : autoRenewEnabled ? (
+              <span className="text-xs font-semibold text-emerald-600">Enabled</span>
+            ) : autoRenewDismissed ? (
+              <span className="text-xs text-muted-foreground">Skipped for now.</span>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={() => onEnableAutoRenew?.()} disabled={autoRenewProcessing}>
+                  {autoRenewProcessing ? "Enabling…" : "Enable Auto-renew"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => onSkipAutoRenew?.()} disabled={autoRenewProcessing}>
+                  Maybe later
+                </Button>
+              </div>
             )
           }
         />

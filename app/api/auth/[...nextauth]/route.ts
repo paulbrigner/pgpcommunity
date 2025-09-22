@@ -200,6 +200,8 @@ const authOptions = {
             tableName: TABLE_NAME,
           });
           const userRecord = await adapter.getUser(token.sub);
+          (token as any).autoRenewPreference = (userRecord as any)?.autoRenewPreference ?? null;
+
           const wallets: string[] = Array.isArray((userRecord as any)?.wallets)
             ? ((userRecord as any).wallets as string[])
             : [];
@@ -251,6 +253,7 @@ const authOptions = {
           (session.user as any).lastName = (userRecord as any)?.lastName ?? null;
           (session.user as any).xHandle = (userRecord as any)?.xHandle ?? null;
           (session.user as any).linkedinUrl = (userRecord as any)?.linkedinUrl ?? null;
+          (session.user as any).autoRenewPreference = (userRecord as any)?.autoRenewPreference ?? null;
           // Membership info from JWT (cached server-side)
           (session.user as any).membershipStatus = (token as any)?.membershipStatus ?? null;
           (session.user as any).membershipExpiry = (token as any)?.membershipExpiry ?? null;
@@ -263,6 +266,7 @@ const authOptions = {
         } else {
           (session.user as any).wallets = [];
           (session.user as any).walletAddress = token.walletAddress || null;
+          (session.user as any).autoRenewPreference = (token as any)?.autoRenewPreference ?? null;
         }
       } catch (e) {
         console.error("session callback: failed to load wallets", e);

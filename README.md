@@ -32,6 +32,7 @@ This software is under active development and has not undergone a full independe
 ### Environment Variables
 ```bash
 ## Public (client + server)
+NEXT_PUBLIC_LOCK_TIERS=[{"id":"holder","address":"0xed16cd934780a48697c2fd89f1b13ad15f0b64e1","label":"Holder","order":0},{"id":"staker","address":"0xb5d2e305c589b1d7a1873c73637adf9a52724105","label":"Staker","order":1},{"id":"builder","address":"0xdd7fff4931409e2d1da47be9798fd404cc44e9a9","label":"Builder","order":2}]
 NEXT_PUBLIC_LOCK_ADDRESS=...
 NEXT_PUBLIC_UNLOCK_ADDRESS=...
 NEXT_PUBLIC_BASE_NETWORK_ID=8453

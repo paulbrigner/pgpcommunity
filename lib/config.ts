@@ -6,8 +6,67 @@ const parseNumber = (value: string | undefined): number | null => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+export type MembershipTierConfig = {
+  id: string;
+  address: string; // lowercase for comparisons
+  checksumAddress: string;
+  label?: string;
+  order: number;
+};
+
+const parseMembershipTiers = (): MembershipTierConfig[] => {
+  const raw = process.env.NEXT_PUBLIC_LOCK_TIERS;
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((entry: any, index: number) => {
+            const address = typeof entry?.address === 'string' ? entry.address.trim() : '';
+            if (!address) return null;
+            const id = (typeof entry?.id === 'string' && entry.id.trim().length
+              ? entry.id.trim()
+              : address).toLowerCase();
+            const label = typeof entry?.label === 'string' ? entry.label.trim() : undefined;
+            const orderRaw = Number(entry?.order);
+            const order = Number.isFinite(orderRaw) ? orderRaw : index;
+            return {
+              id,
+              address: address.toLowerCase(),
+              checksumAddress: address,
+              label,
+              order,
+            } as MembershipTierConfig;
+          })
+          .filter(Boolean) as MembershipTierConfig[];
+      }
+    } catch (err) {
+      console.error('Failed to parse NEXT_PUBLIC_LOCK_TIERS:', err);
+    }
+  }
+
+  const fallbackAddress = process.env.NEXT_PUBLIC_LOCK_ADDRESS;
+  if (!fallbackAddress) {
+    return [];
+  }
+  return [
+    {
+      id: fallbackAddress.toLowerCase(),
+      address: fallbackAddress.toLowerCase(),
+      checksumAddress: fallbackAddress,
+      label: undefined,
+      order: 0,
+    },
+  ];
+};
+
+export const MEMBERSHIP_TIERS: MembershipTierConfig[] = parseMembershipTiers().sort((a, b) => a.order - b.order);
+
 export const UNLOCK_ADDRESS = process.env.NEXT_PUBLIC_UNLOCK_ADDRESS as string;
-export const LOCK_ADDRESS = process.env.NEXT_PUBLIC_LOCK_ADDRESS as string;
+const primaryChecksumAddress = MEMBERSHIP_TIERS[0]?.checksumAddress || process.env.NEXT_PUBLIC_LOCK_ADDRESS || '';
+export const PRIMARY_LOCK_ADDRESS = primaryChecksumAddress;
+export const LOCK_ADDRESS = primaryChecksumAddress.toLowerCase();
+export const MEMBERSHIP_TIER_ADDRESSES = new Set(MEMBERSHIP_TIERS.map((tier) => tier.address));
 const resolvedBaseNetworkId = parseNumber(process.env.NEXT_PUBLIC_BASE_NETWORK_ID);
 export const BASE_NETWORK_ID = resolvedBaseNetworkId && resolvedBaseNetworkId > 0 ? resolvedBaseNetworkId : DEFAULT_BASE_NETWORK_ID;
 export const BASE_CHAIN_ID_HEX = `0x${BASE_NETWORK_ID.toString(16)}`;

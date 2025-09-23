@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  LOCK_ADDRESS,
+  PRIMARY_LOCK_ADDRESS,
   BASE_RPC_URL,
   BASE_NETWORK_ID,
   LOCKSMITH_BASE_URL,
@@ -9,6 +9,7 @@ import {
   UNLOCK_SUBGRAPH_API_KEY,
   HIDDEN_UNLOCK_CONTRACTS,
   CHECKOUT_CONFIGS,
+  MEMBERSHIP_TIER_ADDRESSES,
 } from '@/lib/config';
 import unlockNetworks from '@unlock-protocol/networks';
 import { JsonRpcProvider, Contract } from 'ethers';
@@ -28,7 +29,7 @@ const ALCHEMY_NFT_BASE = ALCHEMY_API_KEY
   ? `https://base-mainnet.g.alchemy.com/nft/v3/${ALCHEMY_API_KEY}`
   : null;
 
-const lockAddress = (LOCK_ADDRESS || '').toLowerCase();
+const lockAddress = (PRIMARY_LOCK_ADDRESS || '').toLowerCase();
 
 let cachedLockDeployer: string | null = null;
 let cachedLockOwner: string | null = null;
@@ -625,6 +626,7 @@ export async function GET(req: NextRequest) {
       for (const keyData of ownerKeys) {
         const contractAddress = keyData.lock?.address?.toLowerCase();
         if (!contractAddress) continue;
+        if (MEMBERSHIP_TIER_ADDRESSES.has(contractAddress)) continue;
 
         const keyLockDeployer = keyData.lock?.deployer?.toLowerCase() || null;
         const keyLockManagers = Array.isArray(keyData.lock?.lockManagers)
@@ -804,6 +806,7 @@ export async function GET(req: NextRequest) {
         if (userContracts.has(addr)) continue;
         if (missedContracts.has(addr)) continue;
         if (addr === lockAddress) continue;
+        if (MEMBERSHIP_TIER_ADDRESSES.has(addr)) continue;
         if (HIDDEN_UNLOCK_CONTRACTS.includes(addr)) continue;
         const sampleTokenId = await fetchSampleTokenForLock(addr);
         const onChainLockName = await getLockName(addr);
@@ -817,8 +820,55 @@ export async function GET(req: NextRequest) {
           }
         }
 
-        if (!sampleTokenId) {
-          const lockMetadata = await fetchLockMetadata(addr);
+        const lockMetadata = await fetchLockMetadata(addr);
+        const lockEventDetails = lockMetadata
+          ? extractEventDetails(
+              {
+                ticket: lockMetadata?.ticket,
+                metadata: lockMetadata?.metadata,
+                event_start_date: lockMetadata?.event_start_date,
+                event_start_time: lockMetadata?.event_start_time,
+                event_end_time: lockMetadata?.event_end_time,
+                event_timezone: lockMetadata?.event_timezone,
+                event_location: lockMetadata?.event_location,
+                event_address: lockMetadata?.event_address,
+              },
+              lock.name?.trim() || null
+            )
+          : { subtitle: null, startTime: null, endTime: null, timezone: null, location: null };
+
+        const eventSubtitle = typeof lockEventDetails.subtitle === 'string' ? lockEventDetails.subtitle : null;
+        const eventStartTime = typeof lockEventDetails.startTime === 'string' ? lockEventDetails.startTime : null;
+        const creationSortValue = await getLockCreationSortKey(addr);
+        const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
+          ? creationSortValue
+          : Number.MAX_SAFE_INTEGER;
+
+        let eventTimestamp: number | null = null;
+        if (eventSubtitle) {
+          const trimmed = eventSubtitle.trim();
+          if (trimmed.length) {
+            const candidates: string[] = [];
+            if (eventStartTime && eventStartTime.trim().length) {
+              candidates.push(`${trimmed} ${eventStartTime}`);
+            }
+            candidates.push(trimmed);
+            for (const candidate of candidates) {
+              const parsed = Date.parse(candidate);
+              if (Number.isFinite(parsed)) {
+                eventTimestamp = parsed;
+                break;
+              }
+            }
+          }
+        }
+
+        const nowMs = Date.now();
+        const classification: 'upcoming' | 'past' = eventTimestamp !== null
+          ? (eventTimestamp > nowMs ? 'upcoming' : 'past')
+          : (sampleTokenId ? 'past' : 'upcoming');
+
+        if (classification === 'upcoming') {
           const slug = coerceToTrimmedString(lockMetadata?.slug);
           const externalUrl = coerceToTrimmedString(lockMetadata?.external_url);
           const title = onChainLockName?.length
@@ -826,11 +876,10 @@ export async function GET(req: NextRequest) {
             : coerceToTrimmedString(lockMetadata?.name) || lock.name?.trim() || 'Upcoming Meeting';
           const detailUrl = externalUrl || (slug ? `https://app.unlock-protocol.com/event/${slug}` : `https://app.unlock-protocol.com/checkout?locks[${addr}][network]=${RESOLVED_NETWORK_ID}`);
           const description = coerceToTrimmedString(lockMetadata?.description) || lock.name || null;
-          const subtitle = coerceToTrimmedString(lockMetadata?.ticket?.event_start_date) || null;
-          const startTime = coerceToTrimmedString(lockMetadata?.ticket?.event_start_time);
-          const endTime = coerceToTrimmedString(lockMetadata?.ticket?.event_end_time);
-          const timezone = coerceToTrimmedString(lockMetadata?.ticket?.event_timezone);
-          const location = coerceToTrimmedString(lockMetadata?.ticket?.event_location || lockMetadata?.ticket?.event_address);
+          const startTime = eventStartTime;
+          const endTime = typeof lockEventDetails.endTime === 'string' ? lockEventDetails.endTime : null;
+          const timezone = typeof lockEventDetails.timezone === 'string' ? lockEventDetails.timezone : null;
+          const location = typeof lockEventDetails.location === 'string' ? lockEventDetails.location : null;
           const imageUrl = normalizeImageUrl(lockMetadata?.image) || null;
           const quickCheckoutConfig = overrideCheckoutConfig
             ? {
@@ -846,81 +895,86 @@ export async function GET(req: NextRequest) {
               }
             : null;
 
-          const creationSortValue = await getLockCreationSortKey(addr);
-          const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
-            ? creationSortValue
-            : Number.MAX_SAFE_INTEGER;
-
           upcoming.push({
             contractAddress: addr,
             title,
             registrationUrl: detailUrl,
             description,
-            subtitle,
+            subtitle: eventSubtitle,
             startTime,
             endTime,
             timezone,
             location,
             image: imageUrl,
-          quickCheckoutConfig,
-          eventDate: subtitle,
-          sortKey: normalizedSortKey,
-        });
+            quickCheckoutConfig,
+            eventDate: eventSubtitle,
+            sortKey: normalizedSortKey,
+          });
           continue;
         }
-        const metadata = await fetchLocksmithMetadata(addr, sampleTokenId);
-        if (!metadata || typeof metadata !== 'object') continue;
+
+        let metadata: any = null;
+        if (sampleTokenId) {
+          const fetched = await fetchLocksmithMetadata(addr, sampleTokenId);
+          if (fetched && typeof fetched === 'object') {
+            metadata = fetched;
+          }
+        }
+        const metadataSource: any = metadata ?? lockMetadata ?? {};
         const fallbackTitle =
-          (metadata as any)?.name?.trim()?.length
-            ? (metadata as any).name
-            : lock.name?.trim()?.length
-            ? lock.name
-            : 'Untitled NFT';
-        const attributes = Array.isArray((metadata as any)?.attributes)
-          ? (metadata as any).attributes
-          : Array.isArray((metadata as any)?.metadata?.attributes)
-          ? (metadata as any).metadata.attributes
+          coerceToTrimmedString(metadataSource?.name) ||
+          (metadataSource?.metadata?.name ? coerceToTrimmedString(metadataSource?.metadata?.name) : null) ||
+          coerceToTrimmedString(lockMetadata?.name) ||
+          lock.name?.trim() ||
+          'Untitled NFT';
+        const attributes = Array.isArray(metadataSource?.attributes)
+          ? metadataSource.attributes
+          : Array.isArray(metadataSource?.metadata?.attributes)
+          ? metadataSource.metadata.attributes
           : [];
         const attrSubtitle = getAttributeValue(attributes, ['subtitle', 'tagline', 'ticket_description', 'ticketDescription']);
         const displayTitle = onChainLockName?.length ? onChainLockName : fallbackTitle;
-        const subtitleSource = attrSubtitle || (metadata as any)?.description || (metadata as any)?.metadata?.description || lock.name || null;
-        const trimmedSubtitle = subtitleSource?.trim()?.length ? subtitleSource.trim() : null;
+        const subtitleSource = attrSubtitle || metadataSource?.description || metadataSource?.metadata?.description || lockMetadata?.description || lock.name || null;
+        const trimmedSubtitle = typeof subtitleSource === 'string' && subtitleSource.trim().length ? subtitleSource.trim() : null;
         const fallbackImage =
-          normalizeImageUrl((metadata as any)?.image) ||
-          normalizeImageUrl((metadata as any)?.image_url) ||
-          normalizeImageUrl((metadata as any)?.imageUrl) ||
-          normalizeImageUrl((metadata as any)?.image_uri) ||
-          normalizeImageUrl((metadata as any)?.imageUri) ||
-          normalizeImageUrl((metadata as any)?.metadata?.image) ||
-          normalizeImageUrl((metadata as any)?.metadata?.image_url) ||
-          normalizeImageUrl((metadata as any)?.metadata?.imageUrl) ||
-          normalizeImageUrl((metadata as any)?.metadata?.image_uri) ||
-          normalizeImageUrl((metadata as any)?.metadata?.imageUri) ||
+          normalizeImageUrl(metadataSource?.image) ||
+          normalizeImageUrl(metadataSource?.image_url) ||
+          normalizeImageUrl(metadataSource?.imageUrl) ||
+          normalizeImageUrl(metadataSource?.image_uri) ||
+          normalizeImageUrl(metadataSource?.imageUri) ||
+          normalizeImageUrl(metadataSource?.metadata?.image) ||
+          normalizeImageUrl(metadataSource?.metadata?.image_url) ||
+          normalizeImageUrl(metadataSource?.metadata?.imageUrl) ||
+          normalizeImageUrl(metadataSource?.metadata?.image_uri) ||
+          normalizeImageUrl(metadataSource?.metadata?.imageUri) ||
+          normalizeImageUrl(lockMetadata?.image) ||
           null;
-        const youtubeLink = extractYoutubeLink(metadata as any, attributes);
-        const metadataDescription = coerceToTrimmedString((metadata as any)?.description) ?? coerceToTrimmedString((metadata as any)?.metadata?.description) ?? null;
-        const creationSortValue = await getLockCreationSortKey(addr);
-        const normalizedSortKey = creationSortValue != null && Number.isFinite(creationSortValue)
-          ? creationSortValue
-          : Number.MAX_SAFE_INTEGER;
-        const eventDetails = extractEventDetails(
-          {
-            ticket: (metadata as any)?.ticket,
-            metadata: (metadata as any)?.metadata,
-            event_start_date: (metadata as any)?.event_start_date,
-            event_start_time: (metadata as any)?.event_start_time,
-            event_end_time: (metadata as any)?.event_end_time,
-            event_timezone: (metadata as any)?.event_timezone,
-            event_location: (metadata as any)?.event_location,
-            event_address: (metadata as any)?.event_address,
-          },
-          lock.name?.trim() || null
-        );
+        const youtubeLink = extractYoutubeLink(metadataSource, attributes);
+        const metadataDescription =
+          coerceToTrimmedString(metadataSource?.description) ??
+          coerceToTrimmedString(metadataSource?.metadata?.description) ??
+          coerceToTrimmedString(lockMetadata?.description) ??
+          null;
+        const eventDetails = metadata && typeof metadata === 'object'
+          ? extractEventDetails(
+              {
+                ticket: metadata?.ticket,
+                metadata: metadata?.metadata,
+                event_start_date: metadata?.event_start_date,
+                event_start_time: metadata?.event_start_time,
+                event_end_time: metadata?.event_end_time,
+                event_timezone: metadata?.event_timezone,
+                event_location: metadata?.event_location,
+                event_address: metadata?.event_address,
+              },
+              lock.name?.trim() || null
+            )
+          : lockEventDetails;
 
         missed.push({
           owner: null,
           contractAddress: addr,
-          tokenId: sampleTokenId,
+          tokenId: sampleTokenId ?? 'lock-metadata',
           title: displayTitle,
           description: metadataDescription,
           subtitle: eventDetails.subtitle || trimmedSubtitle,

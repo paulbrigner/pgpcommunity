@@ -1,4 +1,5 @@
 import { JsonRpcProvider, Contract } from 'ethers';
+import { LOCKSMITH_BASE_URL, MEMBERSHIP_TIERS, MembershipTierConfig } from '@/lib/config';
 
 const ABI = [
   'function getHasValidKey(address _owner) view returns (bool)',
@@ -11,6 +12,51 @@ const ABI = [
   'function expirationTimestampFor(uint256 _tokenId) view returns (uint256)',
 ] as const;
 
+type TierStatus = 'active' | 'expired' | 'none';
+
+export type TierMembershipSummary = {
+  tier: MembershipTierConfig;
+  status: TierStatus;
+  expiry: number | null;
+  metadata?: {
+    name?: string | null;
+    description?: string | null;
+    image?: string | null;
+    price?: string | null;
+  };
+};
+
+export type MembershipSummary = {
+  status: TierStatus;
+  expiry: number | null;
+  tiers: TierMembershipSummary[];
+  highestActiveTier: TierMembershipSummary | null;
+};
+
+const lockMetadataCache = new Map<string, any>();
+
+async function fetchTierMetadata(lockAddress: string, networkId: number) {
+  if (!LOCKSMITH_BASE_URL) return null;
+  const key = `${networkId}:${lockAddress.toLowerCase()}`;
+  if (lockMetadataCache.has(key)) {
+    return lockMetadataCache.get(key);
+  }
+  try {
+    const url = `${LOCKSMITH_BASE_URL}/v2/api/metadata/${networkId}/locks/${lockAddress}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      lockMetadataCache.set(key, null);
+      return null;
+    }
+    const data = await res.json();
+    lockMetadataCache.set(key, data);
+    return data;
+  } catch {
+    lockMetadataCache.set(key, null);
+    return null;
+  }
+}
+
 async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
 async function callWithRetries<T>(fn: () => Promise<T>, attempts = 3, delayMs = 200): Promise<T> {
@@ -21,7 +67,7 @@ async function callWithRetries<T>(fn: () => Promise<T>, attempts = 3, delayMs = 
   throw lastErr;
 }
 
-export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, networkId: number, lockAddress: string): Promise<{ status: 'active'|'expired'|'none'; expiry: number | null }>{
+async function evaluateLockMembership(addresses: string[], rpcUrl: string, networkId: number, lockAddress: string): Promise<{ status: TierStatus; expiry: number | null }>{
   const provider = new JsonRpcProvider(rpcUrl, networkId);
   const contract = new Contract(lockAddress, ABI, provider);
   const now = Math.floor(Date.now() / 1000);
@@ -92,4 +138,67 @@ export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, ne
     status = 'expired';
   }
   return { status, expiry: maxExpiry ?? null };
+}
+
+export async function getStatusAndExpiry(addresses: string[], rpcUrl: string, networkId: number, lockAddress: string): Promise<{ status: TierStatus; expiry: number | null }>{
+  return evaluateLockMembership(addresses, rpcUrl, networkId, lockAddress);
+}
+
+export async function getMembershipSummary(addresses: string[], rpcUrl: string, networkId: number): Promise<MembershipSummary> {
+  if (!Array.isArray(addresses) || addresses.length === 0) {
+    return { status: 'none', expiry: null, tiers: [], highestActiveTier: null };
+  }
+
+  const normalizedAddresses = Array.from(new Set(addresses.map((addr) => addr.toLowerCase())));
+
+  const tiers: TierMembershipSummary[] = [];
+  let highestActiveTier: TierMembershipSummary | null = null;
+  let overallStatus: TierStatus = 'none';
+  let overallExpiry: number | null = null;
+
+  for (const tier of MEMBERSHIP_TIERS) {
+    const { status, expiry } = await evaluateLockMembership(normalizedAddresses, rpcUrl, networkId, tier.checksumAddress);
+    const metadataRaw = await fetchTierMetadata(tier.checksumAddress, networkId);
+    const metadata = metadataRaw
+      ? {
+          name: metadataRaw?.name ?? metadataRaw?.lockName ?? metadataRaw?.metadata?.name ?? null,
+          description: metadataRaw?.description ?? metadataRaw?.metadata?.description ?? null,
+          image: metadataRaw?.image ?? metadataRaw?.metadata?.image ?? null,
+          price: metadataRaw?.price ?? metadataRaw?.metadata?.price ?? null,
+        }
+      : undefined;
+    const entry: TierMembershipSummary = {
+      tier,
+      status,
+      expiry: expiry ?? null,
+      metadata,
+    };
+    tiers.push(entry);
+
+    if (status === 'active') {
+      if (!highestActiveTier || tier.order < highestActiveTier.tier.order) {
+        highestActiveTier = entry;
+      }
+      overallStatus = 'active';
+      if (typeof entry.expiry === 'number') {
+        if (!overallExpiry || entry.expiry > overallExpiry) {
+          overallExpiry = entry.expiry;
+        }
+      }
+    } else if (overallStatus !== 'active' && status === 'expired') {
+      overallStatus = 'expired';
+      if (typeof entry.expiry === 'number') {
+        if (!overallExpiry || entry.expiry > overallExpiry) {
+          overallExpiry = entry.expiry;
+        }
+      }
+    }
+  }
+
+  return {
+    status: overallStatus,
+    expiry: overallExpiry,
+    tiers,
+    highestActiveTier,
+  };
 }

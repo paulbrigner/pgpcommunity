@@ -13,13 +13,14 @@ import remarkGfm from "remark-gfm";
 import { DateTime } from "luxon";
 import { createEvent } from "ics";
 import {
-  LOCK_ADDRESS,
+  MEMBERSHIP_TIERS,
   BASE_NETWORK_ID,
   BASE_RPC_URL,
   USDC_ADDRESS,
   BASE_CHAIN_ID_HEX,
   BASE_BLOCK_EXPLORER_URL,
 } from "@/lib/config"; // Environment-specific constants
+import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
@@ -30,6 +31,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 type MembershipSnapshot = {
   status: 'active' | 'expired' | 'none';
   expiry: number | null;
+  summary?: MembershipSummary | null;
 };
 
 let lastKnownMembership: MembershipSnapshot | null = null;
@@ -46,6 +48,13 @@ const stripMarkdown = (value: string): string => {
     .replace(/^-\s+/gm, '')
     .replace(/\r?\n\r?\n/g, '\n')
     .trim();
+};
+
+const formatAddressShort = (value: string | null | undefined): string => {
+  if (!value) return 'N/A';
+  const normalized = value.toLowerCase();
+  if (normalized.length <= 10) return normalized;
+  return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`;
 };
 
 const formatEventDisplay = (
@@ -223,22 +232,24 @@ export default function Home() {
   }, [sessionUser]);
   const firstName = sessionUser?.firstName as string | undefined;
   const lastName = sessionUser?.lastName as string | undefined;
-  const sessionMembershipStatus = sessionUser?.membershipStatus as
+  const sessionMembershipSummary = sessionUser?.membershipSummary as MembershipSummary | null | undefined;
+  const sessionMembershipStatus = (sessionMembershipSummary?.status ?? sessionUser?.membershipStatus) as
     | 'active'
     | 'expired'
     | 'none'
     | undefined;
-  const sessionMembershipExpiry = sessionUser?.membershipExpiry as number | null | undefined;
+  const sessionMembershipExpiry = (sessionMembershipSummary?.expiry ?? (sessionUser?.membershipExpiry as number | null | undefined)) ?? null;
   const profileComplete = !!(firstName && lastName);
   const walletLinked = !!(walletAddress || wallets.length > 0);
   // Membership state; 'unknown' avoids UI flicker until we hydrate from session/cache
-  const [membershipStatus, setMembershipStatus] = useState<
-    "active" | "expired" | "none" | "unknown"
-  >("unknown");
-  // Flags to show when purchase/renewal or funding actions are running
-  const [isPurchasing, setIsPurchasing] = useState(false);
-  
-  const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
+const [membershipStatus, setMembershipStatus] = useState<
+  "active" | "expired" | "none" | "unknown"
+>(sessionMembershipStatus ?? 'unknown');
+// Flags to show when purchase/renewal or funding actions are running
+const [isPurchasing, setIsPurchasing] = useState(false);
+
+const [membershipSummary, setMembershipSummary] = useState<MembershipSummary | null>(sessionMembershipSummary ?? null);
+const [membershipExpiry, setMembershipExpiry] = useState<number | null>(sessionMembershipExpiry);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [autoRenewChecking, setAutoRenewChecking] = useState(false);
   const [autoRenewStateReady, setAutoRenewStateReady] = useState(false);
@@ -300,6 +311,7 @@ export default function Home() {
   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
+  const membershipResolvedRef = useRef(false);
   const nftFetchSeq = useRef(0);
   const lastFetchedAddresses = useRef<string | null>(null);
   const autoRenewClearedRef = useRef(false);
@@ -311,9 +323,9 @@ export default function Home() {
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
-  const [authError, setAuthError] = useState<string | null>(null);
+const [authError, setAuthError] = useState<string | null>(null);
 
-  const addressList = useMemo(() => {
+const addressList = useMemo(() => {
     const raw = wallets && wallets.length
       ? wallets
       : walletAddress
@@ -321,9 +333,20 @@ export default function Home() {
       : [];
     return raw.map((a) => String(a).toLowerCase()).filter(Boolean);
   }, [wallets, walletAddress]);
-  const addressesKey = useMemo(() => addressList.join(','), [addressList]);
-  const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
-  const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabled' | 'skipped' | null;
+const addressesKey = useMemo(() => addressList.join(','), [addressList]);
+const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
+const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabled' | 'skipped' | null;
+  const activeTier = useMemo<TierMembershipSummary | null>(() => {
+    if (!membershipSummary?.tiers?.length) return null;
+    if (membershipSummary.highestActiveTier) return membershipSummary.highestActiveTier;
+    const fallbackActive = membershipSummary.tiers.find((tier) => tier.status === 'active');
+    return fallbackActive || null;
+  }, [membershipSummary]);
+  const activeTierAddress = activeTier?.tier.checksumAddress;
+  const activeTierLabel = useMemo(() => {
+    if (!activeTier) return null;
+    return activeTier.tier.label || activeTier.metadata?.name || 'Member';
+  }, [activeTier]);
   const dismissAutoRenewMessage = useCallback(() => {
     setAutoRenewMessage(null);
     setAutoRenewPromptDismissed(true);
@@ -347,7 +370,7 @@ export default function Home() {
     },
     [update]
   );
-  const autoRenewReady = autoRenewStateReady && membershipStatus === 'active';
+  const autoRenewReady = autoRenewStateReady && membershipStatus === 'active' && !!activeTierAddress;
   const needsAutoRenewStep = autoRenewReady && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed;
   const autoRenewPending = membershipStatus === 'active' && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed && !autoRenewReady;
   const showAutoRenewAlert = Boolean(autoRenewMessage);
@@ -375,18 +398,6 @@ export default function Home() {
       setAutoRenewPromptDismissed(false);
     }
   }, [autoRenewPreference, membershipStatus]);
-
-  useEffect(() => {
-    if (membershipStatus === 'active') {
-      autoRenewClearedRef.current = false;
-      return;
-    }
-    if (membershipStatus === 'unknown') return;
-    if (autoRenewPreference === null) return;
-    if (autoRenewClearedRef.current) return;
-    autoRenewClearedRef.current = true;
-    void persistAutoRenewPreference('clear');
-  }, [membershipStatus, autoRenewPreference, persistAutoRenewPreference]);
 
   // Paywall instance configured for the Base network
   const paywall = useMemo(() => {
@@ -501,7 +512,14 @@ export default function Home() {
       // initiate refresh via server API
       const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(','))}`, { cache: 'no-store' });
       if (!resp.ok) throw new Error(`expiry API: ${resp.status}`);
-      const { expiry, status } = await resp.json();
+      const payload = await resp.json();
+      const summary: MembershipSummary | null = payload && typeof payload === 'object' && Array.isArray(payload?.tiers)
+        ? (payload as MembershipSummary)
+        : null;
+      const status = (summary?.status ?? payload?.status ?? 'none') as 'active' | 'expired' | 'none';
+      const expiry = typeof (summary?.expiry ?? payload?.expiry) === 'number'
+        ? Number(summary?.expiry ?? payload?.expiry)
+        : null;
       // Only apply if this is the latest refresh
       if (seq === refreshSeq.current) {
         // Prefer fresh expiry if present; otherwise keep prior future-dated expiry
@@ -511,6 +529,9 @@ export default function Home() {
             : (membershipExpiry && membershipExpiry * 1000 > Date.now() ? membershipExpiry : null);
 
         setMembershipExpiry(preservedExpiry);
+        if (summary) {
+          setMembershipSummary(summary);
+        }
         const nowSec = Math.floor(Date.now() / 1000);
         const derived = typeof preservedExpiry === 'number' && preservedExpiry > 0
           ? (preservedExpiry > nowSec ? 'active' : 'expired')
@@ -521,13 +542,14 @@ export default function Home() {
           effectiveStatus = prevStatusRef.current;
         }
         setMembershipStatus(effectiveStatus);
+        membershipResolvedRef.current = true;
         // Persist a short-lived client cache to minimize re-checks
         try {
           const cache = { status: effectiveStatus, expiry: preservedExpiry, at: Math.floor(Date.now()/1000), addresses: addresses.join(',') };
           localStorage.setItem('membershipCache', JSON.stringify(cache));
         } catch {}
         prevStatusRef.current = effectiveStatus;
-        lastKnownMembership = { status: effectiveStatus, expiry: preservedExpiry ?? null };
+        lastKnownMembership = { status: effectiveStatus, expiry: preservedExpiry ?? null, summary: summary ?? null };
       } else {
         // stale refresh, ignore
       }
@@ -545,7 +567,9 @@ export default function Home() {
     if (!addresses.length) {
       setMembershipStatus('none');
       setMembershipExpiry(null);
-      lastKnownMembership = { status: 'none', expiry: null };
+      setMembershipSummary(null);
+      lastKnownMembership = { status: 'none', expiry: null, summary: null };
+      membershipResolvedRef.current = true;
       return;
     }
 
@@ -557,23 +581,36 @@ export default function Home() {
       if (sessionStatus === 'active') {
         setMembershipStatus('active');
         setMembershipExpiry(sessionExpiry);
-        lastKnownMembership = { status: 'active', expiry: sessionExpiry };
+        if (sessionMembershipSummary) {
+          setMembershipSummary(sessionMembershipSummary);
+        }
+        lastKnownMembership = { status: 'active', expiry: sessionExpiry, summary: sessionMembershipSummary ?? fallback?.summary ?? null };
         try { prevStatusRef.current = 'active'; } catch {}
         try {
           const cache = { status: 'active', expiry: sessionExpiry ?? null, at: Math.floor(Date.now()/1000), addresses: addressesKey };
           localStorage.setItem('membershipCache', JSON.stringify(cache));
         } catch {}
-        return;
+        membershipResolvedRef.current = true;
+        if (sessionMembershipSummary) {
+          return;
+        }
       }
 
       if (fallback?.status === 'active') {
         // Keep showing the last confirmed active state while we re-verify.
         setMembershipStatus('active');
         setMembershipExpiry(fallback.expiry ?? null);
+        if (fallback.summary) {
+          setMembershipSummary(fallback.summary);
+        }
       } else {
         // Unknown while we re-check to avoid flashing onboarding prematurely.
         setMembershipStatus('unknown');
         setMembershipExpiry(sessionExpiry);
+        if (sessionMembershipSummary) {
+          setMembershipSummary(sessionMembershipSummary);
+        }
+        membershipResolvedRef.current = false;
       }
     }
 
@@ -588,8 +625,9 @@ export default function Home() {
           setMembershipExpiry(typeof cache.expiry === 'number' ? cache.expiry : null);
           // Preserve last known good status to prevent transient downgrades
           try { if (cache.status !== 'none') { prevStatusRef.current = cache.status; } } catch {}
-          lastKnownMembership = { status: cache.status, expiry: typeof cache.expiry === 'number' ? cache.expiry : null };
+          lastKnownMembership = { status: cache.status, expiry: typeof cache.expiry === 'number' ? cache.expiry : null, summary: null };
           // Background refresh without changing checked flag
+          membershipResolvedRef.current = false;
           void refreshMembership();
           return;
         }
@@ -597,18 +635,88 @@ export default function Home() {
     } catch {}
 
     // No session value and no usable cache: do a foreground fetch once
+    membershipResolvedRef.current = false;
     void refreshMembership();
   }, [
     ready,
     authenticated,
     sessionMembershipStatus,
     sessionMembershipExpiry,
+    sessionMembershipSummary,
     addressList,
     addressesKey,
     refreshMembership,
   ]);
   useEffect(() => {
-    if (!authenticated || !walletLinked || membershipStatus !== 'active') {
+    if (!ready || !authenticated) return;
+    if (!walletLinked) return;
+    if (membershipStatus === 'active') {
+      autoRenewClearedRef.current = false;
+      return;
+    }
+    if (membershipStatus === 'unknown') return;
+    if (!membershipResolvedRef.current) return;
+    if (autoRenewPreference === null) return;
+    if (autoRenewClearedRef.current) return;
+    autoRenewClearedRef.current = true;
+    void persistAutoRenewPreference('clear');
+  }, [
+    ready,
+    authenticated,
+    walletLinked,
+    membershipStatus,
+    autoRenewPreference,
+    persistAutoRenewPreference,
+  ]);
+
+  const displayNfts = useMemo(() => {
+    const owned = Array.isArray(creatorNfts) ? creatorNfts : [];
+    const missedList = Array.isArray(missedNfts) ? missedNfts : [];
+    const includeMissed = showAllNfts && missedList.length > 0;
+    const source = includeMissed ? [...owned, ...missedList] : [...owned];
+    if (!source.length) return [] as typeof owned;
+
+    const enriched = source.map((nft) => {
+      const sortValue = (() => {
+        if (typeof nft.sortKey === 'number' && Number.isFinite(nft.sortKey)) {
+          return nft.sortKey;
+        }
+        if (nft.startTime && nft.subtitle) {
+          const parsed = Date.parse(`${nft.subtitle} ${nft.startTime}`);
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        if (nft.subtitle) {
+          const parsed = Date.parse(nft.subtitle);
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        if (nft.tokenId) {
+          const parsed = Number(nft.tokenId);
+          if (Number.isFinite(parsed)) return parsed;
+        }
+        return 0;
+      })();
+      return { ...nft, sortKey: sortValue };
+    });
+
+    return includeMissed
+      ? enriched.sort((a, b) => {
+          if ((a.sortKey ?? 0) !== (b.sortKey ?? 0)) {
+            return (b.sortKey ?? 0) - (a.sortKey ?? 0);
+          }
+          const titleA = (a.title ?? '').toLowerCase();
+          const titleB = (b.title ?? '').toLowerCase();
+          if (titleA > titleB) return -1;
+          if (titleA < titleB) return 1;
+          const tokenA = (a.tokenId ?? '').toString().toLowerCase();
+          const tokenB = (b.tokenId ?? '').toString().toLowerCase();
+          if (tokenA > tokenB) return -1;
+          if (tokenA < tokenB) return 1;
+          return 0;
+        })
+      : enriched;
+  }, [creatorNfts, missedNfts, showAllNfts]);
+  useEffect(() => {
+    if (!authenticated || !walletLinked || membershipStatus !== 'active' || !activeTierAddress) {
       setAutoRenewMonths(null);
       setAutoRenewChecking(false);
       setAutoRenewStateReady(false);
@@ -618,7 +726,7 @@ export default function Home() {
       lastFetchedAddresses.current = null;
       return;
     }
-    if (!USDC_ADDRESS || !LOCK_ADDRESS) {
+    if (!USDC_ADDRESS) {
       setAutoRenewMonths(null);
       setAutoRenewChecking(false);
       return;
@@ -652,7 +760,7 @@ export default function Home() {
           provider
         );
         const lock = new Contract(
-          LOCK_ADDRESS,
+          activeTierAddress,
           ['function keyPrice() view returns (uint256)'],
           provider
         );
@@ -671,7 +779,7 @@ export default function Home() {
         let maxAllowance = 0n;
         for (const addr of addresses) {
           try {
-            const allowance: bigint = await erc20.allowance(addr, LOCK_ADDRESS);
+            const allowance: bigint = await erc20.allowance(addr, activeTierAddress);
             if (allowance > maxAllowance) {
               maxAllowance = allowance;
             }
@@ -698,7 +806,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [authenticated, walletLinked, addressList, addressesKey, membershipStatus, autoRenewRefreshKey]);
+  }, [authenticated, walletLinked, addressList, addressesKey, membershipStatus, autoRenewRefreshKey, activeTierAddress]);
 
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active') return;
@@ -759,8 +867,8 @@ export default function Home() {
   const enableAutoRenew = useCallback(async () => {
     if (autoRenewProcessing) return;
     setAutoRenewMessage(null);
-    if (!USDC_ADDRESS || !LOCK_ADDRESS) {
-      setAutoRenewMessage('Auto-renew is unavailable. Missing contract configuration.');
+    if (!USDC_ADDRESS || !activeTierAddress) {
+      setAutoRenewMessage('Auto-renew is unavailable. No active membership tier detected.');
       return;
     }
     const provider = (window as any)?.ethereum;
@@ -784,7 +892,7 @@ export default function Home() {
         browserProvider
       );
       const lock = new Contract(
-        LOCK_ADDRESS,
+        activeTierAddress,
         ['function keyPrice() view returns (uint256)'],
         browserProvider
       );
@@ -796,12 +904,12 @@ export default function Home() {
         price = 100000n;
       }
       const owner = await signer.getAddress();
-      const current: bigint = await erc20Reader.allowance(owner, LOCK_ADDRESS);
+      const current: bigint = await erc20Reader.allowance(owner, activeTierAddress);
       const targetAllowance = price * 12n;
       if (current >= targetAllowance) {
         setAutoRenewMessage('Auto-renew is already enabled for up to 12 months at the current price.');
       } else {
-        const tx = await erc20.approve(LOCK_ADDRESS, targetAllowance);
+        const tx = await erc20.approve(activeTierAddress, targetAllowance);
         await tx.wait();
         setAutoRenewMessage('Auto-renew enabled. We will attempt renewals automatically (up to 12 months).');
       }
@@ -815,7 +923,7 @@ export default function Home() {
       setAutoRenewProcessing(false);
       setAutoRenewRefreshKey((value) => value + 1);
     }
-  }, [autoRenewProcessing, ensureBaseNetwork, persistAutoRenewPreference]);
+  }, [autoRenewProcessing, ensureBaseNetwork, persistAutoRenewPreference, activeTierAddress]);
 
   const handleSkipAutoRenew = useCallback(() => {
     setAutoRenewPromptDismissed(true);
@@ -850,7 +958,14 @@ export default function Home() {
           try {
             const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(','))}`, { cache: 'no-store' });
             if (resp.ok) {
-              const { status, expiry } = await resp.json();
+              const payload = await resp.json();
+              const summary: MembershipSummary | null = payload && typeof payload === 'object' && Array.isArray(payload?.tiers)
+                ? (payload as MembershipSummary)
+                : null;
+              const status = summary?.status ?? payload?.status;
+              const expiry = typeof (summary?.expiry ?? payload?.expiry) === 'number'
+                ? Number(summary?.expiry ?? payload?.expiry)
+                : null;
               const nowSec = Math.floor(Date.now() / 1000);
               if (status === 'active' || (typeof expiry === 'number' && expiry > nowSec)) {
                 break;
@@ -1078,12 +1193,39 @@ export default function Home() {
                       ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                       : 'Active'}
                   </p>
+                  {activeTierLabel ? (
+                    <p className="text-sm text-muted-foreground">Tier: {activeTierLabel}</p>
+                  ) : null}
                   {autoRenewChecking ? (
                     <p className="text-sm text-muted-foreground">Checking auto-renew allowance…</p>
                   ) : typeof autoRenewMonths === 'number' && autoRenewMonths > 0 ? (
                     <p className="text-sm text-muted-foreground">
                       Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}.
                     </p>
+                  ) : null}
+                  {membershipSummary?.tiers?.length ? (
+                    <div className="space-y-1 text-xs text-muted-foreground border-t pt-2 mt-2">
+                      {membershipSummary.tiers.map((tierInfo) => {
+                        const label = tierInfo.tier.label || tierInfo.metadata?.name || tierInfo.tier.checksumAddress;
+                        const statusLabel = tierInfo.status === 'active'
+                          ? 'Active'
+                          : tierInfo.status === 'expired'
+                          ? 'Expired'
+                          : 'Not owned';
+                        const expiryLabel = tierInfo.expiry && tierInfo.expiry > 0
+                          ? ` (expires ${new Date(tierInfo.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })})`
+                          : '';
+                        return (
+                          <div key={tierInfo.tier.id} className="flex items-center justify-between gap-2">
+                            <span>{label}</span>
+                            <span className={tierInfo.status === 'active' ? 'text-emerald-600' : tierInfo.status === 'expired' ? 'text-amber-600' : 'text-muted-foreground'}>
+                              {statusLabel}
+                              {tierInfo.status !== 'none' ? expiryLabel : ''}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   ) : null}
                   <p className="text-xs text-muted-foreground">
                     Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
@@ -1233,46 +1375,9 @@ export default function Home() {
                     <p className="text-sm text-muted-foreground">Loading your collection…</p>
                   ) : creatorNftsError ? (
                     <p className="text-sm text-red-600 dark:text-red-400">{creatorNftsError}</p>
-                  ) : creatorNfts && creatorNfts.length > 0 ? (
+                  ) : displayNfts.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-2">
-                      {(showAllNfts && missedNfts
-                        ? [...creatorNfts, ...missedNfts]
-                            .map((nft) => {
-                              const sortValue = (() => {
-                                if (typeof nft.sortKey === 'number' && Number.isFinite(nft.sortKey)) {
-                                  return nft.sortKey;
-                                }
-                                if (nft.startTime && nft.subtitle) {
-                                  const parsed = Date.parse(`${nft.subtitle} ${nft.startTime}`);
-                                  if (Number.isFinite(parsed)) return parsed;
-                                }
-                                if (nft.subtitle) {
-                                  const parsed = Date.parse(nft.subtitle);
-                                  if (Number.isFinite(parsed)) return parsed;
-                                }
-                                if (nft.tokenId) {
-                                  const parsed = Number(nft.tokenId);
-                                  if (Number.isFinite(parsed)) return parsed;
-                                }
-                                return 0;
-                              })();
-                              return { ...nft, sortKey: sortValue };
-                            })
-                            .sort((a, b) => {
-                              if ((a.sortKey ?? 0) !== (b.sortKey ?? 0)) {
-                                return (b.sortKey ?? 0) - (a.sortKey ?? 0);
-                              }
-                              const titleA = (a.title ?? '').toLowerCase();
-                              const titleB = (b.title ?? '').toLowerCase();
-                              if (titleA > titleB) return -1;
-                              if (titleA < titleB) return 1;
-                              const tokenA = (a.tokenId ?? '').toString().toLowerCase();
-                              const tokenB = (b.tokenId ?? '').toString().toLowerCase();
-                              if (tokenA > tokenB) return -1;
-                              if (tokenA < tokenB) return 1;
-                              return 0;
-                            })
-                        : creatorNfts).map((nft) => {
+                      {displayNfts.map((nft) => {
                         const displayId = nft.tokenId?.startsWith('0x')
                           ? (() => {
                               try {
@@ -1286,7 +1391,8 @@ export default function Home() {
                         const explorerUrl = nft.tokenId
                           ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
                           : `${explorerBase}/address/${nft.contractAddress}`;
-                        const isOwned = creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
+                        const isOwned = Array.isArray(creatorNfts)
+                          && creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
                         const eventStart = (() => {
                           if (!nft.eventDate) return null;
                           const zone = nft.timezone || 'UTC';
@@ -1563,6 +1669,36 @@ export default function Home() {
             onPurchaseMembership={() => setConfirmOpen(true)}
             purchasing={isPurchasing}
           />
+          {MEMBERSHIP_TIERS.length ? (
+            <div className="text-sm text-muted-foreground border rounded-md p-4">
+              <div className="font-medium text-foreground mb-2">Available tiers</div>
+              <ul className="space-y-1">
+                {MEMBERSHIP_TIERS.map((tier) => {
+                  const summaryTier = membershipSummary?.tiers?.find((entry) => entry.tier.id === tier.id);
+                  const label = tier.label || summaryTier?.metadata?.name || formatAddressShort(tier.checksumAddress);
+                  const statusLabel = summaryTier?.status ?? 'none';
+                  const statusDisplay =
+                    statusLabel === 'active'
+                      ? 'Active'
+                      : statusLabel === 'expired'
+                      ? 'Expired'
+                      : 'Not owned';
+                  const expiryDisplay = summaryTier?.expiry && summaryTier.expiry > 0
+                    ? ` • expires ${new Date(summaryTier.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                    : '';
+                  return (
+                    <li key={tier.id} className="flex items-center justify-between gap-2">
+                      <span>{label}</span>
+                      <span className={statusLabel === 'active' ? 'text-emerald-600' : statusLabel === 'expired' ? 'text-amber-600' : 'text-muted-foreground'}>
+                        {statusDisplay}
+                        {statusLabel !== 'none' ? expiryDisplay : ''}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ) : null}
         </div>
       )}
       {/* Purchase/Renew prerequisites dialog */}

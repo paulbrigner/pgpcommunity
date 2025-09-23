@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -8,13 +8,13 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import { Contract, BrowserProvider, JsonRpcProvider } from "ethers";
 import {
-  LOCK_ADDRESS,
   USDC_ADDRESS,
   BASE_NETWORK_ID,
   BASE_RPC_URL,
   BASE_CHAIN_ID_HEX,
   BASE_BLOCK_EXPLORER_URL,
 } from "@/lib/config";
+import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
 
 const MAX_AUTO_RENEW_MONTHS: number = 12;
 
@@ -43,9 +43,33 @@ export default function ProfileSettingsPage() {
   const [autoRenewPrice, setAutoRenewPrice] = useState<bigint | null>(null);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [enablingAutoRenew, setEnablingAutoRenew] = useState(false);
-  const [membershipStatus, setMembershipStatus] = useState<'active' | 'expired' | 'none' | 'unknown'>('unknown');
-  const [membershipExpiry, setMembershipExpiry] = useState<number | null>(null);
+  const sessionMembershipSummary = sessionUser?.membershipSummary as MembershipSummary | null | undefined;
+  const sessionMembershipStatus = (sessionMembershipSummary?.status ?? sessionUser?.membershipStatus) as 'active' | 'expired' | 'none' | undefined;
+  const sessionMembershipExpiry = sessionMembershipSummary?.expiry ?? (sessionUser?.membershipExpiry as number | null | undefined) ?? null;
+  const [membershipSummary, setMembershipSummary] = useState<MembershipSummary | null>(sessionMembershipSummary ?? null);
+  const [membershipStatus, setMembershipStatus] = useState<'active' | 'expired' | 'none' | 'unknown'>(sessionMembershipStatus ?? 'unknown');
+  const [membershipExpiry, setMembershipExpiry] = useState<number | null>(sessionMembershipExpiry);
   const [membershipChecking, setMembershipChecking] = useState(false);
+
+  const persistAutoRenewPreference = useCallback(
+    async (value: 'enabled' | 'skipped' | 'clear') => {
+      try {
+        const resp = await fetch('/api/profile/auto-renew', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preference: value }),
+        });
+        if (!resp.ok) {
+          console.error('Persist auto-renew preference failed', await resp.text());
+        } else {
+          await update({});
+        }
+      } catch (error) {
+        console.error('Persist auto-renew preference error:', error);
+      }
+    },
+    [update]
+  );
 
   const maxMonthsLabel = `${MAX_AUTO_RENEW_MONTHS} ${MAX_AUTO_RENEW_MONTHS === 1 ? "month" : "months"}`;
   const yearText = MAX_AUTO_RENEW_MONTHS === 12 ? "1 year" : null;
@@ -58,6 +82,14 @@ export default function ProfileSettingsPage() {
           day: 'numeric',
         })
       : null;
+  const activeTier = useMemo<TierMembershipSummary | null>(() => {
+    if (!membershipSummary?.tiers?.length) return null;
+    if (membershipSummary.highestActiveTier) return membershipSummary.highestActiveTier;
+    const fallbackActive = membershipSummary.tiers.find((tier) => tier.status === 'active');
+    return fallbackActive || null;
+  }, [membershipSummary]);
+  const activeTierAddress = activeTier?.tier.checksumAddress;
+  const activeTierLabel = activeTier?.tier.label || activeTier?.metadata?.name || (activeTier?.tier.checksumAddress ?? null);
 
   useEffect(() => {
     if (!authenticated || !sessionUser) return;
@@ -89,7 +121,11 @@ export default function ProfileSettingsPage() {
       return;
     }
 
-    if (su.membershipStatus) {
+    if (sessionMembershipSummary) {
+      setMembershipSummary(sessionMembershipSummary);
+      setMembershipStatus(sessionMembershipSummary.status);
+      setMembershipExpiry(sessionMembershipSummary.expiry ?? null);
+    } else if (su.membershipStatus) {
       setMembershipStatus(su.membershipStatus as 'active' | 'expired' | 'none');
       setMembershipExpiry(typeof su.membershipExpiry === 'number' ? su.membershipExpiry : null);
     }
@@ -99,9 +135,21 @@ export default function ProfileSettingsPage() {
       try {
         const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(','))}`, { cache: 'no-store' });
         if (resp.ok) {
-          const { status, expiry } = await resp.json();
-          setMembershipStatus(status ?? 'none');
-          setMembershipExpiry(typeof expiry === 'number' ? expiry : null);
+          const payload = await resp.json();
+          const summary: MembershipSummary | null = payload && typeof payload === 'object' && Array.isArray(payload?.tiers)
+            ? (payload as MembershipSummary)
+            : null;
+          if (summary) {
+            setMembershipSummary(summary);
+            setMembershipStatus(summary.status);
+            setMembershipExpiry(summary.expiry ?? null);
+          } else {
+            const status = (payload?.status ?? 'none') as 'active' | 'expired' | 'none';
+            const expiry = typeof payload?.expiry === 'number' ? payload.expiry : null;
+            setMembershipSummary(null);
+            setMembershipStatus(status);
+            setMembershipExpiry(expiry);
+          }
         }
       } catch (e) {
         console.error('Membership check failed:', e);
@@ -109,15 +157,21 @@ export default function ProfileSettingsPage() {
         setMembershipChecking(false);
       }
     })();
-  }, [authenticated, sessionUser, wallets, walletAddress]);
+  }, [authenticated, sessionUser, wallets, walletAddress, activeTierAddress, sessionMembershipSummary]);
 
   // Check current USDC allowance vs. current key price to infer auto-renew readiness
   useEffect(() => {
     if (!authenticated) return;
     (async () => {
+      if (!activeTierAddress) {
+        setAutoRenewPrice(null);
+        setAutoRenewMonths(null);
+        setAutoRenewChecking(false);
+        return;
+      }
       setAutoRenewChecking(true);
       try {
-        if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
+        if (!USDC_ADDRESS || !activeTierAddress) throw new Error("Missing contract addresses");
         const owner = walletAddress || (wallets && wallets[0]) || null;
         if (!owner) {
           setAutoRenewPrice(null);
@@ -131,7 +185,7 @@ export default function ProfileSettingsPage() {
           provider
         );
         const lock = new Contract(
-          LOCK_ADDRESS,
+          activeTierAddress,
           [ 'function keyPrice() view returns (uint256)' ],
           provider
         );
@@ -143,7 +197,7 @@ export default function ProfileSettingsPage() {
           setAutoRenewMonths(null);
           return;
         }
-        const allowance: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+        const allowance: bigint = await erc20.allowance(owner, activeTierAddress);
         const months = Number(allowance / price);
         setAutoRenewPrice(price);
         setAutoRenewMonths(months);
@@ -154,7 +208,7 @@ export default function ProfileSettingsPage() {
         setAutoRenewChecking(false);
       }
     })();
-  }, [authenticated, sessionUser, wallets, walletAddress]);
+  }, [authenticated, sessionUser, wallets, walletAddress, activeTierAddress]);
 
   // Ensure the user's wallet is on Base before sending transactions
   const ensureBaseNetwork = async (eth: any) => {
@@ -337,6 +391,9 @@ export default function ProfileSettingsPage() {
           </div>
           <div className="space-y-2 text-sm text-muted-foreground">
             <p>
+              {activeTierLabel ? `Tier: ${activeTierLabel}` : 'Tier: none selected'}
+            </p>
+            <p>
               Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC per month
             </p>
             <p>
@@ -359,6 +416,30 @@ export default function ProfileSettingsPage() {
             <p>
               To stop automatic renewals, revoke the USDC approval granted to the membership lock. This prevents future renewals; your current period remains active until it expires.
             </p>
+            {membershipSummary?.tiers?.length ? (
+              <div className="border-t pt-2 mt-2 space-y-1 text-xs">
+                {membershipSummary.tiers.map((tierInfo) => {
+                  const label = tierInfo.tier.label || tierInfo.metadata?.name || tierInfo.tier.checksumAddress;
+                  const statusLabel = tierInfo.status === 'active'
+                    ? 'Active'
+                    : tierInfo.status === 'expired'
+                    ? 'Expired'
+                    : 'Not owned';
+                  const expiryLabel = tierInfo.status !== 'none' && tierInfo.expiry
+                    ? ` (expires ${new Date(tierInfo.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })})`
+                    : '';
+                  return (
+                    <div key={tierInfo.tier.id} className="flex items-center justify-between gap-2">
+                      <span>{label}</span>
+                      <span className={tierInfo.status === 'active' ? 'text-emerald-600' : tierInfo.status === 'expired' ? 'text-amber-600' : 'text-muted-foreground'}>
+                        {statusLabel}
+                        {expiryLabel}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
           <div className="text-sm">
             {autoRenewChecking ? (
@@ -378,13 +459,13 @@ export default function ProfileSettingsPage() {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              disabled={canceling || wallets.length === 0 || autoRenewChecking || (autoRenewMonths ?? 0) === 0}
+              disabled={canceling || wallets.length === 0 || autoRenewChecking || (autoRenewMonths ?? 0) === 0 || !activeTierAddress}
               onClick={async () => {
                 setError(null);
                 setMessage(null);
                 setCanceling(true);
                 try {
-                  if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
+                  if (!USDC_ADDRESS || !activeTierAddress) throw new Error("Missing contract addresses");
                   const eth = (globalThis as any).ethereum;
                   if (!eth) throw new Error("No wallet found in browser");
                   await ensureBaseNetwork(eth);
@@ -399,16 +480,17 @@ export default function ProfileSettingsPage() {
                     ],
                     signer
                   );
-                  const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+                  const current: bigint = await erc20.allowance(owner, activeTierAddress);
                   if (current === 0n) {
                     setMessage("Auto-renew is already disabled (no active approval).");
                     setAutoRenewMonths(0);
                   } else {
-                    const tx = await erc20.approve(LOCK_ADDRESS, 0n);
+                    const tx = await erc20.approve(activeTierAddress, 0n);
                     await tx.wait();
                     setMessage("Auto-renew disabled. Future renewals will not occur.");
                     setAutoRenewMonths(0);
                   }
+                  void persistAutoRenewPreference('skipped');
                 } catch (e: any) {
                   setError(e?.message || "Failed to update approval");
                 } finally {
@@ -420,18 +502,18 @@ export default function ProfileSettingsPage() {
             </Button>
             {!autoRenewChecking && autoRenewPrice !== null && autoRenewPrice > 0n && autoRenewMonths !== null && autoRenewMonths < MAX_AUTO_RENEW_MONTHS && (
               <Button
-                disabled={wallets.length === 0 || enablingAutoRenew}
+                disabled={wallets.length === 0 || enablingAutoRenew || !activeTierAddress}
                 onClick={async () => {
                   setError(null);
                   setMessage(null);
                   setEnablingAutoRenew(true);
-                  try {
-                    if (!USDC_ADDRESS || !LOCK_ADDRESS) throw new Error("Missing contract addresses");
-                    const price = autoRenewPrice ?? 0n;
-                    if (price <= 0n) throw new Error("Unknown membership price");
-                    const eth = (globalThis as any).ethereum;
-                    if (!eth) throw new Error("No wallet found in browser");
-                    await ensureBaseNetwork(eth);
+                try {
+                  if (!USDC_ADDRESS || !activeTierAddress) throw new Error("Missing contract addresses");
+                  const price = autoRenewPrice ?? 0n;
+                  if (price <= 0n) throw new Error("Unknown membership price");
+                  const eth = (globalThis as any).ethereum;
+                  if (!eth) throw new Error("No wallet found in browser");
+                  await ensureBaseNetwork(eth);
                     const provider = new BrowserProvider(eth, BASE_NETWORK_ID);
                     const signer = await provider.getSigner();
                     const owner = await signer.getAddress();
@@ -444,17 +526,18 @@ export default function ProfileSettingsPage() {
                       signer
                     );
                     const desired = price * BigInt(MAX_AUTO_RENEW_MONTHS);
-                    const current: bigint = await erc20.allowance(owner, LOCK_ADDRESS);
+                    const current: bigint = await erc20.allowance(owner, activeTierAddress);
                     if (current === desired) {
                       setMessage(`Auto-renew is already approved for ${maxMonthsWithYear}.`);
                     } else {
-                      const tx = await erc20.approve(LOCK_ADDRESS, desired);
+                      const tx = await erc20.approve(activeTierAddress, desired);
                       await tx.wait();
                       setMessage((autoRenewMonths ?? 0) > 0
                         ? `Auto-renew approvals topped up to ${maxMonthsWithYear}.`
                         : `Auto-renew enabled for ${maxMonthsWithYear}.`);
                     }
                     setAutoRenewMonths(MAX_AUTO_RENEW_MONTHS);
+                    void persistAutoRenewPreference('enabled');
                   } catch (e: any) {
                     setError(e?.message || "Failed to enable auto‑renew");
                   } finally {

@@ -53,7 +53,48 @@ _Total:_ approximately 2–3 weeks elapsed time, assuming focused work and timel
 - Auto-renew defaults per tier and whether to support tier upgrades/downgrades in-app.
 - Reporting requirements for tier subscriptions (analytics, admin dashboards).
 
-## Next Steps
-1. Gather tier requirements and finalize configuration format.
-2. Begin Phase 1 refactor in a feature branch; maintain this document with updates as work progresses.
-3. Schedule time for end-to-end Unlock purchase testing once multi-tier changes land.
+## Immediate Implementation Tasks
+We are now ready to execute Phase 1 for the three Unlock memberships:
+
+- Holder: `0xed16cd934780a48697c2fd89f1b13ad15f0b64e1`
+- Staker: `0xb5d2e305c589b1d7a1873c73637adf9a52724105`
+- Builder: `0xdd7fff4931409e2d1da47be9798fd404cc44e9a9`
+
+Status (2025-09-21): Tier-aware config, membership summary plumbing, NextAuth session enrichment, and primary UI surfaces (home + settings) now support multi-tier memberships.
+
+### Environment & Config
+- Replace `LOCK_ADDRESS` with a tier array (e.g. `NEXT_PUBLIC_LOCK_TIERS=[{"address":"0x...","label":"Holder"},…]`).
+- Update `lib/config.ts` to expose both the tier collection and helper accessors (default tier list, optional primary lock for backwards compatibility).
+- Ensure Amplify/`.env` templates document the new variables.
+
+### Membership Evaluation
+- Update `lib/membership.ts` / `lib/membership-server.ts` to iterate across all tier locks when checking expiry or status.
+- Normalise the response shape so we can store:
+  * per-tier status (`active`/`expired`/`none`),
+  * latest expiry per tier,
+  * highest active tier (for entitlement decisions),
+  * base flags (`hasAnyActiveMembership`).
+- Cache tier metadata (name, price, icon) from lock metadata or a local config for display and gating.
+
+### Session & JWT
+- Extend the NextAuth JWT callback to embed the tier summary (map of tierId → status/expiry) and the derived highest tier.
+- Update the session callback to hydrate the same data for the client. Preserve existing `membershipStatus`/`membershipExpiry` fields for backward compatibility by mapping from the highest active tier.
+
+### UI & UX Touchpoints
+- Home/onboarding: surface tier list, show active tier badges, and adjust messaging when no membership is active but some tiers exist.
+- Membership card: display current tier, expiry per tier, and optional upgrade CTA (even if tiers functionally identical today).
+- Auto-renew flows: store allowance per lock; when a membership is purchased identify the lock/tier involved and handle approvals accordingly.
+- Settings → Profile: list each tier with its auto-renew status and allow enabling/disabling per tier.
+
+### API Updates
+- `/api/membership/expiry`: accept watch list of addresses, return structured tier results rather than a single status.
+- `/api/nfts`: continue to expose collected NFTs but include tier info when the NFT corresponds to one of the tier locks.
+
+### Testing & QA
+- Add unit coverage for the tier-aware membership helper.
+- Manual testing matrix: purchase/renew each tier, auto-renew on/off per tier, login/logout flows, and regression for content gating.
+- Update `docs`/README with instructions for setting tier env values, redeploy Amplify with new config.
+
+### Deployment Checklist
+- Update Amplify environment variables and re-run builds with new config.
+- Seed staging with test purchases for each tier, verify analytics/logging, then promote to production.

@@ -15,9 +15,9 @@ import {
   EMAIL_SERVER_SECURE,
   BASE_RPC_URL,
   BASE_NETWORK_ID,
-  LOCK_ADDRESS,
+  MEMBERSHIP_TIERS,
 } from "@/lib/config";
-import { getStatusAndExpiry } from "@/lib/membership-server";
+import { getMembershipSummary } from "@/lib/membership-server";
 import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
 
 const PENDING_SIGNUP_PREFIX = "PENDING_SIGNUP#";
@@ -207,15 +207,15 @@ const authOptions = {
             : [];
           // Only consider addresses actually linked to this user
           const addresses = wallets;
-          if (addresses.length) {
-            const { status, expiry } = await getStatusAndExpiry(
+          if (addresses.length && MEMBERSHIP_TIERS.length > 0) {
+            const summary = await getMembershipSummary(
               addresses,
               BASE_RPC_URL,
-              BASE_NETWORK_ID,
-              LOCK_ADDRESS
+              BASE_NETWORK_ID
             );
-            (token as any).membershipStatus = status;
-            (token as any).membershipExpiry = expiry ?? null;
+            (token as any).membershipStatus = summary.status;
+            (token as any).membershipExpiry = summary.expiry ?? null;
+            (token as any).membershipHighestTier = summary.highestActiveTier?.tier?.id ?? null;
             (token as any).membershipCheckedAt = nowSec;
           }
         }
@@ -257,6 +257,8 @@ const authOptions = {
           // Membership info from JWT (cached server-side)
           (session.user as any).membershipStatus = (token as any)?.membershipStatus ?? null;
           (session.user as any).membershipExpiry = (token as any)?.membershipExpiry ?? null;
+          (session.user as any).membershipSummary = null;
+          (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
           // Derive display name if not set
           if (!(session.user as any).name && (userRecord as any)?.firstName) {
             const fn = (userRecord as any).firstName as string;
@@ -267,11 +269,15 @@ const authOptions = {
           (session.user as any).wallets = [];
           (session.user as any).walletAddress = token.walletAddress || null;
           (session.user as any).autoRenewPreference = (token as any)?.autoRenewPreference ?? null;
+          (session.user as any).membershipSummary = null;
+          (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
         }
       } catch (e) {
         console.error("session callback: failed to load wallets", e);
         (session.user as any).wallets = [];
         (session.user as any).walletAddress = token.walletAddress || null;
+        (session.user as any).membershipSummary = null;
+        (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
       }
       return session;
     },

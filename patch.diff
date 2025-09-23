@@ -1,0 +1,236 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/app/page.tsx b/app/page.tsx
+index f5e5f4230bf87fcc6ccf4b0d3c4aa08430ef5e72..20edb2ee1e0121155f0ac2dc4d22dba9e05b11b1 100644
+--- a/app/page.tsx
++++ b/app/page.tsx
+@@ -289,50 +289,51 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(sessionM
+     image: string | null;
+     collectionName: string | null;
+     tokenType: string | null;
+     videoUrl?: string | null;
+     sortKey?: number;
+   }> | null>(null);
+   const [upcomingNfts, setUpcomingNfts] = useState<Array<{
+     contractAddress: string;
+     title: string;
+     description: string | null;
+     subtitle?: string | null;
+     eventDate?: string | null;
+     startTime?: string | null;
+     endTime?: string | null;
+     timezone?: string | null;
+     location?: string | null;
+     image: string | null;
+     registrationUrl: string;
+     quickCheckoutConfig: Record<string, unknown> | null;
+     sortKey?: number;
+   }> | null>(null);
+   const [showAllNfts, setShowAllNfts] = useState(false);
+   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
+   const refreshSeq = useRef(0);
+   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
++  const membershipResolvedRef = useRef(false);
+   const nftFetchSeq = useRef(0);
+   const lastFetchedAddresses = useRef<string | null>(null);
+   const autoRenewClearedRef = useRef(false);
+   const [confirmOpen, setConfirmOpen] = useState(false);
+   const [autoRenewPromptDismissed, setAutoRenewPromptDismissed] = useState(false);
+   const [autoRenewProcessing, setAutoRenewProcessing] = useState(false);
+   const [autoRenewMessage, setAutoRenewMessage] = useState<string | null>(null);
+   const [autoRenewRefreshKey, setAutoRenewRefreshKey] = useState(0);
+   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
+ 
+   // Local auth error (e.g., SIWE with unlinked wallet)
+ const [authError, setAuthError] = useState<string | null>(null);
+ 
+ const addressList = useMemo(() => {
+     const raw = wallets && wallets.length
+       ? wallets
+       : walletAddress
+       ? [walletAddress]
+       : [];
+     return raw.map((a) => String(a).toLowerCase()).filter(Boolean);
+   }, [wallets, walletAddress]);
+ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
+ const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
+ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabled' | 'skipped' | null;
+   const activeTier = useMemo<TierMembershipSummary | null>(() => {
+@@ -519,168 +520,173 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
+       const expiry = typeof (summary?.expiry ?? payload?.expiry) === 'number'
+         ? Number(summary?.expiry ?? payload?.expiry)
+         : null;
+       // Only apply if this is the latest refresh
+       if (seq === refreshSeq.current) {
+         // Prefer fresh expiry if present; otherwise keep prior future-dated expiry
+         const preservedExpiry =
+           (typeof expiry === 'number' && expiry > 0)
+             ? expiry
+             : (membershipExpiry && membershipExpiry * 1000 > Date.now() ? membershipExpiry : null);
+ 
+         setMembershipExpiry(preservedExpiry);
+         if (summary) {
+           setMembershipSummary(summary);
+         }
+         const nowSec = Math.floor(Date.now() / 1000);
+         const derived = typeof preservedExpiry === 'number' && preservedExpiry > 0
+           ? (preservedExpiry > nowSec ? 'active' : 'expired')
+           : undefined;
+         let effectiveStatus = (derived ?? status) as "active" | "expired" | "none";
+         // Avoid downgrading to 'none' on transient RPC failures if we previously knew better
+         if (effectiveStatus === 'none' && prevStatusRef.current !== 'none') {
+           effectiveStatus = prevStatusRef.current;
+         }
+         setMembershipStatus(effectiveStatus);
++        membershipResolvedRef.current = true;
+         // Persist a short-lived client cache to minimize re-checks
+         try {
+           const cache = { status: effectiveStatus, expiry: preservedExpiry, at: Math.floor(Date.now()/1000), addresses: addresses.join(',') };
+           localStorage.setItem('membershipCache', JSON.stringify(cache));
+         } catch {}
+         prevStatusRef.current = effectiveStatus;
+         lastKnownMembership = { status: effectiveStatus, expiry: preservedExpiry ?? null, summary: summary ?? null };
+       } else {
+         // stale refresh, ignore
+       }
+     } catch (error) {
+       console.error("Membership check failed:", error);
+     }
+   }, [ready, authenticated, walletAddress, wallets, membershipExpiry]);
+ 
+   useEffect(() => {
+     // Prefer server-provided membership data via session; fall back to client cache; otherwise fetch in background
+     if (!ready || !authenticated) return;
+     const addresses = addressList;
+ 
+     // If no linked wallets yet, we know membership cannot be verified; show onboarding immediately.
+     if (!addresses.length) {
+       setMembershipStatus('none');
+       setMembershipExpiry(null);
+       setMembershipSummary(null);
+       lastKnownMembership = { status: 'none', expiry: null, summary: null };
++      membershipResolvedRef.current = true;
+       return;
+     }
+ 
+     if (sessionMembershipStatus) {
+       const sessionStatus = sessionMembershipStatus;
+       const sessionExpiry = typeof sessionMembershipExpiry === 'number' ? sessionMembershipExpiry : null;
+       const fallback = lastKnownMembership;
+ 
+       if (sessionStatus === 'active') {
+         setMembershipStatus('active');
+         setMembershipExpiry(sessionExpiry);
+         if (sessionMembershipSummary) {
+           setMembershipSummary(sessionMembershipSummary);
+         }
+         lastKnownMembership = { status: 'active', expiry: sessionExpiry, summary: sessionMembershipSummary ?? fallback?.summary ?? null };
+         try { prevStatusRef.current = 'active'; } catch {}
+         try {
+           const cache = { status: 'active', expiry: sessionExpiry ?? null, at: Math.floor(Date.now()/1000), addresses: addressesKey };
+           localStorage.setItem('membershipCache', JSON.stringify(cache));
+         } catch {}
++        membershipResolvedRef.current = true;
+         if (sessionMembershipSummary) {
+           return;
+         }
+       }
+ 
+       if (fallback?.status === 'active') {
+         // Keep showing the last confirmed active state while we re-verify.
+         setMembershipStatus('active');
+         setMembershipExpiry(fallback.expiry ?? null);
+         if (fallback.summary) {
+           setMembershipSummary(fallback.summary);
+         }
+       } else {
+         // Unknown while we re-check to avoid flashing onboarding prematurely.
+         setMembershipStatus('unknown');
+         setMembershipExpiry(sessionExpiry);
+         if (sessionMembershipSummary) {
+           setMembershipSummary(sessionMembershipSummary);
+         }
++        membershipResolvedRef.current = false;
+       }
+     }
+ 
+     // Try client cache (5 min TTL)
+     try {
+       const raw = localStorage.getItem('membershipCache');
+       if (raw) {
+         const cache = JSON.parse(raw || '{}');
+         const age = Math.floor(Date.now()/1000) - (cache?.at || 0);
+         if (cache?.addresses === addressesKey && age < 300 && cache?.status) {
+           setMembershipStatus(cache.status);
+           setMembershipExpiry(typeof cache.expiry === 'number' ? cache.expiry : null);
+           // Preserve last known good status to prevent transient downgrades
+           try { if (cache.status !== 'none') { prevStatusRef.current = cache.status; } } catch {}
+           lastKnownMembership = { status: cache.status, expiry: typeof cache.expiry === 'number' ? cache.expiry : null, summary: null };
+           // Background refresh without changing checked flag
++          membershipResolvedRef.current = false;
+           void refreshMembership();
+           return;
+         }
+       }
+     } catch {}
+ 
+     // No session value and no usable cache: do a foreground fetch once
++    membershipResolvedRef.current = false;
+     void refreshMembership();
+   }, [
+     ready,
+     authenticated,
+     sessionMembershipStatus,
+     sessionMembershipExpiry,
+     sessionMembershipSummary,
+     addressList,
+     addressesKey,
+     refreshMembership,
+   ]);
+   useEffect(() => {
+     if (!ready || !authenticated) return;
+     if (!walletLinked) return;
+-    if (sessionMembershipStatus === 'active') return;
+     if (membershipStatus === 'active') {
+       autoRenewClearedRef.current = false;
+       return;
+     }
+     if (membershipStatus === 'unknown') return;
++    if (!membershipResolvedRef.current) return;
+     if (autoRenewPreference === null) return;
+     if (autoRenewClearedRef.current) return;
+     autoRenewClearedRef.current = true;
+     void persistAutoRenewPreference('clear');
+   }, [
+     ready,
+     authenticated,
+     walletLinked,
+     membershipStatus,
+-    sessionMembershipStatus,
+     autoRenewPreference,
+     persistAutoRenewPreference,
+   ]);
+   useEffect(() => {
+     if (!authenticated || !walletLinked || membershipStatus !== 'active' || !activeTierAddress) {
+       setAutoRenewMonths(null);
+       setAutoRenewChecking(false);
+       setAutoRenewStateReady(false);
+       setCreatorNfts(null);
+       setCreatorNftsLoading(false);
+       setCreatorNftsError(null);
+       lastFetchedAddresses.current = null;
+       return;
+     }
+     if (!USDC_ADDRESS) {
+       setAutoRenewMonths(null);
+       setAutoRenewChecking(false);
+       return;
+     }
+     const addresses = addressList;
+     if (!addresses.length) {
+       setAutoRenewMonths(null);
+       setAutoRenewChecking(false);
+       setCreatorNfts(null);
+       setCreatorNftsLoading(false);
+ 
+EOF
+)

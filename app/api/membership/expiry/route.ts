@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { BASE_NETWORK_ID, BASE_RPC_URL, LOCK_ADDRESS } from '@/lib/config';
-import { getStatusAndExpiry } from '@/lib/membership-server';
+import { BASE_NETWORK_ID, BASE_RPC_URL, MEMBERSHIP_TIERS } from '@/lib/config';
+import { getMembershipSummary, getStatusAndExpiry } from '@/lib/membership-server';
 
 export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const addrsParam = searchParams.get('addresses');
-    const lock = (searchParams.get('lock') || LOCK_ADDRESS) as string;
     const rpcUrl = BASE_RPC_URL;
     const networkId = BASE_NETWORK_ID;
 
@@ -18,8 +17,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'no valid addresses' }, { status: 400 });
     }
 
-    const { status, expiry } = await getStatusAndExpiry(addresses, rpcUrl, networkId, lock);
-    return NextResponse.json({ status, expiry });
+    const lockOverride = searchParams.get('lock');
+    if (lockOverride) {
+      const { status, expiry } = await getStatusAndExpiry(addresses, rpcUrl, networkId, lockOverride);
+      return NextResponse.json({ status, expiry });
+    }
+
+    const summary = await getMembershipSummary(addresses, rpcUrl, networkId);
+    if (!summary.tiers.length && MEMBERSHIP_TIERS.length === 0) {
+      return NextResponse.json({ status: summary.status, expiry: summary.expiry });
+    }
+    return NextResponse.json(summary);
   } catch (e: any) {
     return NextResponse.json({ error: e?.message || 'Unexpected error' }, { status: 500 });
   }

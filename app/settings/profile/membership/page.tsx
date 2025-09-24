@@ -33,7 +33,7 @@ import {
   savePrefetchedMembership,
 } from "@/lib/membership-prefetch";
 
-const MAX_AUTO_RENEW_MONTHS = 12;
+const MAX_AUTO_RENEW_MONTHS: number = 12;
 
 export default function MembershipSettingsPage() {
   const { data: session, status, update } = useSession();

@@ -259,6 +259,16 @@ export default function MembershipSettingsPage() {
     () => resolveTierLabel(desiredTier, effectiveDesiredTierId ?? sessionDesiredMembershipTierId),
     [desiredTier, effectiveDesiredTierId, sessionDesiredMembershipTierId],
   );
+  const pendingTierLabel =
+    (currentTier?.status === "active" || membershipStatus === "active") &&
+    normalizedDesiredTierId &&
+    normalizedDesiredTierId !== normalizedCurrentTierId &&
+    desiredTierLabel
+      ? desiredTierLabel
+      : null;
+  const tierSummaryText = pendingTierLabel
+    ? `Tier: ${currentTierLabel ?? "None selected"} (switch to ${pendingTierLabel} pending upon expiration).`
+    : `Tier: ${currentTierLabel ?? "None selected"}.`;
 
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
     if (desiredTier?.status === "active") return desiredTier;
@@ -266,8 +276,6 @@ export default function MembershipSettingsPage() {
     return desiredTier?.status === "expired" ? desiredTier : null;
   }, [currentTier, desiredTier]);
   const renewalTierAddress = renewalTier?.tier.checksumAddress ?? null;
-  const renewalTierLabel = resolveTierLabel(renewalTier, renewalTier?.tier.id);
-
   const tierOptions = useMemo(() => {
     return MEMBERSHIP_TIERS.map((tier, index) => {
       const summary = membershipSummary?.tiers?.find(
@@ -447,58 +455,65 @@ export default function MembershipSettingsPage() {
     persistTierSelection,
   ]);
 
-  useEffect(() => {
-    if (!authenticated) return;
-    (async () => {
-      if (!renewalTierAddress) {
+  const checkAutoRenewStatus = useCallback(async () => {
+    if (!authenticated) {
+      setAutoRenewPrice(null);
+      setAutoRenewMonths(null);
+      setAutoRenewChecking(false);
+      return;
+    }
+    if (!renewalTierAddress) {
+      setAutoRenewPrice(null);
+      setAutoRenewMonths(null);
+      setAutoRenewChecking(false);
+      return;
+    }
+    setAutoRenewChecking(true);
+    try {
+      if (!USDC_ADDRESS || !renewalTierAddress) throw new Error("Missing contract addresses");
+      const owner = walletAddress || (wallets && wallets[0]) || null;
+      if (!owner) {
         setAutoRenewPrice(null);
         setAutoRenewMonths(null);
-        setAutoRenewChecking(false);
         return;
       }
-      setAutoRenewChecking(true);
+      const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+      const erc20 = new Contract(
+        USDC_ADDRESS,
+        ["function allowance(address owner, address spender) view returns (uint256)"],
+        provider,
+      );
+      const lock = new Contract(
+        renewalTierAddress,
+        ["function keyPrice() view returns (uint256)"],
+        provider,
+      );
+      let price: bigint = 0n;
       try {
-        if (!USDC_ADDRESS || !renewalTierAddress) throw new Error("Missing contract addresses");
-        const owner = walletAddress || (wallets && wallets[0]) || null;
-        if (!owner) {
-          setAutoRenewPrice(null);
-          setAutoRenewMonths(null);
-          return;
-        }
-        const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
-        const erc20 = new Contract(
-          USDC_ADDRESS,
-          ["function allowance(address owner, address spender) view returns (uint256)"],
-          provider,
-        );
-        const lock = new Contract(
-          renewalTierAddress,
-          ["function keyPrice() view returns (uint256)"],
-          provider,
-        );
-        let price: bigint = 0n;
-        try {
-          price = await lock.keyPrice();
-        } catch {
-          price = 100000n;
-        }
-        if (price <= 0n) {
-          setAutoRenewPrice(null);
-          setAutoRenewMonths(null);
-          return;
-        }
-        const allowance: bigint = await erc20.allowance(owner, renewalTierAddress);
-        const months = Number(allowance / price);
-        setAutoRenewPrice(price);
-        setAutoRenewMonths(months);
+        price = await lock.keyPrice();
       } catch {
+        price = 100000n;
+      }
+      if (price <= 0n) {
         setAutoRenewPrice(null);
         setAutoRenewMonths(null);
-      } finally {
-        setAutoRenewChecking(false);
+        return;
       }
-    })();
-  }, [authenticated, sessionUser, wallets, walletAddress, renewalTierAddress]);
+      const allowance: bigint = await erc20.allowance(owner, renewalTierAddress);
+      const months = Number(allowance / price);
+      setAutoRenewPrice(price);
+      setAutoRenewMonths(months);
+    } catch {
+      setAutoRenewPrice(null);
+      setAutoRenewMonths(null);
+    } finally {
+      setAutoRenewChecking(false);
+    }
+  }, [authenticated, renewalTierAddress, walletAddress, wallets]);
+
+  useEffect(() => {
+    void checkAutoRenewStatus();
+  }, [checkAutoRenewStatus]);
 
   const ensureBaseNetwork = useCallback(async (eth: any) => {
     const targetHex = BASE_CHAIN_ID_HEX;
@@ -597,6 +612,7 @@ export default function MembershipSettingsPage() {
         disableMessage = previousTierLabel ? `${result.message} (Tier: ${previousTierLabel}).` : result.message;
         setAutoRenewMonths(0);
         void persistAutoRenewPreference("skipped");
+        void checkAutoRenewStatus();
       }
 
       const provider = (window as any)?.ethereum;
@@ -701,6 +717,7 @@ export default function MembershipSettingsPage() {
     paywall,
     persistAutoRenewPreference,
     persistTierSelection,
+    checkAutoRenewStatus,
     refreshMembershipSummary,
     selectedTierOption,
     update,
@@ -750,19 +767,7 @@ export default function MembershipSettingsPage() {
           </p>
         </div>
         <div className="space-y-2 text-sm text-muted-foreground">
-          <p>Current tier: {currentTierLabel ?? "None selected"}</p>
-          {desiredTierLabel ? (
-            <p>
-              Desired tier: {desiredTierLabel}
-              {normalizedDesiredTierId && normalizedDesiredTierId === normalizedCurrentTierId
-                ? " (same as current)"
-                : desiredTier?.status === "active"
-                ? " (most recently activated)"
-                : desiredTier?.status === "expired"
-                ? " (expired)"
-                : " (not active yet)"}
-            </p>
-          ) : null}
+          <p>{tierSummaryText}</p>
           <p>
             Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC per month
           </p>
@@ -783,38 +788,6 @@ export default function MembershipSettingsPage() {
             To stop automatic renewals, revoke the USDC approval granted to the membership lock. This prevents future renewals;
             your current period remains active until it expires.
           </p>
-          {membershipSummary?.tiers?.length ? (
-            <div className="mt-2 space-y-1 border-t pt-2 text-xs">
-              {membershipSummary.tiers.map((tierInfo) => {
-                const label = tierInfo.tier.label || tierInfo.metadata?.name || tierInfo.tier.checksumAddress;
-                const statusLabel = tierInfo.status === "active" ? "Active" : tierInfo.status === "expired" ? "Expired" : "Not owned";
-                const expiryLabel = tierInfo.status !== "none" && tierInfo.expiry
-                  ? ` (expires ${new Date(tierInfo.expiry * 1000).toLocaleDateString(undefined, {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })})`
-                  : "";
-                return (
-                  <div key={tierInfo.tier.id} className="flex items-center justify-between gap-2">
-                    <span>{label}</span>
-                    <span
-                      className={
-                        tierInfo.status === "active"
-                          ? "text-emerald-600"
-                          : tierInfo.status === "expired"
-                          ? "text-amber-600"
-                          : "text-muted-foreground"
-                      }
-                    >
-                      {statusLabel}
-                      {expiryLabel}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
         </div>
         <div className="text-sm">
           {autoRenewChecking ? (
@@ -830,19 +803,15 @@ export default function MembershipSettingsPage() {
               }
             >
               {autoRenewMonths >= MAX_AUTO_RENEW_MONTHS
-                ? `Auto-renew is enabled for up to ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} on the ${
-                    renewalTierLabel ?? "selected"
-                  } tier at the current price${
+                ? `Auto-renew is enabled for up to ${autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`} at the current price${
                     autoRenewMonths === MAX_AUTO_RENEW_MONTHS && yearText ? ` (${yearText} maximum).` : "."
                   }`
                 : `Auto-renew approvals cover ${
                     autoRenewMonths === 1 ? "1 month" : `${autoRenewMonths} months`
-                  } for the ${renewalTierLabel ?? "selected"} tier (less than the ${MAX_AUTO_RENEW_MONTHS}-month maximum).`}
+                  }, which is below the ${MAX_AUTO_RENEW_MONTHS}-month maximum.`}
             </span>
           ) : (
-            <span className="text-amber-600 dark:text-amber-400">
-              Auto‑renew is off for the {renewalTierLabel ?? "selected"} tier (0 months approved).
-            </span>
+            <span className="text-amber-600 dark:text-amber-400">Auto‑renew is off (0 months approved).</span>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -859,16 +828,17 @@ export default function MembershipSettingsPage() {
               setError(null);
               setMessage(null);
               setCanceling(true);
-              try {
-                const result = await disableAutoRenewForDesiredTier();
-                setMessage(renewalTierLabel ? `${result.message} (Tier: ${renewalTierLabel}).` : result.message);
-                setAutoRenewMonths(0);
-                void persistAutoRenewPreference("skipped");
-              } catch (err: any) {
-                setError(err?.message || "Failed to disable auto‑renew");
-              } finally {
-                setCanceling(false);
-              }
+            try {
+              const result = await disableAutoRenewForDesiredTier();
+              setMessage(result.message);
+              setAutoRenewMonths(0);
+              void persistAutoRenewPreference("skipped");
+              void checkAutoRenewStatus();
+            } catch (err: any) {
+              setError(err?.message || "Failed to disable auto‑renew");
+            } finally {
+              setCanceling(false);
+            }
             }}
           >
             {canceling ? "Disabling…" : "Disable auto‑renew"}
@@ -913,24 +883,19 @@ export default function MembershipSettingsPage() {
                 const desired = price * BigInt(MAX_AUTO_RENEW_MONTHS);
                 const current: bigint = await erc20.allowance(owner, renewalTierAddress);
                 if (current === desired) {
-                  setMessage(
-                    `Auto-renew is already approved for ${
-                      renewalTierLabel ? `the ${renewalTierLabel} tier` : "your membership"
-                    } for ${maxMonthsWithYear}.`,
-                  );
+                  setMessage(`Auto-renew is already approved for ${maxMonthsWithYear}.`);
                 } else {
                   const tx = await erc20.approve(renewalTierAddress, desired);
                   await tx.wait();
                   setMessage(
                     (autoRenewMonths ?? 0) > 0
                       ? `Auto-renew approvals topped up to ${maxMonthsWithYear}.`
-                      : `Auto-renew enabled for ${
-                          renewalTierLabel ? `the ${renewalTierLabel} tier` : "your membership"
-                        } for ${maxMonthsWithYear}.`,
+                      : `Auto-renew enabled for ${maxMonthsWithYear}.`,
                   );
                 }
                 setAutoRenewMonths(MAX_AUTO_RENEW_MONTHS);
                 void persistAutoRenewPreference("enabled");
+                void checkAutoRenewStatus();
               } catch (err: any) {
                 setError(err?.message || "Failed to enable auto‑renew");
               } finally {

@@ -345,6 +345,16 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
     () => resolveTierLabel(desiredTier, effectiveDesiredTierId ?? sessionDesiredMembershipTierId),
     [desiredTier, effectiveDesiredTierId, sessionDesiredMembershipTierId]
   );
+  const pendingTierLabel =
+    (currentTier?.status === 'active' || membershipStatus === 'active') &&
+    normalizedDesiredTierId &&
+    normalizedDesiredTierId !== normalizedCurrentTierId &&
+    desiredTierLabel
+      ? desiredTierLabel
+      : null;
+  const tierSummaryText = pendingTierLabel
+    ? `Tier: ${currentTierLabel ?? 'None selected'} (switch to ${pendingTierLabel} pending upon expiration).`
+    : `Tier: ${currentTierLabel ?? 'None selected'}.`;
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
     if (desiredTier?.status === 'active') return desiredTier;
     if (currentTier?.status === 'active') return currentTier;
@@ -1326,62 +1336,13 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
                       ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                       : 'Active'}
                   </p>
-                  <p className="text-sm text-muted-foreground">
-                    Current tier: {currentTierLabel ?? 'None selected'}
-                  </p>
-                  {desiredTierLabel ? (
-                    <p className="text-sm text-muted-foreground">
-                      Desired tier: {desiredTierLabel}
-                      {normalizedDesiredTierId && normalizedDesiredTierId === normalizedCurrentTierId
-                        ? ' (same as current)'
-                        : desiredTier?.status === 'active'
-                        ? ' (most recently activated)'
-                        : desiredTier?.status === 'expired'
-                        ? ' (expired)'
-                        : ' (not active yet)'}
-                    </p>
-                  ) : null}
-                  {renewalTierLabel ? (
-                    <p className="text-sm text-muted-foreground">
-                      Auto-renew target: {renewalTierLabel}
-                      {renewalTier?.status === 'active'
-                        ? ''
-                        : renewalTier?.status === 'expired'
-                        ? ' (expired)'
-                        : ' (not active yet)'}
-                    </p>
-                  ) : null}
+                  <p className="text-sm text-muted-foreground">{tierSummaryText}</p>
                   {autoRenewChecking ? (
                     <p className="text-sm text-muted-foreground">Checking auto-renew allowance…</p>
                   ) : typeof autoRenewMonths === 'number' && autoRenewMonths > 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}
-                      {renewalTierLabel ? ` on the ${renewalTierLabel} tier.` : '.'}
+                      Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}.
                     </p>
-                  ) : null}
-                  {membershipSummary?.tiers?.length ? (
-                    <div className="space-y-1 text-xs text-muted-foreground border-t pt-2 mt-2">
-                      {membershipSummary.tiers.map((tierInfo) => {
-                        const label = tierInfo.tier.label || tierInfo.metadata?.name || tierInfo.tier.checksumAddress;
-                        const statusLabel = tierInfo.status === 'active'
-                          ? 'Active'
-                          : tierInfo.status === 'expired'
-                          ? 'Expired'
-                          : 'Not owned';
-                        const expiryLabel = tierInfo.expiry && tierInfo.expiry > 0
-                          ? ` (expires ${new Date(tierInfo.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })})`
-                          : '';
-                        return (
-                          <div key={tierInfo.tier.id} className="flex items-center justify-between gap-2">
-                            <span>{label}</span>
-                            <span className={tierInfo.status === 'active' ? 'text-emerald-600' : tierInfo.status === 'expired' ? 'text-amber-600' : 'text-muted-foreground'}>
-                              {statusLabel}
-                              {tierInfo.status !== 'none' ? expiryLabel : ''}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
                   ) : null}
                   <p className="text-xs text-muted-foreground">
                     Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.

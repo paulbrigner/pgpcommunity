@@ -1354,7 +1354,7 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
                   </div>
                 </section>
               ) : (
-                <section className="grid gap-5 md:grid-cols-2">
+                <section className="grid gap-5 md:grid-cols-[minmax(0,1fr)]">
                   {/* Membership Card */}
                   <div className="glass-item space-y-2 p-5">
                     <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Membership</h2>

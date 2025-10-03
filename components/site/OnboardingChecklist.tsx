@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 import { CheckCircle2, Circle } from "lucide-react";
 import { LinkWalletButton } from "./LinkWalletButton";
 
@@ -51,25 +52,15 @@ export function OnboardingChecklist({
     action?: React.ReactNode;
     disabled?: boolean;
   }) => (
-    <div className={`flex items-start justify-between gap-3 rounded-md border p-3 ${disabled ? 'opacity-60' : ''}`}>
+    <div className={cn("glass-item flex items-start justify-between gap-3 p-4", disabled && "opacity-60")}>
       <div className="flex items-start gap-3">
-        <div
-          className={`mt-0.5 ${
-            done ? "text-emerald-600" : "text-muted-foreground"
-          } ${disabled ? 'opacity-60' : ''}`}
-        >
-          {icon}
-        </div>
+        <div className={cn("mt-0.5", done ? "text-emerald-600" : "text-[var(--muted-ink)]", disabled && "opacity-60")}>{icon}</div>
         <div>
-          <div className="font-medium text-sm">{title}</div>
-          {description ? (
-            <div className="text-xs text-muted-foreground">{description}</div>
-          ) : null}
+          <div className="text-sm font-semibold text-[var(--brand-navy)]">{title}</div>
+          {description ? <div className="text-xs text-[var(--muted-ink)]">{description}</div> : null}
         </div>
       </div>
-      {action ? (
-        <div className={disabled ? 'pointer-events-none opacity-60' : ''}>{action}</div>
-      ) : null}
+      {action ? <div className={disabled ? "pointer-events-none opacity-60" : ""}>{action}</div> : null}
     </div>
   );
 
@@ -77,8 +68,8 @@ export function OnboardingChecklist({
 
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-semibold">Getting started</h2>
-      <p className="text-sm text-muted-foreground">
+      <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Getting started</h2>
+      <p className="text-sm text-[var(--muted-ink)]">
         {requiredRemaining === 0
           ? "All core steps completed."
           : `${requiredRemaining} required step${requiredRemaining > 1 ? "s" : ""} remaining to activate your membership.`}
@@ -155,11 +146,11 @@ export function OnboardingChecklist({
           }
           action={
             !autoRenewReady ? (
-              <span className="text-xs text-muted-foreground">Available after membership purchase.</span>
+              <span className="text-xs text-[var(--muted-ink)]">Available after membership purchase.</span>
             ) : autoRenewEnabled ? (
               <span className="text-xs font-semibold text-emerald-600">Enabled</span>
             ) : autoRenewDismissed ? (
-              <span className="text-xs text-muted-foreground">Skipped for now.</span>
+              <span className="text-xs text-[var(--muted-ink)]">Skipped for now.</span>
             ) : (
               <div className="flex items-center gap-2">
                 <Button size="sm" onClick={() => onEnableAutoRenew?.()} disabled={autoRenewProcessing}>

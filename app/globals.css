@@ -1,2 +1,83 @@
-/* app/globals.css */
 @import "tailwindcss";
+
+:root {
+  --hero-sheen: radial-gradient(circle at 18% 16%, rgba(67, 119, 243, 0.38), rgba(67, 119, 243, 0.12) 38%, transparent 62%),
+    radial-gradient(circle at 82% -6%, rgba(193, 197, 226, 0.32), rgba(193, 197, 226, 0.08) 42%, transparent 68%),
+    linear-gradient(125deg, rgba(11, 11, 67, 0.98) 0%, rgba(17, 18, 78, 0.96) 52%, rgba(33, 44, 132, 0.9) 100%);
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer components {
+  .section-eyebrow {
+    font-size: 0.75rem;
+    letter-spacing: 0.32em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+
+  .community-hero {
+    position: relative;
+    overflow: hidden;
+    border-radius: 1.75rem;
+    background: var(--hero-sheen);
+    color: #ffffff;
+    box-shadow: 0 30px 60px -32px rgba(11, 11, 67, 0.65);
+    border: 1px solid rgba(193, 197, 226, 0.18);
+  }
+
+  .community-hero::before {
+    content: "";
+    position: absolute;
+    inset: -18% -14% -22%;
+    border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, rgba(88, 110, 229, 0.4), transparent 72%),
+      radial-gradient(circle at 80% -12%, rgba(193, 197, 226, 0.2), transparent 64%);
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .community-hero__frame {
+    position: relative;
+    width: 100%;
+    border-radius: 1.65rem;
+    border: 1px solid rgba(193, 197, 226, 0.32);
+    padding: clamp(2.4rem, 6.5vw, 3.8rem) clamp(1.8rem, 6vw, 3.6rem);
+    background: linear-gradient(140deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02) 52%, rgba(67, 119, 243, 0.16));
+    backdrop-filter: blur(10px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 22px 40px -26px rgba(11, 11, 67, 0.6);
+  }
+
+  .community-hero__content {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+  }
+
+  .glass-surface {
+    border-radius: 1.5rem;
+    border: 1px solid rgba(193, 197, 226, 0.45);
+    background: linear-gradient(135deg, rgba(193, 197, 226, 0.22), rgba(250, 250, 252, 0.85));
+    box-shadow: 0 26px 46px -30px rgba(11, 11, 67, 0.55);
+    backdrop-filter: blur(18px);
+  }
+
+  .glass-item {
+    border-radius: 1.1rem;
+    border: 1px solid rgba(193, 197, 226, 0.45);
+    background: linear-gradient(140deg, rgba(250, 250, 252, 0.92), rgba(193, 197, 226, 0.25));
+    box-shadow: 0 20px 32px -24px rgba(11, 11, 67, 0.4);
+    backdrop-filter: blur(16px);
+  }
+
+  .muted-card {
+    border-radius: 1.1rem;
+    border: 1px solid rgba(193, 197, 226, 0.45);
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 20px 36px -26px rgba(11, 11, 67, 0.25);
+  }
+}

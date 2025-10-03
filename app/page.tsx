@@ -4,6 +4,7 @@
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"; // React helpers for state and lifecycle
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { Paywall } from "@unlock-protocol/paywall";
 import { networks } from "@unlock-protocol/networks";
@@ -457,10 +458,10 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
   const autoRenewPending = membershipStatus === 'active' && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed && !autoRenewReady;
   const showAutoRenewAlert = Boolean(autoRenewMessage);
   const autoRenewMessageNode = showAutoRenewAlert ? (
-    <Alert>
+    <Alert className="glass-item border-[rgba(67,119,243,0.35)] bg-[rgba(67,119,243,0.15)] text-[var(--brand-navy)]">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <AlertDescription className="text-sm">{autoRenewMessage}</AlertDescription>
-        <Button size="sm" variant="secondary" onClick={dismissAutoRenewMessage}>
+        <Button size="sm" variant="secondary" className="shadow-[0_10px_22px_-14px_rgba(67,119,243,0.55)]" onClick={dismissAutoRenewMessage}>
           {"Let's go!"}
         </Button>
       </div>
@@ -1142,21 +1143,45 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
   
 
   return (
-    <div className="mx-auto p-6 space-y-6">
-      <h1 className="text-3xl md:text-4xl font-bold text-center">
-        PGP for Crypto Community
-      </h1>
+    <div className="relative mx-auto w-full max-w-6xl space-y-12 px-4 md:px-6">
+      <section className="community-hero p-8 md:p-12">
+        <div className="community-hero__frame">
+          <div className="community-hero__content mx-auto flex w-full max-w-4xl flex-col items-center gap-8 text-center md:flex-row md:items-stretch md:gap-12 md:text-left">
+            <div className="flex flex-1 flex-col gap-5 md:max-w-xl">
+              <p className="section-eyebrow text-[var(--brand-cloud)]/80">Pretty Good Policy Member Portal</p>
+              <div className="space-y-3">
+                <h1 className="text-4xl font-extrabold tracking-tight md:text-5xl">PGP* Community</h1>
+                <p className="mx-auto max-w-2xl text-sm leading-relaxed text-[var(--brand-cloud)] md:mx-0 md:text-base md:leading-relaxed">
+                  A Web3-native portal to manage your membership, collect meeting NFTs, and stay current on Pretty Good Policy for Crypto.
+                </p>
+              </div>
+            </div>
+            <div className="mx-auto flex-shrink-0 rounded-[1.9rem] border border-white/20 bg-white/10 p-[6px] shadow-[0_28px_48px_-28px_rgba(11,11,67,0.55)] backdrop-blur-lg md:mx-0 md:self-center">
+              <div className="relative h-28 w-28 overflow-hidden rounded-[1.6rem] md:h-40 md:w-40">
+                <Image
+                  src="/pgp_profile_image.png"
+                  alt="PGP Community profile"
+                  fill
+                  sizes="(min-width: 768px) 160px, 112px"
+                  className="object-cover"
+                  priority
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
       {/* Scenario-driven UI based on auth, wallet linking, and membership */}
       {!ready ? (
-        <p className="text-center">Loading…</p>
+        <div className="glass-surface p-8 text-center text-lg text-[var(--brand-navy)]/85">Loading…</div>
       ) : !authenticated ? (
         // Not logged in yet — Landing & Benefits
-        <div className="mx-auto max-w-4xl space-y-10">
-          <section className="text-center space-y-4">
-            <p className="text-lg text-muted-foreground">
+        <div className="space-y-10">
+          <section className="glass-surface space-y-6 p-6 text-center shadow-[0_28px_48px_-28px_rgba(11,11,67,0.45)] md:p-10 md:text-left">
+            <p className="text-base leading-relaxed text-[var(--muted-ink)] md:text-lg">
               Join a community of privacy and crypto enthusiasts. Support PGP efforts, collect meeting NFTs, and get insider updates.
             </p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+            <div className="flex flex-col items-center justify-center gap-3 sm:flex-row md:justify-start">
               <Button
                 onClick={async () => {
                   const res = await signInWithSiwe();
@@ -1171,7 +1196,7 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
                   }
                   setAuthError(null);
                 }}
-                className="w-full sm:w-auto"
+                className="w-full sm:w-auto shadow-[0_18px_36px_-20px_rgba(67,119,243,0.65)]"
               >
                 <Wallet className="mr-2 h-4 w-4" /> Sign In with Wallet
               </Button>
@@ -1184,7 +1209,7 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
                   })();
                   router.push(`/signin?callbackUrl=${encodeURIComponent(current)}&reason=signup`);
                 }}
-                className="w-full sm:w-auto"
+                className="w-full border-[rgba(11,11,67,0.2)] bg-white/60 text-[var(--brand-navy)] shadow-[0_10px_24px_-16px_rgba(11,11,67,0.35)] transition hover:bg-white/80 sm:w-auto"
               >
                 Sign up with Email
               </Button>
@@ -1194,73 +1219,76 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
             )}
           </section>
 
-          <section className="grid gap-4 sm:grid-cols-2">
-            <div className="flex items-start gap-3 rounded-lg border p-4">
-              <HeartHandshake className="h-5 w-5 mt-0.5 text-primary" />
+          <section className="grid gap-5 sm:grid-cols-2">
+            <div className="glass-item flex items-start gap-3 p-5 text-left">
+              <HeartHandshake className="mt-1 h-5 w-5 text-[var(--brand-denim)]" />
               <div>
-                <h3 className="font-medium">Support the PGP Community</h3>
-                <p className="text-sm text-muted-foreground">Your membership helps sustain open, privacy‑preserving tooling and community events.</p>
+                <h3 className="text-base font-semibold text-[var(--brand-navy)]">Support the PGP Community</h3>
+                <p className="text-sm leading-relaxed text-[var(--muted-ink)]">Your membership helps sustain open, privacy‑preserving tooling and community events.</p>
               </div>
             </div>
-            <div className="flex items-start gap-3 rounded-lg border p-4">
-              <TicketCheck className="h-5 w-5 mt-0.5 text-primary" />
+            <div className="glass-item flex items-start gap-3 p-5 text-left">
+              <TicketCheck className="mt-1 h-5 w-5 text-[var(--brand-denim)]" />
               <div>
-                <h3 className="font-medium">Track Meeting POAPs/NFTs</h3>
-                <p className="text-sm text-muted-foreground">Automatically collect and showcase proof of attendance and meeting NFTs.</p>
+                <h3 className="text-base font-semibold text-[var(--brand-navy)]">Track Meeting POAPs/NFTs</h3>
+                <p className="text-sm leading-relaxed text-[var(--muted-ink)]">Automatically collect and showcase proof of attendance and meeting NFTs.</p>
               </div>
             </div>
-            <div className="flex items-start gap-3 rounded-lg border p-4">
-              <BellRing className="h-5 w-5 mt-0.5 text-primary" />
+            <div className="glass-item flex items-start gap-3 p-5 text-left">
+              <BellRing className="mt-1 h-5 w-5 text-[var(--brand-denim)]" />
               <div>
-                <h3 className="font-medium">Insider Updates</h3>
-                <p className="text-sm text-muted-foreground">Be first to hear about upcoming meetings, demos, and releases.</p>
+                <h3 className="text-base font-semibold text-[var(--brand-navy)]">Insider Updates</h3>
+                <p className="text-sm leading-relaxed text-[var(--muted-ink)]">Be first to hear about upcoming meetings, demos, and releases.</p>
               </div>
             </div>
-            <div className="flex items-start gap-3 rounded-lg border p-4">
-              <ShieldCheck className="h-5 w-5 mt-0.5 text-primary" />
+            <div className="glass-item flex items-start gap-3 p-5 text-left">
+              <ShieldCheck className="mt-1 h-5 w-5 text-[var(--brand-denim)]" />
               <div>
-                <h3 className="font-medium">Member‑Only Content</h3>
-                <p className="text-sm text-muted-foreground">Access gated guides, recordings, and resources when your membership is active.</p>
+                <h3 className="text-base font-semibold text-[var(--brand-navy)]">Member‑Only Content</h3>
+                <p className="text-sm leading-relaxed text-[var(--muted-ink)]">Access gated guides, recordings, and resources when your membership is active.</p>
               </div>
             </div>
           </section>
 
-          <section className="rounded-lg border p-4">
-            <h3 className="font-semibold mb-2">How it works</h3>
-            <ul className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 text-sm">
-              <li className="flex items-start gap-2">
-                <BadgeCheck className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+          <section className="glass-surface space-y-4 p-6 md:p-8">
+            <h3 className="text-xl font-semibold text-[var(--brand-navy)]">How it works</h3>
+            <ul className="grid gap-4 text-sm sm:grid-cols-2 md:grid-cols-3">
+              <li className="glass-item flex items-start gap-3 p-4">
+                <BadgeCheck className="mt-1 h-5 w-5 shrink-0 text-[var(--brand-denim)]" />
                 <div>
-                  <div className="font-medium">Create your account</div>
-                  <div className="text-muted-foreground">Sign in with your wallet or email.</div>
+                  <div className="font-semibold text-[var(--brand-navy)]">Create your account</div>
+                  <div className="text-[var(--muted-ink)]">Sign in with your wallet or email.</div>
                 </div>
               </li>
-              <li className="flex items-start gap-2">
-                <Wallet className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+              <li className="glass-item flex items-start gap-3 p-4">
+                <Wallet className="mt-1 h-5 w-5 shrink-0 text-[var(--brand-denim)]" />
                 <div>
-                  <div className="font-medium">Link a wallet</div>
-                  <div className="text-muted-foreground">Use it for NFTs, donations, and access.</div>
+                  <div className="font-semibold text-[var(--brand-navy)]">Link a wallet</div>
+                  <div className="text-[var(--muted-ink)]">Use it for NFTs, donations, and access.</div>
                 </div>
               </li>
-              <li className="flex items-start gap-2">
-                <KeyIcon className="h-5 w-5 shrink-0 mt-0.5 text-primary" />
+              <li className="glass-item flex items-start gap-3 p-4">
+                <KeyIcon className="mt-1 h-5 w-5 shrink-0 text-[var(--brand-denim)]" />
                 <div>
-                  <div className="font-medium">Activate membership</div>
-                  <div className="text-muted-foreground">Purchase the PGP Unlock membership.</div>
+                  <div className="font-semibold text-[var(--brand-navy)]">Activate membership</div>
+                  <div className="text-[var(--muted-ink)]">Purchase the PGP Unlock membership.</div>
                 </div>
               </li>
-              
             </ul>
-            <div className="mt-4 text-sm text-muted-foreground">
-              This site uses the open‑source, Web3‑based Unlock Protocol to issue and verify memberships. When you buy a membership, Unlock mints a time‑limited key (NFT) to your wallet. We verify your active key on‑chain to grant access to member‑only pages and features. When your key expires, you can renew to continue access. <a className="underline hover:text-foreground" href="https://unlock-protocol.com/" target="_blank" rel="noreferrer">Learn more about Unlock Protocol</a>.
+            <div className="text-sm leading-relaxed text-[var(--muted-ink)]">
+              This site uses the open‑source, Web3‑based Unlock Protocol to issue and verify memberships. When you buy a membership, Unlock mints a time‑limited key (NFT) to your wallet. We verify your active key on‑chain to grant access to member‑only pages and features. When your key expires, you can renew to continue access.{' '}
+              <a className="text-[var(--brand-denim)] underline underline-offset-4 hover:text-white" href="https://unlock-protocol.com/" target="_blank" rel="noreferrer">
+                Learn more about Unlock Protocol
+              </a>
             </div>
           </section>
         </div>
       ) : membershipStatus === "unknown" ? (
-        !ready ? (
-          <div className="mx-auto max-w-4xl" />
-        ) : !walletLinked && authenticated ? (
-          <div className="mx-auto max-w-4xl space-y-6">
+        !walletLinked ? (
+          <div className="glass-surface space-y-6 p-6 md:p-8">
+            <div className="text-center text-[var(--muted-ink)]">
+              Hello {firstName || (session?.user as any)?.email || "there"}! Link your wallet to continue.
+            </div>
             <OnboardingChecklist
               walletLinked={false}
               profileComplete={!!(firstName && lastName)}
@@ -1268,22 +1296,22 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
             />
           </div>
         ) : (
-          <div className="mx-auto max-w-4xl" />
+          <div className="glass-surface p-6 text-center text-[var(--muted-ink)] md:p-8">
+            Checking your membership status…
+          </div>
         )
       ) : membershipStatus === "active" ? (
         autoRenewPending ? (
-          <div className="mx-auto max-w-3xl space-y-6 text-center">
-            <h2 className="text-xl font-semibold">Just a moment…</h2>
-            <p className="text-sm text-muted-foreground">
+          <div className="glass-surface space-y-3 p-6 text-center text-[var(--muted-ink)] md:p-8">
+            <h2 className="text-xl font-semibold text-[var(--brand-navy)]">Just a moment…</h2>
+            <p className="text-sm">
               Confirming your membership and renewal options. This should only take a second.
             </p>
           </div>
         ) : needsAutoRenewStep ? (
-          <div className="mx-auto max-w-4xl space-y-6">
-            <div className="text-center">
-              <p>
-                Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! Your membership is active—finish setup by enabling auto-renew or skip it for now.
-              </p>
+          <div className="glass-surface space-y-6 p-6 md:p-8">
+            <div className="text-center text-[var(--muted-ink)]">
+              Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! Your membership is active—finish setup by enabling auto-renew or skip it for now.
             </div>
             <OnboardingChecklist
               walletLinked={walletLinked}
@@ -1300,467 +1328,469 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
           </div>
         ) : (
           // Scenario 1: linked wallet has a valid membership -> authorized
-          <div className="mx-auto max-w-4xl space-y-6">
-            <div className="text-center">
+          <div className="space-y-8">
+            <section className="glass-surface p-6 text-center text-[var(--muted-ink)] md:p-8 md:text-left">
               <p>
                 Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! You’re a member.
               </p>
-            </div>
+            </section>
             {autoRenewMessageNode}
             {walletLinked && profileComplete ? (
-            viewerUrl ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Inline Viewer Only */}
-                <div className="rounded-lg border md:col-span-2 overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2 border-b bg-background">
-                    <div className="text-sm text-muted-foreground truncate">Member Content Viewer</div>
-                    <Button size="sm" variant="outline" onClick={() => setViewerUrl(null)}>
-                      Close
-                    </Button>
-                  </div>
-                  <iframe
-                    title="Member content"
-                    src={viewerUrl}
-                    className="w-full h-[70vh]"
-                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                  />
-                </div>
-              </div>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Membership Card */}
-                <div className="rounded-lg border p-4 space-y-2">
-                  <h2 className="text-lg font-semibold">Membership</h2>
-                  <p className="text-sm text-muted-foreground">
-                    {typeof membershipExpiry === 'number' && membershipExpiry > 0
-                      ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
-                      : 'Active'}
-                  </p>
-                  <p className="text-sm text-muted-foreground">{tierSummaryText}</p>
-                  {autoRenewChecking ? (
-                    <p className="text-sm text-muted-foreground">Checking auto-renew allowance…</p>
-                  ) : typeof autoRenewMonths === 'number' && autoRenewMonths > 0 ? (
-                    <p className="text-sm text-muted-foreground">
-                      Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}.
-                    </p>
-                  ) : null}
-                  <p className="text-xs text-muted-foreground">
-                    Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
-                  </p>
-                </div>
-
-                {/* Member Tools */}
-                <div className="rounded-lg border p-4 space-y-3">
-                  <h2 className="text-lg font-semibold">Member Tools</h2>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button
-                      asChild
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        const url = await getContentUrl("index.html");
-                        setViewerUrl(url);
-                      }}
-                    >
-                      <a href="#">View Home</a>
-                    </Button>
-                    <Button
-                      asChild
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        const url = await getContentUrl("guide.html");
-                        setViewerUrl(url);
-                      }}
-                    >
-                      <a href="#">View Guide</a>
-                    </Button>
-                    <Button
-                      asChild
-                      onClick={async (e) => {
-                        e.preventDefault();
-                        const url = await getContentUrl("faq.html");
-                        setViewerUrl(url);
-                      }}
-                    >
-                      <a href="#">View FAQ</a>
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Experimental preview: these links stream HTML content that normally lives behind our member gate. We only fetch the page when you are logged in, the server-side API confirms your session and active membership, and it returns a short-lived, path-scoped CloudFront URL. That signed URL expires quickly, so the file stays private to authenticated members.
-                  </p>
-                </div>
-
-                {upcomingNfts && upcomingNfts.length > 0 ? (
-                  <div className="rounded-lg border p-4 space-y-3 md:col-span-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <h2 className="text-lg font-semibold">Upcoming PGP Meetings</h2>
-                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          checked={showUpcomingNfts}
-                          onChange={(e) => setShowUpcomingNfts(e.target.checked)}
-                        />
-                        Show upcoming events
-                      </label>
+              viewerUrl ? (
+                <section className="glass-surface p-0">
+                  <div className="muted-card overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 border-b border-[rgba(193,197,226,0.35)] bg-white/80 px-5 py-3">
+                      <div className="truncate text-sm font-medium text-[var(--muted-ink)]">Member Content Viewer</div>
+                      <Button size="sm" variant="outline" onClick={() => setViewerUrl(null)}>
+                        Close
+                      </Button>
                     </div>
-                    {showUpcomingNfts ? (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {[...upcomingNfts]
-                          .sort((a, b) => {
-                            const titleA = a.title?.toLowerCase() ?? '';
-                            const titleB = b.title?.toLowerCase() ?? '';
-                            if (titleA > titleB) return -1;
-                            if (titleA < titleB) return 1;
-                            return 0;
-                          })
-                          .map((nft) => {
-                            return (
-                              <div key={`upcoming-${nft.contractAddress}`} className="flex gap-3 rounded-md border bg-muted/40 p-3">
-                                {nft.image ? (
-                                  <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted">
-                                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                                    <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
-                                  </div>
-                                ) : (
-                                  <div className="h-20 w-20 shrink-0 rounded-md bg-muted" />
-                                )}
-                                <div className="min-w-0 space-y-1">
-                                  <div className="font-medium truncate">{nft.title}</div>
-                                  {nft.subtitle ? (
-                                    <div className="text-xs text-muted-foreground">Date: {nft.subtitle}</div>
-                                  ) : null}
-                                  {nft.startTime || nft.endTime ? (
-                                    <div className="text-xs text-muted-foreground">
-                                      Time: {nft.startTime ?? 'TBD'}
-                                      {nft.endTime ? ` - ${nft.endTime}` : ''}
-                                      {nft.timezone ? ` (${nft.timezone})` : ''}
-                                    </div>
-                                  ) : null}
-                                  {nft.location ? (
-                                    <div className="text-xs text-muted-foreground whitespace-pre-wrap">Location: {nft.location}</div>
-                                  ) : null}
-                                  <div className="flex flex-wrap items-center gap-2 text-xs">
-                                    <a
-                                      href={nft.registrationUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-primary hover:underline"
-                                    >
-                                      View event details
-                                    </a>
-                                    {nft.quickCheckoutConfig ? (
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        className="text-xs"
-                                        onClick={() => handleQuickRegister(nft.quickCheckoutConfig as Record<string, unknown>)}
-                                      >
-                                        Quick Register
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">Turn on to see upcoming meetings available for registration.</p>
-                    )}
+                    <iframe
+                      title="Member content"
+                      src={viewerUrl}
+                      className="h-[70vh] w-full"
+                      sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    />
                   </div>
-                ) : null}
-
-                {/* NFT/POAPs (placeholder) */}
-                <div className="rounded-lg border p-4 space-y-3 md:col-span-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <h2 className="text-lg font-semibold">
-                      {showAllNfts ? 'All PGP NFTs' : 'Your PGP NFT Collection'}
-                    </h2>
-                    {missedNfts && missedNfts.length > 0 ? (
-                      <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4"
-                          checked={showAllNfts}
-                          onChange={(e) => setShowAllNfts(e.target.checked)}
-                        />
-                        Show meetings you missed
-                      </label>
+                </section>
+              ) : (
+                <section className="grid gap-5 md:grid-cols-2">
+                  {/* Membership Card */}
+                  <div className="glass-item space-y-2 p-5">
+                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Membership</h2>
+                    <p className="text-sm text-[var(--muted-ink)]">
+                      {typeof membershipExpiry === 'number' && membershipExpiry > 0
+                        ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                        : 'Active'}
+                    </p>
+                    <p className="text-sm text-[var(--muted-ink)]">{tierSummaryText}</p>
+                    {autoRenewChecking ? (
+                      <p className="text-sm text-[var(--muted-ink)]">Checking auto-renew allowance…</p>
+                    ) : typeof autoRenewMonths === 'number' && autoRenewMonths > 0 ? (
+                      <p className="text-sm text-[var(--muted-ink)]">
+                        Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}.
+                      </p>
                     ) : null}
+                    <p className="text-xs text-[var(--muted-ink)]">
+                      Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
+                    </p>
                   </div>
-                  {creatorNftsLoading ? (
-                    <p className="text-sm text-muted-foreground">Loading your collection…</p>
-                  ) : creatorNftsError ? (
-                    <p className="text-sm text-red-600 dark:text-red-400">{creatorNftsError}</p>
-                  ) : displayNfts.length > 0 ? (
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      {displayNfts.map((nft) => {
-                        const displayId = nft.tokenId?.startsWith('0x')
-                          ? (() => {
-                              try {
-                                return BigInt(nft.tokenId).toString();
-                              } catch {
-                                return nft.tokenId;
-                              }
-                            })()
-                          : nft.tokenId ?? '';
-                        const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
-                        const explorerUrl = nft.tokenId
-                          ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
-                          : `${explorerBase}/address/${nft.contractAddress}`;
-                        const isOwned = Array.isArray(creatorNfts)
-                          && creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
-                        const eventStart = (() => {
-                          if (!nft.eventDate) return null;
-                          const zone = nft.timezone || 'UTC';
-                          const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
-                          if (rawDate.isValid) {
-                            if (nft.startTime) {
-                              const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
-                              if (combined.isValid) return combined;
-                            }
-                            if (String(nft.eventDate).includes('T')) {
-                              return rawDate;
-                            }
-                            return rawDate.endOf('day');
-                          }
-                          if (nft.startTime) {
-                            const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
-                            if (fallback.isValid) return fallback;
-                          }
-                          return null;
-                        })();
-                        const futureTimeMs = (() => {
-                          if (eventStart) return eventStart.toUTC().toMillis();
-                          const dateParsed = nft.eventDate ? Date.parse(String(nft.eventDate)) : NaN;
-                          if (Number.isFinite(dateParsed)) return dateParsed;
-                          const subtitleParsed = nft.subtitle ? Date.parse(String(nft.subtitle)) : NaN;
-                          if (Number.isFinite(subtitleParsed)) return subtitleParsed;
-                          return null;
-                        })();
-                        const isFutureMeeting = typeof futureTimeMs === 'number' && futureTimeMs > Date.now();
-                        const isUpcomingRegistration = isFutureMeeting && isOwned;
-                        const eventLabels = formatEventDisplay(
-                          nft.eventDate,
-                          nft.startTime,
-                          nft.endTime,
-                          nft.timezone
-                        );
-                        const showEventDetails = isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
-                        const calendarLinks = showEventDetails
-                          ? buildCalendarLinks(
-                              nft.title ?? 'PGP Event',
-                              nft.eventDate,
-                              nft.startTime,
-                              nft.endTime,
-                              nft.timezone,
-                              nft.location,
-                              nft.description ?? null
-                            )
-                          : { google: null, ics: null };
-                        const subtitle = showEventDetails
-                          ? null
-                          : (() => {
-                              const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
-                              if (!text) return null;
-                              const normalizedTitle = nft.title?.trim().toLowerCase();
-                              const normalizedText = text.toLowerCase();
-                              if (normalizedTitle && normalizedTitle === normalizedText) return null;
-                              if (text.length > 80) return null;
-                              return text;
-                            })();
-                        const shortenedDescription = showEventDetails
-                          ? null
-                          : (() => {
-                              const source = (() => {
-                                const desc = nft.description?.trim();
-                                if (desc && desc.length) return desc;
-                                const sub = nft.subtitle?.trim();
-                                if (sub && sub.length) return sub;
-                                const collection = nft.collectionName?.trim();
-                                if (collection && collection.length) return collection;
-                                return '';
-                              })();
-                              if (!source) return null;
-                              const plain = stripMarkdown(source);
-                              if (!plain) return null;
-                              const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
-                              const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
-                                // Avoid wrapping existing markdown links
-                                const before = str.slice(0, offset + prefix.length);
-                                if (/\[[^\]]*$/.test(before)) return match;
-                                return `${prefix}[${url}](${url})`;
-                              });
-                              return {
-                                preview,
-                                fullMarkdown: enrichedMarkdown,
-                              } as const;
-                            })();
-                        const handleDownloadIcs = () => {
-                          if (calendarLinks.ics) {
-                            downloadIcs(calendarLinks.ics, nft.title || 'PGP Event');
-                          }
-                        };
-                        const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
-                        const tokenIdKey = nft.tokenId ?? 'upcoming';
-                        const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
-                        const isDescriptionOpen = openDescriptionKey === descriptionKey;
-                        return (
-                          <div
-                            key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
-                            className={`flex gap-3 rounded-md border p-3 ${
-                              isUpcomingRegistration
-                                ? 'bg-amber-50 border-amber-300 dark:bg-amber-900/20 dark:border-amber-600'
-                                : isOwned
-                                ? ''
-                                : 'bg-slate-100 dark:bg-slate-800/40'
-                            }`}
-                          >
-                            {nft.image ? (
-                              <a
-                                href={explorerUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted"
-                              >
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
-                              </a>
-                            ) : (
-                              <a
-                                href={explorerUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="h-20 w-20 shrink-0 rounded-md bg-muted"
-                              />
-                            )}
-                            <div className="min-w-0 space-y-1">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <div className="font-medium truncate max-w-full">{nft.title}</div>
-                                {isUpcomingRegistration ? (
-                                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-100">
-                                    <BadgeCheck className="h-3 w-3" /> You&apos;re Registered!
-                                  </span>
-                                ) : null}
-                              </div>
-                              {subtitle ? (
-                                <div className="text-xs text-muted-foreground truncate">{subtitle}</div>
-                              ) : null}
-                              {displayId ? (
-                                <div className="text-xs text-muted-foreground truncate">Token #{displayId}</div>
-                              ) : null}
-                              {showEventDetails ? (
-                                <div className="space-y-1 text-xs text-muted-foreground">
-                                  {eventLabels.dateLabel ? <div>Date: {eventLabels.dateLabel}</div> : null}
-                                  {eventLabels.timeLabel ? <div>Time: {eventLabels.timeLabel}</div> : null}
-                                  {nft.location ? (
-                                    <div className="whitespace-pre-wrap">Location: {nft.location}</div>
-                                  ) : null}
-                                  {(calendarLinks.google || calendarLinks.ics) ? (
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      {calendarLinks.google ? (
-                                        <Button asChild size="sm" variant="secondary">
-                                          <a
-                                            href={calendarLinks.google}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                          >
-                                            Add to Google Calendar
-                                          </a>
-                                        </Button>
-                                      ) : null}
-                                      {calendarLinks.ics ? (
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="secondary"
-                                          onClick={handleDownloadIcs}
-                                        >
-                                          Download .ics
-                                        </Button>
-                                      ) : null}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              ) : null}
-                              {shortenedDescription ? (
-                                <div className="text-xs text-muted-foreground">
-                                  {isDescriptionOpen ? (
-                                    <div className="space-y-2">
-                                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                          {shortenedDescription.fullMarkdown}
-                                        </ReactMarkdown>
-                                      </div>
-                                      <button
-                                        type="button"
-                                        className="text-xs text-primary hover:underline focus-visible:outline-none"
-                                        onClick={() => setOpenDescriptionKey(null)}
-                                      >
-                                        Hide description
-                                      </button>
+
+                  {/* Member Tools (temporarily hidden)
+                  <div className="glass-item space-y-3 p-5">
+                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Member Tools</h2>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        asChild
+                        className="shadow-[0_12px_24px_-18px_rgba(67,119,243,0.5)]"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          const url = await getContentUrl("index.html");
+                          setViewerUrl(url);
+                        }}
+                      >
+                        <a href="#">View Home</a>
+                      </Button>
+                      <Button
+                        asChild
+                        className="shadow-[0_12px_24px_-18px_rgba(67,119,243,0.5)]"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          const url = await getContentUrl("guide.html");
+                          setViewerUrl(url);
+                        }}
+                      >
+                        <a href="#">View Guide</a>
+                      </Button>
+                      <Button
+                        asChild
+                        className="shadow-[0_12px_24px_-18px_rgba(67,119,243,0.5)]"
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          const url = await getContentUrl("faq.html");
+                          setViewerUrl(url);
+                        }}
+                      >
+                        <a href="#">View FAQ</a>
+                      </Button>
+                    </div>
+                    <p className="text-xs text-[var(--muted-ink)]">
+                      Experimental preview: these links stream HTML content that normally lives behind our member gate. We only fetch the page when you are logged in, the server-side API confirms your session and active membership, and it returns a short-lived, path-scoped CloudFront URL. That signed URL expires quickly, so the file stays private to authenticated members.
+                    </p>
+                  </div>
+                  */}
+
+                  {upcomingNfts && upcomingNfts.length > 0 ? (
+                    <div className="glass-item space-y-4 p-5 md:col-span-2">
+                      <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
+                        <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Upcoming PGP Meetings</h2>
+                        <label className="flex items-center gap-2 text-xs">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={showUpcomingNfts}
+                            onChange={(e) => setShowUpcomingNfts(e.target.checked)}
+                          />
+                          Show upcoming events
+                        </label>
+                      </div>
+                      {showUpcomingNfts ? (
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {[...upcomingNfts]
+                            .sort((a, b) => {
+                              const titleA = a.title?.toLowerCase() ?? '';
+                              const titleB = b.title?.toLowerCase() ?? '';
+                              if (titleA > titleB) return -1;
+                              if (titleA < titleB) return 1;
+                              return 0;
+                            })
+                            .map((nft) => {
+                              return (
+                                <div
+                                  key={`upcoming-${nft.contractAddress}`}
+                                  className="muted-card flex gap-3 p-3"
+                                >
+                                  {nft.image ? (
+                                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-white/40">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
                                     </div>
                                   ) : (
-                                    <button
-                                      type="button"
-                                      className="text-left text-xs text-primary hover:underline focus-visible:outline-none"
-                                      onClick={() => setOpenDescriptionKey(descriptionKey)}
-                                    >
-                                      {shortenedDescription.preview}
-                                    </button>
+                                    <div className="h-20 w-20 shrink-0 rounded-md bg-white/50" />
                                   )}
+                                  <div className="min-w-0 space-y-1">
+                                    <div className="font-medium truncate text-[var(--brand-navy)]">{nft.title}</div>
+                                    {nft.subtitle ? (
+                                      <div className="text-xs text-[var(--muted-ink)]">Date: {nft.subtitle}</div>
+                                    ) : null}
+                                    {nft.startTime || nft.endTime ? (
+                                      <div className="text-xs text-[var(--muted-ink)]">
+                                        Time: {nft.startTime ?? 'TBD'}
+                                        {nft.endTime ? ` - ${nft.endTime}` : ''}
+                                        {nft.timezone ? ` (${nft.timezone})` : ''}
+                                      </div>
+                                    ) : null}
+                                    {nft.location ? (
+                                      <div className="text-xs text-[var(--muted-ink)] whitespace-pre-wrap">Location: {nft.location}</div>
+                                    ) : null}
+                                    <div className="flex flex-wrap items-center gap-2 text-xs">
+                                      <a
+                                        href={nft.registrationUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[var(--brand-denim)] hover:underline"
+                                      >
+                                        View event details
+                                      </a>
+                                      {nft.quickCheckoutConfig ? (
+                                        <Button
+                                          size="sm"
+                                          variant="secondary"
+                                          className="text-xs"
+                                          onClick={() => handleQuickRegister(nft.quickCheckoutConfig as Record<string, unknown>)}
+                                        >
+                                          Quick Register
+                                        </Button>
+                                      ) : null}
+                                    </div>
+                                  </div>
                                 </div>
-                              ) : null}
-                              {nft.videoUrl ? (
-                                <div>
-                                  <a
-                                    href={nft.videoUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="text-xs text-primary hover:underline"
-                                  >
-                                    Watch Video
-                                  </a>
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        );
-                      })}
-            </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No creator NFTs or POAPs detected yet. Join community events to start collecting!
-                    </p>
-                  )}
-                </div>
+                              );
+                            })}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-[var(--muted-ink)]">Turn on to see upcoming meetings available for registration.</p>
+                      )}
+                    </div>
+                  ) : null}
 
-                {/* News / Updates (placeholder) */}
-                <div className="rounded-lg border p-4 space-y-2 md:col-span-2">
-                  <h2 className="text-lg font-semibold">News & Updates</h2>
-                  <p className="text-sm text-muted-foreground">Member announcements and updates will appear here.</p>
-                </div>
+                  {/* NFT/POAPs (placeholder) */}
+                  <div className="glass-item space-y-4 p-5 md:col-span-2">
+                    <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
+                      <h2 className="text-lg font-semibold text-[var(--brand-navy)]">
+                        {showAllNfts ? 'All PGP NFTs' : 'Your PGP NFT Collection'}
+                      </h2>
+                      {missedNfts && missedNfts.length > 0 ? (
+                        <label className="flex items-center gap-1 text-xs">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4"
+                            checked={showAllNfts}
+                            onChange={(e) => setShowAllNfts(e.target.checked)}
+                          />
+                          Show meetings you missed
+                        </label>
+                      ) : null}
+                    </div>
+                    {creatorNftsLoading ? (
+                      <p className="text-sm text-[var(--muted-ink)]">Loading your collection…</p>
+                    ) : creatorNftsError ? (
+                      <p className="text-sm text-red-600 dark:text-red-400">{creatorNftsError}</p>
+                    ) : displayNfts.length > 0 ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {displayNfts.map((nft) => {
+                          const displayId = nft.tokenId?.startsWith('0x')
+                            ? (() => {
+                                try {
+                                  return BigInt(nft.tokenId).toString();
+                                } catch {
+                                  return nft.tokenId;
+                                }
+                              })()
+                            : nft.tokenId ?? '';
+                          const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
+                          const explorerUrl = nft.tokenId
+                            ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
+                            : `${explorerBase}/address/${nft.contractAddress}`;
+                          const isOwned = Array.isArray(creatorNfts)
+                            && creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
+                          const eventStart = (() => {
+                            if (!nft.eventDate) return null;
+                            const zone = nft.timezone || 'UTC';
+                            const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
+                            if (rawDate.isValid) {
+                              if (nft.startTime) {
+                                const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
+                                if (combined.isValid) return combined;
+                              }
+                              if (String(nft.eventDate).includes('T')) {
+                                return rawDate;
+                              }
+                              return rawDate.endOf('day');
+                            }
+                            if (nft.startTime) {
+                              const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
+                              if (fallback.isValid) return fallback;
+                            }
+                            return null;
+                          })();
+                          const futureTimeMs = (() => {
+                            if (eventStart) return eventStart.toUTC().toMillis();
+                            const dateParsed = nft.eventDate ? Date.parse(String(nft.eventDate)) : NaN;
+                            if (Number.isFinite(dateParsed)) return dateParsed;
+                            const subtitleParsed = nft.subtitle ? Date.parse(String(nft.subtitle)) : NaN;
+                            if (Number.isFinite(subtitleParsed)) return subtitleParsed;
+                            return null;
+                          })();
+                          const isFutureMeeting = typeof futureTimeMs === 'number' && futureTimeMs > Date.now();
+                          const isUpcomingRegistration = isFutureMeeting && isOwned;
+                          const eventLabels = formatEventDisplay(
+                            nft.eventDate,
+                            nft.startTime,
+                            nft.endTime,
+                            nft.timezone
+                          );
+                          const showEventDetails = isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
+                          const calendarLinks = showEventDetails
+                            ? buildCalendarLinks(
+                                nft.title ?? 'PGP Event',
+                                nft.eventDate,
+                                nft.startTime,
+                                nft.endTime,
+                                nft.timezone,
+                                nft.location,
+                                nft.description ?? null
+                              )
+                            : { google: null, ics: null };
+                          const subtitle = showEventDetails
+                            ? null
+                            : (() => {
+                                const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
+                                if (!text) return null;
+                                const normalizedTitle = nft.title?.trim().toLowerCase();
+                                const normalizedText = text.toLowerCase();
+                                if (normalizedTitle && normalizedTitle === normalizedText) return null;
+                                if (text.length > 80) return null;
+                                return text;
+                              })();
+                          const shortenedDescription = showEventDetails
+                            ? null
+                            : (() => {
+                                const source = (() => {
+                                  const desc = nft.description?.trim();
+                                  if (desc && desc.length) return desc;
+                                  const sub = nft.subtitle?.trim();
+                                  if (sub && sub.length) return sub;
+                                  const collection = nft.collectionName?.trim();
+                                  if (collection && collection.length) return collection;
+                                  return '';
+                                })();
+                                if (!source) return null;
+                                const plain = stripMarkdown(source);
+                                if (!plain) return null;
+                                const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
+                                const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
+                                  // Avoid wrapping existing markdown links
+                                  const before = str.slice(0, offset + prefix.length);
+                                  if (/\[[^\]]*$/.test(before)) return match;
+                                  return `${prefix}[${url}](${url})`;
+                                });
+                                return {
+                                  preview,
+                                  fullMarkdown: enrichedMarkdown,
+                                } as const;
+                              })();
+                          const handleDownloadIcs = () => {
+                            if (calendarLinks.ics) {
+                              downloadIcs(calendarLinks.ics, nft.title || 'PGP Event');
+                            }
+                          };
+                          const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
+                          const tokenIdKey = nft.tokenId ?? 'upcoming';
+                          const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
+                          const isDescriptionOpen = openDescriptionKey === descriptionKey;
+                          return (
+                            <div
+                              key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
+                              className={`muted-card flex gap-3 p-3 ${
+                                isUpcomingRegistration ? 'ring-2 ring-[rgba(67,119,243,0.45)]' : ''
+                              } ${isOwned ? '' : 'opacity-80'}`}
+                            >
+                              {nft.image ? (
+                                <a
+                                  href={explorerUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted"
+                                >
+                                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                                  <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
+                                </a>
+                              ) : (
+                                <a
+                                  href={explorerUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="h-20 w-20 shrink-0 rounded-md bg-muted"
+                                />
+                              )}
+                              <div className="min-w-0 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="max-w-full truncate font-medium text-[var(--brand-navy)]">{nft.title}</div>
+                                  {isUpcomingRegistration ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-100">
+                                      <BadgeCheck className="h-3 w-3" /> You&apos;re Registered!
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {subtitle ? (
+                                  <div className="truncate text-xs text-[var(--muted-ink)]">{subtitle}</div>
+                                ) : null}
+                                {displayId ? (
+                                  <div className="truncate text-xs text-[var(--muted-ink)]">Token #{displayId}</div>
+                                ) : null}
+                                {showEventDetails ? (
+                                  <div className="space-y-1 text-xs text-[var(--muted-ink)]">
+                                    {eventLabels.dateLabel ? <div>Date: {eventLabels.dateLabel}</div> : null}
+                                    {eventLabels.timeLabel ? <div>Time: {eventLabels.timeLabel}</div> : null}
+                                    {nft.location ? (
+                                      <div className="whitespace-pre-wrap">Location: {nft.location}</div>
+                                    ) : null}
+                                    {(calendarLinks.google || calendarLinks.ics) ? (
+                                      <div className="flex flex-wrap items-center gap-2">
+                                    {calendarLinks.google ? (
+                                          <Button asChild size="sm" variant="secondary">
+                                            <a
+                                              href={calendarLinks.google}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                            >
+                                              Add to Google Calendar
+                                            </a>
+                                          </Button>
+                                        ) : null}
+                                        {calendarLinks.ics ? (
+                                          <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={handleDownloadIcs}
+                                          >
+                                            Download .ics
+                                          </Button>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {shortenedDescription ? (
+                                  <div className="text-xs text-[var(--muted-ink)]">
+                                    {isDescriptionOpen ? (
+                                      <div className="space-y-2">
+                                        <div className="prose prose-sm dark:prose-invert max-w-none">
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                            {shortenedDescription.fullMarkdown}
+                                          </ReactMarkdown>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          className="text-xs text-[var(--brand-denim)] hover:underline focus-visible:outline-none"
+                                          onClick={() => setOpenDescriptionKey(null)}
+                                        >
+                                          Hide description
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        className="text-left text-xs text-[var(--brand-denim)] hover:underline focus-visible:outline-none"
+                                        onClick={() => setOpenDescriptionKey(descriptionKey)}
+                                      >
+                                        {shortenedDescription.preview}
+                                      </button>
+                                    )}
+                                  </div>
+                                ) : null}
+                                {nft.videoUrl ? (
+                                  <div>
+                                    <a
+                                      href={nft.videoUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-xs text-[var(--brand-denim)] hover:underline"
+                                    >
+                                      Watch Video
+                                    </a>
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
               </div>
-            )
-          ) : (
-            <OnboardingChecklist
-              walletLinked={walletLinked}
-              profileComplete={profileComplete}
-              membershipStatus="active"
-              autoRenewReady={autoRenewReady}
-              autoRenewEnabled={autoRenewEnabled}
-              autoRenewProcessing={autoRenewProcessing}
-              autoRenewDismissed={autoRenewPromptDismissed}
-              onEnableAutoRenew={enableAutoRenew}
-              onSkipAutoRenew={handleSkipAutoRenew}
-            />
-          )}
+                    ) : (
+                      <p className="text-sm text-[var(--muted-ink)]">
+                        No creator NFTs or POAPs detected yet. Join community events to start collecting!
+                      </p>
+                    )}
+                  </div>
+
+                  {/* News / Updates (placeholder) */}
+                  <div className="glass-item space-y-2 p-5 md:col-span-2">
+                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">News & Updates</h2>
+                    <p className="text-sm text-[var(--muted-ink)]">Member announcements and updates will appear here.</p>
+                  </div>
+                </section>
+              )
+            ) : (
+              <OnboardingChecklist
+                walletLinked={walletLinked}
+                profileComplete={profileComplete}
+                membershipStatus="active"
+                autoRenewReady={autoRenewReady}
+                autoRenewEnabled={autoRenewEnabled}
+                autoRenewProcessing={autoRenewProcessing}
+                autoRenewDismissed={autoRenewPromptDismissed}
+                onEnableAutoRenew={enableAutoRenew}
+                onSkipAutoRenew={handleSkipAutoRenew}
+              />
+            )}
           </div>
         )
       ) : !walletLinked ? (
         // Authenticated but wallet not linked (after hydration)
-        <div className="mx-auto max-w-4xl space-y-6">
-          <div className="text-center">
+        <div className="glass-surface space-y-6 p-6 md:p-8">
+          <div className="text-center text-[var(--muted-ink)]">
             <p>
               Hello {firstName || (session?.user as any)?.email || "there"}! Link your wallet to continue.
             </p>
@@ -1773,23 +1803,25 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
         </div>
       ) : (
         // Scenario 2: authenticated but no valid membership -> offer purchase/renew
-        <div className="mx-auto max-w-4xl space-y-6">
-          <div className="text-center">
+        <div className="space-y-8">
+          <section className="glass-surface space-y-4 p-6 text-center text-[var(--muted-ink)] md:p-8">
             <p>
               Hello, {firstName || walletAddress || (session?.user as any)?.email}! {membershipStatus === "expired" ? "Your membership has expired." : "You need a membership."}
             </p>
-          </div>
-          <OnboardingChecklist
-            walletLinked={walletLinked}
-            profileComplete={!!(firstName && lastName)}
-            membershipStatus={membershipStatus}
-            onPurchaseMembership={() => setConfirmOpen(true)}
-            purchasing={isPurchasing}
-          />
+          </section>
+          <section className="glass-surface p-6 md:p-8">
+            <OnboardingChecklist
+              walletLinked={walletLinked}
+              profileComplete={!!(firstName && lastName)}
+              membershipStatus={membershipStatus}
+              onPurchaseMembership={() => setConfirmOpen(true)}
+              purchasing={isPurchasing}
+            />
+          </section>
           {MEMBERSHIP_TIERS.length ? (
-            <div className="text-sm text-muted-foreground border rounded-md p-4">
-              <div className="font-medium text-foreground mb-2">Available tiers</div>
-              <ul className="space-y-1">
+            <section className="glass-surface space-y-4 p-6 text-sm text-[var(--muted-ink)] md:p-8">
+              <div className="text-base font-semibold text-[var(--brand-navy)]">Available tiers</div>
+              <ul className="space-y-3">
                 {MEMBERSHIP_TIERS.map((tier) => {
                   const summaryTier = membershipSummary?.tiers?.find((entry) => entry.tier.id === tier.id);
                   const label = tier.label || summaryTier?.metadata?.name || formatAddressShort(tier.checksumAddress);
@@ -1804,9 +1836,9 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
                     ? ` • expires ${new Date(summaryTier.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
                     : '';
                   return (
-                    <li key={tier.id} className="flex items-center justify-between gap-2">
-                      <span>{label}</span>
-                      <span className={statusLabel === 'active' ? 'text-emerald-600' : statusLabel === 'expired' ? 'text-amber-600' : 'text-muted-foreground'}>
+                    <li key={tier.id} className="flex flex-col gap-2 rounded-xl border border-[rgba(193,197,226,0.45)] bg-white/80 px-4 py-3 md:flex-row md:items-center md:justify-between">
+                      <span className="font-medium text-[var(--brand-navy)]">{label}</span>
+                      <span className={statusLabel === 'active' ? 'text-emerald-600' : statusLabel === 'expired' ? 'text-amber-600' : 'text-[var(--muted-ink)]'}>
                         {statusDisplay}
                         {statusLabel !== 'none' ? expiryDisplay : ''}
                       </span>
@@ -1814,20 +1846,20 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
                   );
                 })}
               </ul>
-            </div>
+            </section>
           ) : null}
         </div>
       )}
       {/* Purchase/Renew prerequisites dialog */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="glass-surface space-y-4 p-6 md:p-8">
           <AlertDialogHeader>
             <AlertDialogTitle>Before you continue</AlertDialogTitle>
             <AlertDialogDescription>
               Review wallet requirements before continuing.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="space-y-2 text-left">
+          <div className="space-y-2 text-left text-[var(--muted-ink)]">
             <div>What to have in your wallet:</div>
             <ul className="list-disc pl-5 space-y-1">
               <li>USDC (Base): 0.10 USDC for the membership itself.</li>
@@ -1840,7 +1872,7 @@ const autoRenewPreference = (sessionUser?.autoRenewPreference ?? null) as 'enabl
               <strong>First time only:</strong> you may see two on‑chain steps—Approve USDC (gas only) then Purchase (0.10 USDC + gas).
             </div>
             <div>That’s it—0.10 USDC for the membership, plus pennies of ETH for gas.</div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-[var(--muted-ink)]">
               Note: After purchase you can enable auto-renew so renewals happen automatically, or skip it and set it up later from Edit Profile.
             </div>
           </div>

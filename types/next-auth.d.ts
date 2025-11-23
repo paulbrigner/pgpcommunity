@@ -13,13 +13,10 @@ declare module "next-auth" {
       image?: string | null;
       walletAddress?: string | null;
       wallets?: string[] | null;
-      autoRenewPreference?: 'enabled' | 'skipped' | null;
       membershipStatus?: 'active' | 'expired' | 'none' | null;
       membershipExpiry?: number | null;
       membershipSummary?: any;
       membershipHighestTier?: string | null;
-      currentMembershipTierId?: string | null;
-      lastMembershipTierId?: string | null;
     };
   }
 
@@ -32,9 +29,6 @@ declare module "next-auth" {
     email?: string | null;
     walletAddress?: string | null;
     wallets?: string[] | null;
-    autoRenewPreference?: 'enabled' | 'skipped' | null;
-    currentMembershipTierId?: string | null;
-    lastMembershipTierId?: string | null;
   }
 }
 
@@ -42,11 +36,8 @@ declare module "next-auth/jwt" {
   interface JWT {
     email?: string | null;
     walletAddress?: string | null;
-    autoRenewPreference?: 'enabled' | 'skipped' | null;
     membershipStatus?: 'active' | 'expired' | 'none' | null;
     membershipExpiry?: number | null;
     membershipHighestTier?: string | null;
-    currentMembershipTierId?: string | null;
-    lastMembershipTierId?: string | null;
   }
 }

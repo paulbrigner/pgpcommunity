@@ -118,7 +118,10 @@ async function getLockName(address: string): Promise<string | null> {
 
 
 
-const locksmithMetadataCache = new Map<string, any>();
+type CacheEntry<T> = { value: T; expiresAt: number };
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+const locksmithMetadataCache = new Map<string, CacheEntry<any>>();
 const LOCKSMITH_BASE = LOCKSMITH_BASE_URL;
 const NETWORK_ID = BASE_NETWORK_ID;
 const NETWORK_CONFIG_COLLECTION = (unlockNetworks as any)?.networks || unlockNetworks;
@@ -363,13 +366,11 @@ function extractEventDetails(metadata: any, fallbackName: string | null): EventD
 
 async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
   const key = `${lockAddress}:${tokenId}`;
-  if (locksmithMetadataCache.has(key)) {
-    const cached = locksmithMetadataCache.get(key);
-    if (cached !== null && cached !== undefined) {
-      return cached;
-    }
-    locksmithMetadataCache.delete(key);
+  const cached = locksmithMetadataCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
   }
+  locksmithMetadataCache.delete(key);
   try {
     const url = `${LOCKSMITH_BASE}/v2/api/metadata/${RESOLVED_NETWORK_ID}/locks/${lockAddress}/keys/${encodeURIComponent(tokenId)}`;
     const res = await fetch(url, { cache: 'no-store' });
@@ -378,7 +379,7 @@ async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
       return null;
     }
     const data = await res.json();
-    locksmithMetadataCache.set(key, data);
+    locksmithMetadataCache.set(key, { value: data, expiresAt: Date.now() + CACHE_TTL_MS });
     return data;
   } catch (_err) {
     locksmithMetadataCache.delete(key);
@@ -386,13 +387,15 @@ async function fetchLocksmithMetadata(lockAddress: string, tokenId: string) {
   }
 }
 
-const lockMetadataCache = new Map<string, any>();
+const lockMetadataCache = new Map<string, CacheEntry<any>>();
 
 async function fetchLockMetadata(lockAddress: string) {
   const key = lockAddress.toLowerCase();
-  if (lockMetadataCache.has(key)) {
-    return lockMetadataCache.get(key);
+  const cached = lockMetadataCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
   }
+  lockMetadataCache.delete(key);
   try {
     const url = `${LOCKSMITH_BASE}/v2/api/metadata/${RESOLVED_NETWORK_ID}/locks/${lockAddress}`;
     const res = await fetch(url, { cache: 'no-store' });
@@ -400,7 +403,7 @@ async function fetchLockMetadata(lockAddress: string) {
       return null;
     }
     const data = await res.json();
-    lockMetadataCache.set(key, data);
+    lockMetadataCache.set(key, { value: data, expiresAt: Date.now() + CACHE_TTL_MS });
     return data;
   } catch {
     return null;
@@ -881,19 +884,7 @@ export async function GET(req: NextRequest) {
           const timezone = typeof lockEventDetails.timezone === 'string' ? lockEventDetails.timezone : null;
           const location = typeof lockEventDetails.location === 'string' ? lockEventDetails.location : null;
           const imageUrl = normalizeImageUrl(lockMetadata?.image) || null;
-          const quickCheckoutConfig = overrideCheckoutConfig
-            ? {
-                ...overrideCheckoutConfig,
-                locks: {
-                  ...(overrideCheckoutConfig?.locks || {}),
-                  [addr]: {
-                    network: RESOLVED_NETWORK_ID,
-                    order: 0,
-                    ...(overrideCheckoutConfig?.locks?.[addr] || {}),
-                  },
-                },
-              }
-            : null;
+          const quickCheckoutLock = overrideCheckoutConfig ? addr : null;
 
           upcoming.push({
             contractAddress: addr,
@@ -906,7 +897,7 @@ export async function GET(req: NextRequest) {
             timezone,
             location,
             image: imageUrl,
-            quickCheckoutConfig,
+            quickCheckoutLock,
             eventDate: eventSubtitle,
             sortKey: normalizedSortKey,
           });

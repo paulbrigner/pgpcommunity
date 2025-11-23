@@ -20,6 +20,8 @@ const buttonVariants = cva(
         ghost:
           "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
         link: "text-primary underline-offset-4 hover:underline",
+        "outlined-primary":
+          "border border-[rgba(67,119,243,0.35)] bg-white text-[var(--brand-denim)] shadow-none hover:bg-[rgba(67,119,243,0.08)] focus-visible:ring-[rgba(67,119,243,0.35)] dark:bg-transparent",
       },
       size: {
         default: "h-9 px-4 py-2 has-[>svg]:px-3",
@@ -40,19 +42,42 @@ function Button({
   variant,
   size,
   asChild = false,
+  isLoading = false,
+  children,
   ...props
 }: React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
+    isLoading?: boolean
   }) {
   const Comp = asChild ? Slot : "button"
+  const { disabled, ...rest } = props
+  const classNameValue = cn(
+    buttonVariants({ variant, size, className }),
+    isLoading ? "cursor-wait" : undefined
+  )
+  const sharedProps = {
+    "data-slot": "button",
+    className: classNameValue,
+    disabled: disabled || isLoading,
+    ...rest,
+  }
+  const spinner = isLoading ? (
+    <span
+      aria-hidden="true"
+      className="inline-flex size-4 animate-spin rounded-full border-[2px] border-current border-r-transparent"
+    />
+  ) : null
+
+  if (asChild) {
+    return <Comp {...sharedProps}>{children}</Comp>
+  }
 
   return (
-    <Comp
-      data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
+    <Comp {...sharedProps}>
+      {spinner}
+      {children}
+    </Comp>
   )
 }
 

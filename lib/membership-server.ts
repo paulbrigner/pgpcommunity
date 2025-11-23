@@ -18,6 +18,7 @@ export type TierMembershipSummary = {
   tier: MembershipTierConfig;
   status: TierStatus;
   expiry: number | null;
+  tokenIds?: string[];
   metadata?: {
     name?: string | null;
     description?: string | null;

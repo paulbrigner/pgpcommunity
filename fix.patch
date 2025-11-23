@@ -1,0 +1,143 @@
+ (cd "$(git rev-parse --show-toplevel)" && git apply --3way <<'EOF' 
+diff --git a/docs/membership-architecture-redesign.md b/docs/membership-architecture-redesign.md
+index 5561c97829961e64cf8a3e23e7983b3a36cbc305..cfa0fb1e5161bc9dd03f1c4dbfc05df799ecdda2 100644
+--- a/docs/membership-architecture-redesign.md
++++ b/docs/membership-architecture-redesign.md
+@@ -9,26 +9,131 @@ Membership State
+ 
+ Fetch TierMembershipSummary for each lock via getMembershipSummary and extend it with token id / renewal info by calling tokenOfOwnerByIndex + expirationTimestampFor (same RPCs already wrapped in evaluateLockMembership at lib/membership-server.ts:70).
+ Determine auto-renew purely from USDC.allowance(owner, lock) (exposed alongside membership summary), flagging unlimited approvals vs zeroed allowances.
+ Surface redundant active keys (e.g., user owns both Gold and Silver) so UI can prompt clean-up; the app still treats the lowest order tier as the authoritative membership.
+ Cache the assembled state per session with a short TTL (e.g., 60s) to avoid RPC spam; invalidate immediately after unlock SDK transactions settle.
+ Expose status, expiry, allowance, active key id, and metadata to the UI so components like app/settings/profile/membership/page.tsx can render without DB lookups.
+ Tier Change Flow
+ 
+ Immediate upgrade: Detect current key id (highest tier). Ask user if they want to end it now; if yes, call walletService.cancelAndRefund for that lock/token, wait for confirmation, revoke USDC allowance if they don’t want renewals, then purchase the higher-tier lock and refresh summary.
+ Immediate downgrade: Same mechanics—cancel-and-refund the premium lock (warning about penalty), optionally purchase the cheaper tier right after, and revoke old approvals.
+ Scheduled downgrade: Offer a “switch at expiry” helper that simply revokes the old allowance, records the target tier in local state, and prompts the user once highestActiveTier.expiry passes; actual purchase still requires an explicit click.
+ Lateral switch with overlapping access: Allow purchasing the new tier without canceling the old one, but mark the previous lock as “still active, auto-renew on/off” so the UI nudges the user to clean it up.
+ Post-transaction sync: After every WalletService call (purchase/extend/cancel), wait for tx.wait(), re-run the summary RPCs, and update the session cache so downstream pages immediately reflect the change.
+ Implementation Steps
+ 
+ Delete the Dynamo persistence logic for autoRenewPreference, currentMembershipTierId, lastMembershipTierId, and replace those API routes with thin RPC proxies or remove them if the client can talk to the chain directly.
+ Extend lib/membership-server.ts with helpers that return { tokenId, hasAllowance } per tier, and expose them through a single server action or React query hook.
+ Wrap Unlock SDK interactions in a dedicated module (e.g., lib/membership-actions.ts) that handles network switching, allowance inspection, approval deltas, and error decoding.
+ Refactor UI flows (dashboard, settings) to consume the new state object, show upgrade/downgrade CTAs based on derived status, and surface cancel/allowance actions instead of stored preferences.
+ Adjust authentication enrichment (app/api/auth/[...nextauth]/route.ts:203) to only stuff cached membership summary fields into the JWT/session, removing references to the deleted DB columns.
+ 
+ Next Steps
+ 
+ 1. Sketch the MembershipStateService interface (inputs, outputs, cache policy) and agree on the RPC calls it must support.
+ 2. Prototype the upgrade/downgrade orchestrator with mock WalletService calls to validate the cancel-and-refund + purchase sequencing.
+-3. pdate the membership settings page to use the new state shape and UX copy, then prune the Dynamo routes once the UI is wired up.
+\ No newline at end of file
++3. Update the membership settings page to use the new state shape and UX copy, then prune the Dynamo routes once the UI is wired up.
++
++## Step 1 — MembershipStateService sketch
++
++### Goals
++
++* Provide a single entry point for retrieving on-chain membership status, tier metadata, and renewal allowances for one or more wallet addresses.
++* Avoid duplicating membership persistence in the application database; everything comes from Unlock contracts, ERC20 allowances, or cached metadata.
++* Supply a shape that the UI and orchestrators can consume without additional RPC calls, while allowing explicit cache invalidation after transactions.
++
++### Interface surface
++
++```ts
++export interface MembershipStateService {
++  getState(params: {
++    /** Primary wallet plus any delegate / recovery addresses that should count toward membership */
++    addresses: string[];
++    /** Override for chain id; defaults to BASE_NETWORK_ID */
++    chainId?: number;
++    /** Force bypass of the cached snapshot when fresh data is required */
++    forceRefresh?: boolean;
++    /** When true, resolves Locksmith metadata for tiers that are missing cached copy */
++    hydrateMetadata?: boolean;
++  }): Promise<MembershipStateSnapshot>;
++
++  getTierState(params: {
++    addresses: string[];
++    tierId: string;
++    chainId?: number;
++    forceRefresh?: boolean;
++  }): Promise<TierStateSnapshot | null>;
++
++  /**
++   * Drop cached snapshots for the supplied addresses (after purchases, refunds, allowance changes, etc.).
++   * Returns true when an entry was removed so callers can decide whether to refetch immediately.
++   */
++  invalidate(addresses: string[], chainId?: number): boolean;
++
++  /**
++   * Optionally seed the cache with a known-good snapshot (e.g., result returned to the client) to avoid double-fetching.
++   */
++  prime(snapshot: MembershipStateSnapshot, params: { addresses: string[]; chainId?: number; ttlMs?: number }): void;
++}
++```
++
++```ts
++export type MembershipStateSnapshot = {
++  chainId: number;
++  fetchedAt: number; // epoch ms
++  asOfBlock?: number; // optional block number for display / debugging
++  highestActiveTier: TierStateSnapshot | null;
++  tiers: TierStateSnapshot[];
++  // Allowance keyed by lock checksum address
++  allowances: Record<string, AllowanceState>;
++};
++
++export type TierStateSnapshot = {
++  tier: MembershipTierConfig;
++  status: 'active' | 'expired' | 'none';
++  expiry: number | null;
++  // Raw token ids (if any) that belong to the supplied address set
++  tokenIds: string[];
++  // Timestamp when we last observed an auto-renew approval for this tier
++  renewalApprovedAt?: number;
++  metadata?: {
++    name?: string | null;
++    description?: string | null;
++    image?: string | null;
++    price?: string | null;
++  };
++};
++
++export type AllowanceState = {
++  lockAddress: string; // checksum
++  amount: string; // raw allowance value as a stringified bigint
++  spender: string; // lock address for clarity
++  isUnlimited: boolean;
++  lastCheckedAt: number;
++};
++```
++
++### Cache policy
++
++* **Address+chain scoped cache key:** `hash([chainId, ...addresses.sort()])` ensures we share snapshots between server actions and API routes.
++* **Default TTL:** 60 seconds. Snapshots older than this trigger a background refresh when `forceRefresh !== true`, but we still return stale data immediately if available to keep UI responsive.
++* **Post-transaction invalidation:** Callers *must* invoke `invalidate` after purchase, cancel, or approval transactions settle (the orchestrator will own this).
++* **Metadata cache:** Locksmith lock metadata is cached separately with a ~10 minute TTL since it rarely changes.
++* **Concurrency guard:** Deduplicate concurrent fetches for the same key so we only run the expensive RPC bundle once.
++
++### Required RPC / HTTP calls
++
++The service consolidates state by calling the following primitives. Any provider used must support batching or parallel calls because a single refresh touches every configured tier.
++
++* **PublicLock (per tier / lock):**
++  * `getHasValidKey(address)` – fast path for active status.
++  * `keyExpirationTimestampFor(address)` – direct expiry lookup when supported.
++  * `totalKeys(address)` – guards older locks that do not implement ERC721 enumerable helpers.
++  * `balanceOf(address)` and `tokenOfOwnerByIndex(address, index)` – enumerate token ids when address-based expiry fails.
++  * `keyExpirationTimestampFor(uint256)` / `tokenExpirationTimestamp(uint256)` / `expirationTimestampFor(uint256)` – resolve expiry for enumerated keys.
++* **ERC20 (USDC):**
++  * `allowance(owner, spender)` – detect auto-renew approvals per lock.
++* **Optional niceties:**
++  * `balanceOf(owner)` on USDC – allows UI to warn when balance is insufficient even if allowance exists (not required for MVP but included for completeness).
++  * Locksmith metadata endpoint (`/v2/api/metadata/{networkId}/locks/{lockAddress}`) – hydrate tier name/description/price for richer UI.
++
++The service should be provider-agnostic (accepting an `RpcClient` abstraction) so tests can inject mocks and we can swap RPC providers without rewriting call sites.
+\ No newline at end of file
+ 
+EOF
+)

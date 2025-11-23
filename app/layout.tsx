@@ -20,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${inter.variable} antialiased`}>
+    <html lang="en" className={`${inter.variable} antialiased`} data-scroll-behavior="smooth">
       <body className="font-sans min-h-screen bg-background text-foreground">
         <Providers>
           <MainNav />

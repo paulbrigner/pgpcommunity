@@ -27,6 +27,9 @@ This software is under active development and has not undergone a full independe
   - Server environment variables store sensitive credentials including:
     - CloudFront private key for signed URL generation (`PRIVATE_KEY_SECRET`)
     - CloudFront distribution config values (`CLOUDFRONT_DOMAIN`, `KEY_PAIR_ID`)
+- **Membership logic**:
+  - Membership state is derived on-chain (Unlock locks + USDC approvals) and cached briefly server-side; UI consumes snapshots.
+  - Checkout/renewal paths run client-side via Unlock JS; server helpers only refresh/invalidate cache (no server-side signing).
 
 ## Setup
 ### Environment Variables
@@ -78,11 +81,12 @@ EMAIL_FROM=PGP Community <no-reply@your-domain>
 CHECKOUT_CONFIGS=0x1111111111111111111111111111111111111111:{"locks":{"0x1111111111111111111111111111111111111111":{"network":8453}},"title":"Register"};0x2222222222222222222222222222222222222222:{"locks":{"0x2222222222222222222222222222222222222222":{"network":8453}},"title":"Register"}
 ```
 
-Each pair maps a lock address to a JSON Paywall config snippet (as a single-line JSON string). Separate pairs with semicolons. The app merges this with sensible defaults (network, order, etc.) when launching the in-page paywall modal. If an address is omitted, a default config is generated automatically.
+Each pair maps a lock address to a JSON config snippet (as a single-line JSON string). Separate pairs with semicolons. The new Unlock checkout helpers merge these overrides with sensible defaults when embedding the React-based checkout component. If an address is omitted, the UI falls back to the tier metadata in `lib/checkout-config.ts` and still renders a purchase drawer, but without the extra customizations from this map.
 
 Notes:
 - Ensure these server-only env vars are set in Amplify build/deploy environment (not exposed to the client).
 - DynamoDB table for NextAuth is created/used by the adapter (name via `NEXTAUTH_TABLE`). Ensure the Amplify role has read/write access to it.
+- For deterministic membership tokenId lookups on non-enumerable locks, set either `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL` *or* both `UNLOCK_SUBGRAPH_API_KEY` and `UNLOCK_SUBGRAPH_ID`. Without these, checkout may refuse renewals when a key exists but the tokenId cannot be discovered.
 
 ### Authentication (NextAuth v4 + Email + SIWE)
 - API route: `app/api/auth/[...nextauth]/route.ts` uses NextAuth v4 with:

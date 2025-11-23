@@ -7,11 +7,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import type { MembershipSummary } from "@/lib/membership-server";
-import {
-  clearPrefetchedMembership,
-  loadPrefetchedMembershipFor,
-  savePrefetchedMembership,
-} from "@/lib/membership-prefetch";
+import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
 
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
@@ -71,84 +67,18 @@ export default function ProfileSettingsPage() {
   }, [authenticated, sessionUser]);
 
   useEffect(() => {
-    if (!authenticated) {
-      clearPrefetchedMembership();
-      return;
-    }
-    if (!membershipAddresses.length) {
-      clearPrefetchedMembership();
-      return;
-    }
-
-    if (sessionMembershipSummary) {
-      savePrefetchedMembership({
-        summary: sessionMembershipSummary,
-        status: sessionMembershipSummary.status,
-        expiry: sessionMembershipSummary.expiry ?? null,
-        addresses: membershipAddresses,
-      });
-      return;
-    }
-
-    const existing = loadPrefetchedMembershipFor(membershipAddresses);
-    if (existing) {
-      return;
-    }
-
+    if (!authenticated) return;
+    if (!membershipAddresses.length) return;
+    if (sessionMembershipSummary) return;
     const fetchMembership = async () => {
       try {
-        const query = encodeURIComponent(membershipAddresses.join(","));
-        const response = await fetch(`/api/membership/expiry?addresses=${query}`, { cache: "no-store" });
-        if (!response.ok) {
-          clearPrefetchedMembership();
-          return;
-        }
-        const payload = await response.json();
-        const summary =
-          payload && typeof payload === "object" && Array.isArray(payload?.tiers)
-            ? (payload as MembershipSummary)
-            : null;
-        if (summary) {
-          savePrefetchedMembership({
-            summary,
-            status: summary.status,
-            expiry: summary.expiry ?? null,
-            addresses: membershipAddresses,
-          });
-          return;
-        }
-        const normalizeStatus = (value: unknown): "active" | "expired" | "none" =>
-          value === "active" || value === "expired" || value === "none" ? value : "none";
-        const fallbackStatus = normalizeStatus(payload?.status ?? sessionMembershipStatus ?? "none");
-        const fallbackExpiryRaw = payload?.expiry ?? sessionMembershipExpiry;
-        const fallbackExpiry =
-          typeof fallbackExpiryRaw === "number" && Number.isFinite(fallbackExpiryRaw) ? fallbackExpiryRaw : null;
-        savePrefetchedMembership({
-          summary: null,
-          status: fallbackStatus,
-          expiry: fallbackExpiry,
-          addresses: membershipAddresses,
-        });
-      } catch {
-        if (sessionMembershipStatus) {
-          savePrefetchedMembership({
-            summary: null,
-            status: sessionMembershipStatus,
-            expiry: sessionMembershipExpiry ?? null,
-            addresses: membershipAddresses,
-          });
-        }
+        await fetchMembershipStateSnapshot({ addresses: membershipAddresses, forceRefresh: true });
+      } catch (err) {
+        console.error("Profile membership fetch failed", err);
       }
     };
-
     void fetchMembership();
-  }, [
-    authenticated,
-    membershipAddresses,
-    sessionMembershipExpiry,
-    sessionMembershipStatus,
-    sessionMembershipSummary,
-  ]);
+  }, [authenticated, membershipAddresses, sessionMembershipSummary]);
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

@@ -20,7 +20,7 @@ function getWeb3(rpcUrl: string, networkId: number) {
 }
 
 export const UNLOCK_ERRORS: Record<string, string> = {
-  '0x17ed8646': 'Membership sold out or max keys reached.',
+  '0x17ed8646': 'You already hold the maximum number of keys for this lock.',
   '0x31af6951': 'Lock sold out.',
   '0x1f04ddc8': 'Not enough funds.',
 };

@@ -6,9 +6,7 @@ import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
-import { BrowserProvider, Contract, JsonRpcProvider } from "ethers";
-import { Paywall } from "@unlock-protocol/paywall";
-import { networks } from "@unlock-protocol/networks";
+import { BrowserProvider, Contract } from "ethers";
 import {
   BASE_BLOCK_EXPLORER_URL,
   BASE_CHAIN_ID_HEX,
@@ -17,8 +15,9 @@ import {
   MEMBERSHIP_TIERS,
   USDC_ADDRESS,
 } from "@/lib/config";
-import { buildSingleLockCheckoutConfig } from "@/lib/membership-paywall";
+import { useUnlockCheckout } from "@/lib/unlock-checkout";
 import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
+import { snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import {
   detectRecentlyActivatedTierId,
   findTierInSummary,
@@ -27,11 +26,7 @@ import {
   pickHighestActiveTier,
   resolveTierLabel,
 } from "@/lib/membership-tiers";
-import {
-  clearPrefetchedMembership,
-  loadPrefetchedMembershipFor,
-  savePrefetchedMembership,
-} from "@/lib/membership-prefetch";
+import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
 
 const MAX_AUTO_RENEW_MONTHS: number = 12;
 
@@ -75,10 +70,9 @@ export default function MembershipSettingsPage() {
       ),
     );
   }, [walletAddress, wallets]);
-  const prefetchedMembership = membershipAddresses.length ? loadPrefetchedMembershipFor(membershipAddresses) : null;
-
   const [currentTierOverride, setCurrentTierOverride] = useState<string | null | undefined>(undefined);
   const [desiredTierOverride, setDesiredTierOverride] = useState<string | null | undefined>(undefined);
+  const [allowances, setAllowances] = useState<Record<string, AllowanceState>>({});
 
   useEffect(() => {
     if (currentTierOverride === undefined) return;
@@ -102,67 +96,29 @@ export default function MembershipSettingsPage() {
     | undefined;
   const sessionMembershipExpiry =
     sessionMembershipSummary?.expiry ?? (sessionUser?.membershipExpiry as number | null | undefined) ?? null;
-  const initialSummary = sessionMembershipSummary ?? prefetchedMembership?.summary ?? null;
-  const initialStatus = sessionMembershipStatus ?? prefetchedMembership?.status ?? "unknown";
-  const initialExpiry =
-    sessionMembershipSummary?.expiry ?? prefetchedMembership?.expiry ?? sessionMembershipExpiry ?? null;
+  const initialSummary = sessionMembershipSummary ?? null;
+  const initialStatus = sessionMembershipStatus ?? "unknown";
+  const initialExpiry = sessionMembershipSummary?.expiry ?? sessionMembershipExpiry ?? null;
   const [membershipSummary, setMembershipSummary] = useState<MembershipSummary | null>(initialSummary);
   const [membershipStatus, setMembershipStatus] = useState<"active" | "expired" | "none" | "unknown">(initialStatus);
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialExpiry);
   const [membershipChecking, setMembershipChecking] = useState(false);
   const previousSummaryRef = useRef<MembershipSummary | null>(sessionMembershipSummary ?? null);
+  const pendingTierSwitchRef = useRef<{
+    targetTierAddress: string;
+    targetTierLower: string;
+    targetTierId: string;
+    targetTierLabel: string;
+    disableMessage: string | null;
+    previousTierLabel: string | null;
+    switchingTier: boolean;
+    addresses: string[];
+  } | null>(null);
 
-  useEffect(() => {
-    if (!prefetchedMembership) return;
-    if (!membershipSummary && prefetchedMembership.summary) {
-      setMembershipSummary(prefetchedMembership.summary);
-    }
-    if (membershipStatus === "unknown") {
-      setMembershipStatus(prefetchedMembership.status);
-    }
-    if ((membershipExpiry === null || typeof membershipExpiry !== "number") && typeof prefetchedMembership.expiry === "number") {
-      setMembershipExpiry(prefetchedMembership.expiry);
-    }
-  }, [membershipExpiry, membershipStatus, membershipSummary, prefetchedMembership]);
-
-  const paywall = useMemo(() => {
-    return new Paywall({
-      ...networks,
-      [BASE_NETWORK_ID]: {
-        ...networks[BASE_NETWORK_ID],
-        provider: BASE_RPC_URL,
-      },
-    });
-  }, []);
-
-  const persistAutoRenewPreference = useCallback(
-    async (value: "enabled" | "skipped" | "clear") => {
-      try {
-        const resp = await fetch("/api/profile/auto-renew", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ preference: value }),
-        });
-        if (!resp.ok) {
-          console.error("Persist auto-renew preference failed", await resp.text());
-        } else {
-          await update({});
-        }
-      } catch (err) {
-        console.error("Persist auto-renew preference error:", err);
-      }
-    },
-    [update],
-  );
 
   const persistTierSelection = useCallback(
-    async (values: { currentTierId?: string | null; desiredTierId?: string | null }) => {
+    (values: { currentTierId?: string | null; desiredTierId?: string | null }) => {
       if (!values || typeof values !== "object") return;
-      const prevCurrent = currentTierOverride;
-      const prevDesired = desiredTierOverride;
-      const payload: Record<string, string | null> = {};
-      let shouldUpdateCurrent = false;
-      let shouldUpdateDesired = false;
 
       if (Object.prototype.hasOwnProperty.call(values, "currentTierId")) {
         const normalized = normalizeTierId(values.currentTierId ?? null);
@@ -170,8 +126,6 @@ export default function MembershipSettingsPage() {
           const target = normalized ?? null;
           const pending = currentTierOverride !== undefined ? currentTierOverride ?? null : sessionCurrentMembershipTierId ?? null;
           if (target !== pending) {
-            payload.currentTierId = normalized ?? null;
-            shouldUpdateCurrent = true;
             setCurrentTierOverride(target);
           }
         }
@@ -183,44 +137,12 @@ export default function MembershipSettingsPage() {
           const target = normalized ?? null;
           const pending = desiredTierOverride !== undefined ? desiredTierOverride ?? null : sessionDesiredMembershipTierId ?? null;
           if (target !== pending) {
-            payload.desiredTierId = normalized ?? null;
-            shouldUpdateDesired = true;
             setDesiredTierOverride(target);
           }
         }
       }
-
-      if (!shouldUpdateCurrent && !shouldUpdateDesired) {
-        return;
-      }
-
-      try {
-        const resp = await fetch("/api/profile/membership-tier", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!resp.ok) {
-          const detail = await resp.text().catch(() => null);
-          console.error("Persist membership tier failed", detail || resp.statusText);
-          if (shouldUpdateCurrent) setCurrentTierOverride(prevCurrent);
-          if (shouldUpdateDesired) setDesiredTierOverride(prevDesired);
-        } else {
-          await update({});
-        }
-      } catch (err) {
-        console.error("Persist membership tier error:", err);
-        if (shouldUpdateCurrent) setCurrentTierOverride(prevCurrent);
-        if (shouldUpdateDesired) setDesiredTierOverride(prevDesired);
-      }
     },
-    [
-      currentTierOverride,
-      desiredTierOverride,
-      sessionCurrentMembershipTierId,
-      sessionDesiredMembershipTierId,
-      update,
-    ],
+    [currentTierOverride, desiredTierOverride, sessionCurrentMembershipTierId, sessionDesiredMembershipTierId],
   );
 
   const maxMonthsLabel = `${MAX_AUTO_RENEW_MONTHS} ${MAX_AUTO_RENEW_MONTHS === 1 ? "month" : "months"}`;
@@ -326,7 +248,7 @@ export default function MembershipSettingsPage() {
       setMembershipStatus("none");
       setMembershipExpiry(null);
       setMembershipChecking(false);
-      clearPrefetchedMembership();
+      setAllowances({});
       return null;
     }
 
@@ -334,71 +256,157 @@ export default function MembershipSettingsPage() {
       setMembershipSummary(sessionMembershipSummary);
       setMembershipStatus(sessionMembershipSummary.status);
       setMembershipExpiry(sessionMembershipSummary.expiry ?? null);
-      savePrefetchedMembership({
-        summary: sessionMembershipSummary,
-        status: sessionMembershipSummary.status,
-        expiry: sessionMembershipSummary.expiry ?? null,
-        addresses,
-      });
     } else if (su.membershipStatus) {
       const fallbackStatus =
         su.membershipStatus === "active" || su.membershipStatus === "expired" ? su.membershipStatus : "none";
       const fallbackExpiry = typeof su.membershipExpiry === "number" ? su.membershipExpiry : null;
       setMembershipStatus(fallbackStatus);
       setMembershipExpiry(fallbackExpiry);
-      savePrefetchedMembership({
-        summary: null,
-        status: fallbackStatus,
-        expiry: fallbackExpiry,
-        addresses,
-      });
     }
 
     setMembershipChecking(true);
     try {
-      const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(","))}`, {
-        cache: "no-store",
-      });
-      if (resp.ok) {
-        const payload = await resp.json();
-        const summary: MembershipSummary | null =
-          payload && typeof payload === "object" && Array.isArray(payload?.tiers) ? (payload as MembershipSummary) : null;
-        if (summary) {
-          setMembershipSummary(summary);
-          setMembershipStatus(summary.status);
-          setMembershipExpiry(summary.expiry ?? null);
-          savePrefetchedMembership({
-            summary,
-            status: summary.status,
-            expiry: summary.expiry ?? null,
-            addresses,
-          });
-          return summary;
-        } else {
-          const status = (payload?.status ?? "none") as "active" | "expired" | "none";
-          const expiry = typeof payload?.expiry === "number" ? payload.expiry : null;
-          setMembershipSummary(null);
-          setMembershipStatus(status);
-          setMembershipExpiry(expiry);
-          savePrefetchedMembership({
-            summary: null,
-            status,
-            expiry,
-            addresses,
-          });
-        }
-      } else {
-        clearPrefetchedMembership();
-      }
+      const snapshot = await fetchMembershipStateSnapshot({ addresses, forceRefresh: true });
+      const { summary, allowances: snapshotAllowances } = snapshotToMembershipSummary(snapshot);
+      setMembershipSummary(summary);
+      setMembershipStatus(summary.status);
+      setMembershipExpiry(summary.expiry ?? null);
+      setAllowances(snapshotAllowances);
+      return summary;
     } catch (err) {
       console.error("Membership check failed:", err);
-      clearPrefetchedMembership();
+      setAllowances({});
     } finally {
       setMembershipChecking(false);
     }
 
     return null;
   }, [authenticated, membershipAddresses, sessionMembershipSummary, sessionUser]);
+
+  const handleMembershipCheckoutComplete = useCallback(async () => {
+    const context = pendingTierSwitchRef.current;
+    pendingTierSwitchRef.current = null;
+    try {
+      let newTierDetected = false;
+      if (context) {
+        const { addresses, targetTierLower } = context;
+        if (addresses.length) {
+          for (let i = 0; i < 5; i++) {
+            try {
+              const snapshot = await fetchMembershipStateSnapshot({ addresses, forceRefresh: true });
+              const { summary, allowances: snapshotAllowances } = snapshotToMembershipSummary(snapshot);
+              setAllowances(snapshotAllowances);
+              if (summary?.tiers?.length) {
+                const detected = summary.tiers.find((tier) => tier.tier.checksumAddress.toLowerCase() === targetTierLower);
+                if (detected?.status === "active") {
+                  newTierDetected = true;
+                  break;
+                }
+              } else {
+                const status = summary?.status;
+                const expiry = typeof summary?.expiry === "number" ? summary.expiry : null;
+                const nowSec = Math.floor(Date.now() / 1000);
+                if (status === "active" || (typeof expiry === "number" && expiry > nowSec)) {
+                  break;
+                }
+              }
+            } catch {}
+            await new Promise((resolve) => setTimeout(resolve, 1200));
+          }
+        }
+
+        let refreshedSummary: MembershipSummary | null = null;
+        try {
+          refreshedSummary = await refreshMembershipSummary();
+        } catch {}
+
+        const summaryForCheck = refreshedSummary ?? membershipSummary;
+        if (!newTierDetected && summaryForCheck?.tiers?.length) {
+          const detected = summaryForCheck.tiers.find((tier) => tier.tier.checksumAddress.toLowerCase() === context.targetTierLower);
+          if (detected?.status === "active") {
+            newTierDetected = true;
+          }
+        }
+
+        if (newTierDetected) {
+          void persistTierSelection({ desiredTierId: context.targetTierId });
+        }
+
+        try {
+          await update({});
+        } catch {}
+
+        const parts: string[] = [];
+        if (context.disableMessage) {
+          parts.push(context.disableMessage);
+        }
+
+        let previousTierNote: string | null = null;
+        if (context.switchingTier && context.previousTierLabel) {
+          previousTierNote = newTierDetected
+            ? `Your previous membership (${context.previousTierLabel}) will remain active until it expires.`
+            : `We could not confirm your new membership yet. If checkout completed, your previous membership (${context.previousTierLabel}) will remain active until it expires.`;
+        } else if (!newTierDetected) {
+          previousTierNote =
+            "We could not confirm your new membership yet. If checkout completed, your membership details will update shortly.";
+        }
+
+        if (previousTierNote) {
+          parts.push(previousTierNote);
+        }
+
+        if (newTierDetected) {
+          parts.push(`If you completed checkout for the ${context.targetTierLabel} tier, your membership details will update shortly.`);
+        } else if (!previousTierNote) {
+          parts.push(
+            "We could not confirm your new membership yet. If checkout completed, your membership details will update shortly.",
+          );
+        }
+
+        setMessage(parts.join(" "));
+        setError(null);
+      } else {
+        try {
+          await refreshMembershipSummary();
+        } catch {}
+      }
+    } finally {
+      setTierSwitching(false);
+    }
+  }, [membershipSummary, persistTierSelection, refreshMembershipSummary, update]);
+
+  const tokenIdMap = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const tier of membershipSummary?.tiers || []) {
+      if (tier?.tier?.checksumAddress && Array.isArray(tier?.tokenIds)) {
+        map[tier.tier.checksumAddress.toLowerCase()] = tier.tokenIds;
+      }
+    }
+    return map;
+  }, [membershipSummary]);
+
+  const selectedTierHasKey = useMemo(() => {
+    if (!selectedTierAddress) return false;
+    const ids = tokenIdMap[selectedTierAddress.toLowerCase()] ?? [];
+    return Array.isArray(ids) && ids.length > 0;
+  }, [selectedTierAddress, tokenIdMap]);
+
+  const {
+    openMembershipCheckout,
+    checkoutPortal,
+    status: checkoutStatus,
+  } = useUnlockCheckout({
+    onMembershipComplete: handleMembershipCheckoutComplete,
+  }, tokenIdMap);
+
+  useEffect(() => {
+    const busy = checkoutStatus === 'loading' || checkoutStatus === 'ready' || checkoutStatus === 'processing';
+    if (busy) {
+      setTierSwitching(true);
+    } else if (!busy && pendingTierSwitchRef.current === null) {
+      setTierSwitching(false);
+    }
+  }, [checkoutStatus]);
 
   useEffect(() => {
     void refreshMembershipSummary();
@@ -455,61 +463,49 @@ export default function MembershipSettingsPage() {
     persistTierSelection,
   ]);
 
-  const checkAutoRenewStatus = useCallback(async () => {
-    if (!authenticated) {
-      setAutoRenewPrice(null);
-      setAutoRenewMonths(null);
-      setAutoRenewChecking(false);
-      return;
-    }
-    if (!renewalTierAddress) {
-      setAutoRenewPrice(null);
-      setAutoRenewMonths(null);
-      setAutoRenewChecking(false);
-      return;
-    }
+  const checkAutoRenewStatus = useCallback(() => {
     setAutoRenewChecking(true);
-    try {
-      if (!USDC_ADDRESS || !renewalTierAddress) throw new Error("Missing contract addresses");
-      const owner = walletAddress || (wallets && wallets[0]) || null;
-      if (!owner) {
-        setAutoRenewPrice(null);
-        setAutoRenewMonths(null);
-        return;
-      }
-      const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
-      const erc20 = new Contract(
-        USDC_ADDRESS,
-        ["function allowance(address owner, address spender) view returns (uint256)"],
-        provider,
-      );
-      const lock = new Contract(
-        renewalTierAddress,
-        ["function keyPrice() view returns (uint256)"],
-        provider,
-      );
-      let price: bigint = 0n;
-      try {
-        price = await lock.keyPrice();
-      } catch {
-        price = 100000n;
-      }
-      if (price <= 0n) {
-        setAutoRenewPrice(null);
-        setAutoRenewMonths(null);
-        return;
-      }
-      const allowance: bigint = await erc20.allowance(owner, renewalTierAddress);
-      const months = Number(allowance / price);
-      setAutoRenewPrice(price);
-      setAutoRenewMonths(months);
-    } catch {
+    if (!authenticated || membershipStatus !== "active" || !renewalTierAddress) {
       setAutoRenewPrice(null);
       setAutoRenewMonths(null);
-    } finally {
       setAutoRenewChecking(false);
+      return;
     }
-  }, [authenticated, renewalTierAddress, walletAddress, wallets]);
+    const entry = allowances[renewalTierAddress.toLowerCase()];
+    if (!entry) {
+      setAutoRenewPrice(null);
+      setAutoRenewMonths(0);
+      setAutoRenewChecking(false);
+      return;
+    }
+    let price: bigint | null = null;
+    try {
+      price = entry.keyPrice ? BigInt(entry.keyPrice) : null;
+    } catch {
+      price = null;
+    }
+    if (price && price > 0n) {
+      setAutoRenewPrice(price);
+    } else {
+      setAutoRenewPrice(null);
+    }
+
+    let months = 0;
+    if (entry.isUnlimited) {
+      months = MAX_AUTO_RENEW_MONTHS;
+    } else if (price && price > 0n) {
+      try {
+        const allowanceAmount = BigInt(entry.amount || "0");
+        months = Number(allowanceAmount / price);
+      } catch {
+        months = 0;
+      }
+    } else {
+      months = 0;
+    }
+    setAutoRenewMonths(months);
+    setAutoRenewChecking(false);
+  }, [authenticated, allowances, membershipStatus, renewalTierAddress]);
 
   useEffect(() => {
     void checkAutoRenewStatus();
@@ -605,125 +601,47 @@ export default function MembershipSettingsPage() {
       const switchingTier = Boolean(previousTierAddress && previousTierAddress.toLowerCase() !== targetTierLower);
 
       let disableMessage: string | null = null;
-      let previousTierNote: string | null = null;
-
       if (switchingTier && currentTierAddress) {
         const result = await disableAutoRenewForCurrentTier();
-        disableMessage = previousTierLabel ? `${result.message} (Tier: ${previousTierLabel}).` : result.message;
+        disableMessage = previousTierLabel
+          ? `${result.message} (Tier: ${previousTierLabel}).`
+          : result.message;
         setAutoRenewMonths(0);
-        void persistAutoRenewPreference("skipped");
-        void checkAutoRenewStatus();
+        await refreshMembershipSummary();
       }
 
-      const provider = (window as any)?.ethereum;
-      if (!provider) {
-        throw new Error("No wallet found in browser");
-      }
-      await paywall.connect(provider);
-      const checkoutConfig = buildSingleLockCheckoutConfig(targetTierAddress);
-      await paywall.loadCheckoutModal(checkoutConfig);
-
-      let newTierDetected = false;
       const addresses = (wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : [])
         .map((addr) => String(addr).toLowerCase());
-      if (addresses.length) {
-        for (let i = 0; i < 5; i++) {
-          try {
-            const resp = await fetch(`/api/membership/expiry?addresses=${encodeURIComponent(addresses.join(","))}`, {
-              cache: "no-store",
-            });
-            if (resp.ok) {
-              const payload = await resp.json();
-              const summary: MembershipSummary | null =
-                payload && typeof payload === "object" && Array.isArray(payload?.tiers) ? (payload as MembershipSummary) : null;
-              if (summary?.tiers?.length) {
-                const detected = summary.tiers.find((tier) => tier.tier.checksumAddress.toLowerCase() === targetTierLower);
-                if (detected?.status === "active") {
-                  newTierDetected = true;
-                  break;
-                }
-              } else {
-                const status = summary?.status ?? payload?.status;
-                const expiry = typeof (summary?.expiry ?? payload?.expiry) === "number"
-                  ? Number(summary?.expiry ?? payload?.expiry)
-                  : null;
-                const nowSec = Math.floor(Date.now() / 1000);
-                if (status === "active" || (typeof expiry === "number" && expiry > nowSec)) {
-                  break;
-                }
-              }
-            }
-          } catch {}
-          await new Promise((resolve) => setTimeout(resolve, 1200));
-        }
-      }
 
-      let refreshedSummary: MembershipSummary | null = null;
-      try {
-        refreshedSummary = await refreshMembershipSummary();
-      } catch {}
+      pendingTierSwitchRef.current = {
+        targetTierAddress,
+        targetTierLower,
+        targetTierId: selectedTierOption.tier.id,
+        targetTierLabel: selectedTierOption.baseLabel,
+        disableMessage,
+        previousTierLabel,
+        switchingTier,
+        addresses,
+      };
 
-      const summaryForCheck = refreshedSummary ?? membershipSummary;
-      if (!newTierDetected && summaryForCheck?.tiers?.length) {
-        const detected = summaryForCheck.tiers.find((tier) => tier.tier.checksumAddress.toLowerCase() === targetTierLower);
-        if (detected?.status === "active") {
-          newTierDetected = true;
-        }
-      }
-
-      if (switchingTier && previousTierLabel) {
-        previousTierNote = newTierDetected
-          ? `Your previous membership (${previousTierLabel}) will remain active until it expires.`
-          : `We could not confirm your new membership yet. If checkout completed, your previous membership (${previousTierLabel}) will remain active until it expires.`;
-      } else if (!newTierDetected) {
-        previousTierNote =
-          "We could not confirm your new membership yet. If checkout completed, your membership details will update shortly.";
-      }
-
-      if (newTierDetected) {
-        void persistTierSelection({ desiredTierId: selectedTierOption.tier.id });
-      }
-
-      try {
-        await update({});
-      } catch {}
-
-      const tierName = selectedTierOption.baseLabel;
-      const parts: string[] = [];
-      if (disableMessage) {
-        parts.push(disableMessage);
-      }
-      if (previousTierNote) {
-        parts.push(previousTierNote);
-      }
-      if (newTierDetected) {
-        parts.push(`If you completed checkout for the ${tierName} tier, your membership details will update shortly.`);
-      } else if (!previousTierNote) {
-        parts.push(
-          "We could not confirm your new membership yet. If checkout completed, your membership details will update shortly.",
-        );
-      }
-      setMessage(parts.join(" "));
+      openMembershipCheckout(targetTierAddress);
     } catch (err: any) {
-      setError(err?.message || "Failed to start membership checkout");
-    } finally {
+      pendingTierSwitchRef.current = null;
       setTierSwitching(false);
+      setError(err?.message || "Failed to start membership checkout");
     }
   }, [
     currentTierAddress,
     currentTierLabel,
     disableAutoRenewForCurrentTier,
-    membershipSummary,
-    paywall,
-    persistAutoRenewPreference,
-    persistTierSelection,
-    checkAutoRenewStatus,
+    openMembershipCheckout,
     refreshMembershipSummary,
     selectedTierOption,
-    update,
+    setAutoRenewMonths,
     walletAddress,
     wallets,
   ]);
+
 
   if (!ready) {
     return <div className="py-12 text-center text-sm text-muted-foreground">Loading…</div>;
@@ -739,7 +657,9 @@ export default function MembershipSettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <>
+      {checkoutPortal}
+      <div className="space-y-6">
       <div className="flex justify-end">
         <Button variant="outline" onClick={() => router.push("/")}>
           ← Back to Home
@@ -832,8 +752,7 @@ export default function MembershipSettingsPage() {
               const result = await disableAutoRenewForDesiredTier();
               setMessage(result.message);
               setAutoRenewMonths(0);
-              void persistAutoRenewPreference("skipped");
-              void checkAutoRenewStatus();
+              await refreshMembershipSummary();
             } catch (err: any) {
               setError(err?.message || "Failed to disable auto‑renew");
             } finally {
@@ -894,8 +813,7 @@ export default function MembershipSettingsPage() {
                   );
                 }
                 setAutoRenewMonths(MAX_AUTO_RENEW_MONTHS);
-                void persistAutoRenewPreference("enabled");
-                void checkAutoRenewStatus();
+                await refreshMembershipSummary();
               } catch (err: any) {
                 setError(err?.message || "Failed to enable auto‑renew");
               } finally {
@@ -932,12 +850,21 @@ export default function MembershipSettingsPage() {
             </select>
             <Button
               onClick={handleTierSwitch}
-              disabled={tierSwitching || !selectedTierOption || (wallets.length === 0 && !walletAddress)}
+              disabled={
+                tierSwitching ||
+                !selectedTierOption ||
+                (wallets.length === 0 && !walletAddress) ||
+                (selectedTierHasKey && (!tokenIdMap[selectedTierAddress.toLowerCase()] || tokenIdMap[selectedTierAddress.toLowerCase()]?.length === 0))
+              }
             >
               {tierSwitching
                 ? "Preparing checkout…"
+                : selectedTierHasKey
+                ? selectedTierOption
+                  ? `Renew ${selectedTierOption.baseLabel}`
+                  : "Renew tier"
                 : selectedTierOption
-                ? `Open checkout for ${selectedTierOption.baseLabel}`
+                ? `Purchase ${selectedTierOption.baseLabel}`
                 : "Open checkout"}
             </Button>
           </div>
@@ -951,6 +878,7 @@ export default function MembershipSettingsPage() {
           ) : null}
         </div>
       </section>
-    </div>
+      </div>
+    </>
   );
 }

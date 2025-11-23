@@ -14,6 +14,8 @@ export type MembershipTierConfig = {
   order: number;
 };
 
+const DEFAULT_MEMBERSHIP_REFERRER = '0x76ff49cc68710a0df27724d46698835d7c7af2f2';
+
 const parseMembershipTiers = (): MembershipTierConfig[] => {
   const raw = process.env.NEXT_PUBLIC_LOCK_TIERS;
   if (raw) {
@@ -112,3 +114,7 @@ export const EMAIL_SERVER_PORT = process.env.EMAIL_SERVER_PORT as string | undef
 export const EMAIL_SERVER_USER = process.env.EMAIL_SERVER_USER as string | undefined;
 export const EMAIL_SERVER_PASSWORD = process.env.EMAIL_SERVER_PASSWORD as string | undefined;
 export const EMAIL_SERVER_SECURE = process.env.EMAIL_SERVER_SECURE as string | undefined;
+
+const resolvedRecurringPayments = parseNumber(process.env.NEXT_PUBLIC_MEMBERSHIP_RECURRING_PAYMENTS);
+export const MEMBERSHIP_RECURRING_PAYMENTS = resolvedRecurringPayments && resolvedRecurringPayments > 0 ? resolvedRecurringPayments : 12;
+export const MEMBERSHIP_REFERRER_ADDRESS = (process.env.NEXT_PUBLIC_MEMBERSHIP_REFERRER || DEFAULT_MEMBERSHIP_REFERRER).trim();

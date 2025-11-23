@@ -77,7 +77,7 @@ if (!process.env.NEXTAUTH_URL && NEXTAUTH_URL) {
   process.env.NEXTAUTH_URL = NEXTAUTH_URL;
 }
 
-const authOptions = {
+export const authOptions = {
   adapter: DynamoDBAdapter(documentClient as any, {
     tableName: TABLE_NAME,
   }),
@@ -200,17 +200,6 @@ const authOptions = {
             tableName: TABLE_NAME,
           });
           const userRecord = await adapter.getUser(token.sub);
-          (token as any).autoRenewPreference = (userRecord as any)?.autoRenewPreference ?? null;
-          const currentTierIdRaw = (userRecord as any)?.currentMembershipTierId;
-          const lastTierIdRaw = (userRecord as any)?.lastMembershipTierId;
-          (token as any).currentMembershipTierId =
-            typeof currentTierIdRaw === 'string' && currentTierIdRaw.trim().length
-              ? currentTierIdRaw.trim().toLowerCase()
-              : null;
-          (token as any).lastMembershipTierId =
-            typeof lastTierIdRaw === 'string' && lastTierIdRaw.trim().length
-              ? lastTierIdRaw.trim().toLowerCase()
-              : null;
 
           const wallets: string[] = Array.isArray((userRecord as any)?.wallets)
             ? ((userRecord as any).wallets as string[])
@@ -263,22 +252,11 @@ const authOptions = {
           (session.user as any).lastName = (userRecord as any)?.lastName ?? null;
           (session.user as any).xHandle = (userRecord as any)?.xHandle ?? null;
           (session.user as any).linkedinUrl = (userRecord as any)?.linkedinUrl ?? null;
-          (session.user as any).autoRenewPreference = (userRecord as any)?.autoRenewPreference ?? null;
-          (session.user as any).currentMembershipTierId =
-            typeof (userRecord as any)?.currentMembershipTierId === 'string'
-              ? ((userRecord as any).currentMembershipTierId as string)
-              : null;
-          (session.user as any).lastMembershipTierId =
-            typeof (userRecord as any)?.lastMembershipTierId === 'string'
-              ? ((userRecord as any).lastMembershipTierId as string)
-              : null;
           // Membership info from JWT (cached server-side)
           (session.user as any).membershipStatus = (token as any)?.membershipStatus ?? null;
           (session.user as any).membershipExpiry = (token as any)?.membershipExpiry ?? null;
           (session.user as any).membershipSummary = null;
           (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
-          (session.user as any).currentMembershipTierId = (token as any)?.currentMembershipTierId ?? null;
-          (session.user as any).lastMembershipTierId = (token as any)?.lastMembershipTierId ?? null;
           // Derive display name if not set
           if (!(session.user as any).name && (userRecord as any)?.firstName) {
             const fn = (userRecord as any).firstName as string;
@@ -288,7 +266,6 @@ const authOptions = {
         } else {
           (session.user as any).wallets = [];
           (session.user as any).walletAddress = token.walletAddress || null;
-          (session.user as any).autoRenewPreference = (token as any)?.autoRenewPreference ?? null;
           (session.user as any).membershipSummary = null;
           (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
         }
@@ -298,8 +275,6 @@ const authOptions = {
         (session.user as any).walletAddress = token.walletAddress || null;
         (session.user as any).membershipSummary = null;
         (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
-        (session.user as any).currentMembershipTierId = (token as any)?.currentMembershipTierId ?? null;
-        (session.user as any).lastMembershipTierId = (token as any)?.lastMembershipTierId ?? null;
       }
       return session;
     },

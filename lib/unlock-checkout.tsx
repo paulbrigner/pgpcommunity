@@ -152,14 +152,6 @@ const formatErrorMessage = (error: unknown) => {
   return message || 'Unable to complete checkout. Please try again.';
 };
 
-const isMaxKeysRevert = (error: unknown) => {
-  const data =
-    ((error as any)?.data as string | undefined) ||
-    ((error as any)?.error?.data as string | undefined) ||
-    (typeof (error as any)?.message === 'string' ? (error as any).message : undefined);
-  return typeof data === 'string' && data.includes('0x17ed8646');
-};
-
 const findExistingMembershipTokenId = async (lockAddress: string, owner: string, walletService?: WalletService): Promise<string | null> => {
   try {
     const rpc = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
@@ -615,7 +607,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
       setError(formatErrorMessage(err));
       setStatus('error');
     }
-  }, [handlers, intent, pricing, target]);
+  }, [handlers, intent, prefetchedTokenIds, pricing, target]);
 
   const drawer = useMemo(() => {
     if (!isClient || !target || !intent) return null;

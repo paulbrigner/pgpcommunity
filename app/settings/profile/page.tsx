@@ -33,13 +33,6 @@ export default function ProfileSettingsPage() {
   }, [sessionUser]);
   const walletAddress = sessionUser?.walletAddress as string | undefined;
   const sessionMembershipSummary = sessionUser?.membershipSummary as MembershipSummary | null | undefined;
-  const sessionMembershipStatus = (sessionMembershipSummary?.status ?? sessionUser?.membershipStatus) as
-    | "active"
-    | "expired"
-    | "none"
-    | undefined;
-  const sessionMembershipExpiry =
-    sessionMembershipSummary?.expiry ?? (typeof sessionUser?.membershipExpiry === "number" ? sessionUser.membershipExpiry : null);
   const membershipAddresses = useMemo(() => {
     const sources = wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : [];
     return Array.from(

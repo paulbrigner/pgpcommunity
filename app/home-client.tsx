@@ -684,7 +684,7 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
           const cache = { status: initialMembershipStatus, expiry: expiry ?? null, at: Math.floor(Date.now() / 1000), addresses: addressesKey };
           localStorage.setItem('membershipCache', JSON.stringify(cache));
         } catch {}
-        membershipResolvedRef.current = initialMembershipStatus !== 'unknown';
+        membershipResolvedRef.current = true;
         initialMembershipAppliedRef.current = true;
         if (initialMembershipStatus === 'active') {
           return;
@@ -1008,16 +1008,6 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
     }
     openMembershipCheckout(undefined);
   }, [walletAddress, wallets, openMembershipCheckout]);
-
-  // Ask the backend for a short-lived signed URL to view gated content
-  const getContentUrl = async (file: string): Promise<string> => {
-    const res = await fetch(`/api/content/${file}`);
-    if (!res.ok) throw new Error("Failed to fetch signed URL");
-    const data = await res.json();
-    return data.url;
-  };
-
-
 
   return (
     <>

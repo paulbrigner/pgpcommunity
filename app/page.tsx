@@ -6,7 +6,7 @@ import type { MembershipSummary } from "@/lib/membership-server";
 
 export default async function HomePage() {
   const session = await getServerSession(authOptions as any);
-  const sessionUser = (session?.user ?? null) as any | null;
+  const sessionUser = (session as any)?.user || null;
   const wallets = Array.isArray(sessionUser?.wallets) ? (sessionUser.wallets as string[]) : [];
   const walletAddress = typeof sessionUser?.walletAddress === "string" ? (sessionUser.walletAddress as string) : null;
   const addresses = wallets.length ? wallets : walletAddress ? [walletAddress] : [];

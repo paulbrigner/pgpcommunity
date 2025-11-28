@@ -531,7 +531,6 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           const subgraphTokenId = await fetchTokenIdFromSubgraph(target.checksumAddress, owner);
           if (subgraphTokenId) {
             tokenIdForExtend = subgraphTokenId;
-            shouldExtend = true;
             const tx = await walletService.extendKey({
               lockAddress: target.checksumAddress,
               owner,

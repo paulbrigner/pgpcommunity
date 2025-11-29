@@ -337,7 +337,7 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
         return keys.includes(normalizedSelectedTierId);
       }) ?? null
     );
-  }, [MEMBERSHIP_TIERS, normalizedSelectedTierId]);
+  }, [normalizedSelectedTierId]);
   useEffect(() => {
     if (!MEMBERSHIP_TIERS.length) return;
     if (selectedTierConfig && normalizedSelectedTierId) return;
@@ -354,7 +354,7 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     if (fallback && fallback !== normalizedSelectedTierId) {
       setSelectedTierId(fallback);
     }
-  }, [MEMBERSHIP_TIERS, membershipSummary, normalizedSelectedTierId, selectedTierConfig]);
+  }, [membershipSummary, normalizedSelectedTierId, selectedTierConfig]);
 
   useEffect(() => {
     setAllowances(initialAllowances ?? {});
@@ -643,7 +643,7 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
       }
       openEventCheckout(lockAddress);
     },
-    [MEMBERSHIP_TIERS, openEventCheckout, openMembershipCheckout],
+    [openEventCheckout, openMembershipCheckout],
   );
 
   useEffect(() => {
@@ -1018,7 +1018,7 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
       null;
     const targetId = targetTier?.checksumAddress ?? targetTier?.id ?? fallbackTierId ?? undefined;
     openMembershipCheckout(targetId);
-  }, [MEMBERSHIP_TIERS, walletAddress, wallets, normalizedSelectedTierId, membershipSummary, selectedTierConfig, openMembershipCheckout]);
+  }, [walletAddress, wallets, normalizedSelectedTierId, membershipSummary, selectedTierConfig, openMembershipCheckout]);
 
   return (
     <>

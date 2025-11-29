@@ -63,7 +63,7 @@ export default function ProfileSettingsPage() {
       xHandle: (u.xHandle as string) || "",
       linkedinUrl: (u.linkedinUrl as string) || "",
     });
-  }, [authenticated, sessionUser]);
+  }, [authenticated, sessionUser, currentEmail]);
 
   useEffect(() => {
     if (!authenticated) return;

@@ -335,7 +335,7 @@ export default function MembershipSettingsPage() {
     } finally {
       setTierSwitching(false);
     }
-  }, [membershipSummary, persistTierSelection, refreshMembershipSummary, update]);
+  }, [membershipSummary, refreshMembershipSummary, update]);
 
   const tokenIdMap = useMemo(() => {
     const map: Record<string, string[]> = {};

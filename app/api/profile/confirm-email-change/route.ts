@@ -60,7 +60,9 @@ export async function GET(request: NextRequest) {
       GSI1SK: `USER#${newEmail}`,
     });
 
-    const redirectUrl = new URL("/signin?reason=email-updated", request.url);
+    const host = request.headers.get("host");
+    const baseUrl = host ? `https://${host}` : request.url;
+    const redirectUrl = new URL("/signin?reason=email-updated", baseUrl);
     const response = NextResponse.redirect(redirectUrl);
     // Expire common NextAuth session cookies so the user signs back in with the new email.
     const expires = new Date(0).toUTCString();

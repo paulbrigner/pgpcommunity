@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { DynamoDBAdapter } from "@next-auth/dynamodb-adapter";
 import { randomBytes } from "crypto";
+// Nodemailer types are not installed; import with explicit any for runtime only.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
 import nodemailer from "nodemailer";
 import {
   EMAIL_FROM,

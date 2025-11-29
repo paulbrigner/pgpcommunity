@@ -22,11 +22,16 @@ export default function ProfileSettingsPage() {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [emailMessage, setEmailMessage] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailSubmitting, setEmailSubmitting] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
   const [initial, setInitial] = useState<
     { firstName: string; lastName: string; xHandle: string; linkedinUrl: string } | null
   >(null);
 
   const sessionUser = session?.user as any | undefined;
+  const currentEmail = typeof sessionUser?.email === "string" ? sessionUser.email : "";
   const wallets = useMemo(() => {
     const list = sessionUser?.wallets;
     return Array.isArray(list) ? list.map((item) => String(item)) : [];
@@ -51,6 +56,7 @@ export default function ProfileSettingsPage() {
     setLastName(u.lastName || "");
     setXHandle(u.xHandle || "");
     setLinkedinUrl(u.linkedinUrl || "");
+    setNewEmail(currentEmail || "");
     setInitial({
       firstName: (u.firstName as string) || "",
       lastName: (u.lastName as string) || "",
@@ -135,6 +141,40 @@ export default function ProfileSettingsPage() {
       current.xHandle !== (initial.xHandle || "") ||
       current.linkedinUrl !== (initial.linkedinUrl || "")
     );
+  };
+
+  const onRequestEmailChange = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setEmailSubmitting(true);
+    setEmailMessage(null);
+    setEmailError(null);
+    try {
+      const target = newEmail.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!target || !emailRegex.test(target)) {
+        throw new Error("Enter a valid email address.");
+      }
+      if (currentEmail && target === currentEmail.toLowerCase()) {
+        throw new Error("Enter a different email to change it.");
+      }
+      const res = await fetch("/api/profile/request-email-change", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: target }),
+      });
+      if (!res.ok) {
+        let detail: any = undefined;
+        try {
+          detail = await res.json();
+        } catch {}
+        throw new Error(detail?.error || res.statusText || "Failed to send verification email");
+      }
+      setEmailMessage("Check your new email for a confirmation link. We will switch your account after you verify.");
+    } catch (err: any) {
+      setEmailError(err?.message || "Failed to start email change");
+    } finally {
+      setEmailSubmitting(false);
+    }
   };
 
   const handleBack = () => {
@@ -244,6 +284,53 @@ export default function ProfileSettingsPage() {
               {submitting ? "Saving…" : "Save changes"}
             </Button>
           </div>
+        </form>
+      </section>
+
+      <section className="rounded-lg border p-6 shadow-sm space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold">Email</h2>
+          <p className="text-sm text-muted-foreground">
+            Current email: {currentEmail ? <span className="font-mono">{currentEmail}</span> : "Not set"}.
+            We’ll send a confirmation link to the new address before switching your account.
+          </p>
+        </div>
+        {emailMessage ? (
+          <Alert>
+            <CheckCircle2 className="h-4 w-4" />
+            <AlertTitle>Verification sent</AlertTitle>
+            <AlertDescription>{emailMessage}</AlertDescription>
+          </Alert>
+        ) : null}
+        {emailError ? (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>{emailError}</AlertDescription>
+          </Alert>
+        ) : null}
+        <form onSubmit={onRequestEmailChange} className="space-y-3">
+          <div className="space-y-2">
+            <label htmlFor="newEmail" className="text-sm font-medium">
+              New email
+            </label>
+            <input
+              id="newEmail"
+              type="email"
+              value={newEmail}
+              onChange={(event) => setNewEmail(event.target.value)}
+              placeholder="you@example.com"
+              className="w-full rounded-md border px-3 py-2 text-sm dark:border-input dark:bg-input/30"
+            />
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={emailSubmitting}>
+              {emailSubmitting ? "Sending…" : "Send verification link"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            After you click the link we send, you may need to sign in again with the new email.
+          </p>
         </form>
       </section>
 

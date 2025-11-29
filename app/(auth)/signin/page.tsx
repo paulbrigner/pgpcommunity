@@ -20,8 +20,62 @@ export default function SignInPage() {
   if (reason === "signup") {
     return <SignupFlow callbackUrl={callbackUrl} />;
   }
+  if (reason === "email-updated") {
+    return <WalletReauth callbackUrl={callbackUrl} />;
+  }
 
   return <LegacyEmailSignIn callbackUrl={callbackUrl} reason={reason} />;
+}
+
+function WalletReauth({ callbackUrl }: { callbackUrl: string }) {
+  const router = useRouter();
+  const [walletError, setWalletError] = useState<string | null>(null);
+  const [walletLoading, setWalletLoading] = useState(false);
+
+  const handleWalletSignIn = async () => {
+    setWalletError(null);
+    setWalletLoading(true);
+    try {
+      const res = await signInWithSiwe();
+      if (res.ok) {
+        // Force a full reload so the new session cookies are applied immediately.
+        window.location.href = callbackUrl;
+        return;
+      }
+      const err = res.error || "Failed to sign in with wallet";
+      setWalletError(err);
+    } catch (e: any) {
+      setWalletError(e?.message || "Failed to sign in with wallet");
+    } finally {
+      setWalletLoading(false);
+    }
+  };
+
+  return (
+    <div className="mx-auto max-w-md p-6 space-y-6">
+      <h1 className="text-2xl font-semibold">Reconnect your wallet</h1>
+      <Alert>
+        <Mail className="h-4 w-4" />
+        <AlertTitle>Email updated</AlertTitle>
+        <AlertDescription>
+          Your email was updated successfully. To continue, sign back in with your linked wallet.
+        </AlertDescription>
+      </Alert>
+      <div className="space-y-3">
+        <Button className="w-full" onClick={handleWalletSignIn} disabled={walletLoading}>
+          {walletLoading ? "Connecting wallet…" : (
+            <>
+              <Wallet className="mr-2 h-4 w-4" /> Sign in with wallet
+            </>
+          )}
+        </Button>
+        {walletError && <p className="text-sm text-red-600 dark:text-red-400">{walletError}</p>}
+        <p className="text-xs text-muted-foreground">
+          If your wallet is already linked, this will sign you back in immediately.
+        </p>
+      </div>
+    </div>
+  );
 }
 
 function SignupFlow({ callbackUrl }: { callbackUrl: string }) {
@@ -261,7 +315,6 @@ function LegacyEmailSignIn({ callbackUrl, reason }: { callbackUrl: string; reaso
           throw new Error("LinkedIn URL must be http(s)");
         }
       }
-
       const pending = {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
@@ -300,43 +353,56 @@ function LegacyEmailSignIn({ callbackUrl, reason }: { callbackUrl: string; reaso
       {reason && reason !== "wallet-unlinked" && (
         <Alert>
           <Mail className="h-4 w-4" />
-          <AlertTitle>Create your account</AlertTitle>
-          <AlertDescription>
-            Enter your details and we’ll email a magic link to verify your address.
-          </AlertDescription>
+          {isEmailUpdate ? (
+            <>
+              <AlertTitle>Email updated</AlertTitle>
+              <AlertDescription>
+                Your email was updated successfully. Sign in with the new address below.
+              </AlertDescription>
+            </>
+          ) : (
+            <>
+              <AlertTitle>Create your account</AlertTitle>
+              <AlertDescription>
+                Enter your details and we’ll email a magic link to verify your address.
+              </AlertDescription>
+            </>
+          )}
         </Alert>
       )}
       <form onSubmit={onSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2">
-            <label htmlFor="legacy-firstName" className="text-sm font-medium">
-              First name
-            </label>
-            <input
-              id="legacy-firstName"
-              type="text"
-              required
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              placeholder="Ada"
-              className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
-            />
+        {!isEmailUpdate && (
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <label htmlFor="legacy-firstName" className="text-sm font-medium">
+                First name
+              </label>
+              <input
+                id="legacy-firstName"
+                type="text"
+                required
+                value={firstName}
+                onChange={(e) => setFirstName(e.target.value)}
+                placeholder="Ada"
+                className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="legacy-lastName" className="text-sm font-medium">
+                Last name
+              </label>
+              <input
+                id="legacy-lastName"
+                type="text"
+                required
+                value={lastName}
+                onChange={(e) => setLastName(e.target.value)}
+                placeholder="Lovelace"
+                className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
+              />
+            </div>
           </div>
-          <div className="space-y-2">
-            <label htmlFor="legacy-lastName" className="text-sm font-medium">
-              Last name
-            </label>
-            <input
-              id="legacy-lastName"
-              type="text"
-              required
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              placeholder="Lovelace"
-              className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
-            />
-          </div>
-        </div>
+        )}
         <div className="space-y-2">
           <label htmlFor="legacy-email" className="text-sm font-medium">
             Email
@@ -351,34 +417,38 @@ function LegacyEmailSignIn({ callbackUrl, reason }: { callbackUrl: string; reaso
             className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
           />
         </div>
-        <div className="space-y-2">
-          <label htmlFor="legacy-xHandle" className="text-sm font-medium">
-            X handle (optional)
-          </label>
-          <input
-            id="legacy-xHandle"
-            type="text"
-            value={xHandle}
-            onChange={(e) => setXHandle(e.target.value)}
-            placeholder="@handle"
-            className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
-          />
-        </div>
-        <div className="space-y-2">
-          <label htmlFor="legacy-linkedin" className="text-sm font-medium">
-            LinkedIn URL (optional)
-          </label>
-          <input
-            id="legacy-linkedin"
-            type="url"
-            value={linkedinUrl}
-            onChange={(e) => setLinkedinUrl(e.target.value)}
-            placeholder="https://www.linkedin.com/in/username"
-            className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
-          />
-        </div>
+        {!isEmailUpdate && (
+          <>
+            <div className="space-y-2">
+              <label htmlFor="legacy-xHandle" className="text-sm font-medium">
+                X handle (optional)
+              </label>
+              <input
+                id="legacy-xHandle"
+                type="text"
+                value={xHandle}
+                onChange={(e) => setXHandle(e.target.value)}
+                placeholder="@handle"
+                className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="legacy-linkedin" className="text-sm font-medium">
+                LinkedIn URL (optional)
+              </label>
+              <input
+                id="legacy-linkedin"
+                type="url"
+                value={linkedinUrl}
+                onChange={(e) => setLinkedinUrl(e.target.value)}
+                placeholder="https://www.linkedin.com/in/username"
+                className="w-full rounded-md border px-3 py-2 text-sm dark:bg-input/30 dark:border-input"
+              />
+            </div>
+          </>
+        )}
         <Button type="submit" disabled={submitting}>
-          {submitting ? "Sending…" : "Send magic link"}
+          {submitting ? "Sending…" : isEmailUpdate ? "Send sign-in link" : "Send magic link"}
         </Button>
       </form>
       {message && (

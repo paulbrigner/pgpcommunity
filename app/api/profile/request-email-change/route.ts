@@ -90,7 +90,8 @@ export async function POST(request: NextRequest) {
       userId: sessionToken.sub,
     });
 
-    const baseUrl = NEXTAUTH_URL || request.nextUrl.origin;
+    const host = request.headers.get("host");
+    const baseUrl = NEXTAUTH_URL || (host ? `https://${host}` : request.nextUrl.origin);
     const confirmUrl = new URL("/api/profile/confirm-email-change", baseUrl);
     confirmUrl.searchParams.set("token", token);
     confirmUrl.searchParams.set("identifier", identifier);

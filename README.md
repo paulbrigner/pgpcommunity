@@ -210,7 +210,7 @@ Protecting API routes
 ## Architecture Notes
 - **Unlock Integration**:
   - Wallet auth via NextAuth + SIWE (only for previously linked wallets)
-  - Unlock checkout is opened client-side; after closing, the app refreshes membership status
+  - Unlock component checkout is opened client-side via `useUnlockCheckout`; tiers come from `NEXT_PUBLIC_LOCK_TIERS` and event configs from `CHECKOUT_CONFIGS`. After checkout, the app refreshes membership and allowances. No paywall dependency remains.
 - **CloudFront Distribution**:
   - Configured with Trusted Key Groups for signature validation
   - OAC ensures S3 only serves content via authenticated CloudFront requests
@@ -224,7 +224,7 @@ Protecting API routes
     - `@radix-ui/react-alert-dialog`
     - `@radix-ui/react-slot`
     - Note: adding more shadcn components may add additional `@radix-ui/*` packages.
-- **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`, `@unlock-protocol/paywall`
+- **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`
 - **Security**: CloudFront OAC
 - **Scheduling**:
   - `luxon` for timezone-aware event formatting on the client

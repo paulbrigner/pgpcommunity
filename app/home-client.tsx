@@ -23,14 +23,7 @@ import { useUnlockCheckout } from "@/lib/unlock-checkout";
 import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
 import { snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
-import {
-  detectRecentlyActivatedTierId,
-  findTierInSummary,
-  normalizeTierId,
-  pickFallbackDesiredTierId,
-  pickHighestActiveTier,
-  resolveTierLabel,
-} from "@/lib/membership-tiers";
+import { findTierInSummary, normalizeTierId, pickHighestActiveTier, pickNextActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
@@ -209,12 +202,7 @@ export default function HomeClient({
     typeof sessionUser?.currentMembershipTierId === "string" && sessionUser.currentMembershipTierId.trim().length
       ? sessionUser.currentMembershipTierId.trim().toLowerCase()
       : null;
-  const sessionDesiredMembershipTierId =
-    typeof sessionUser?.lastMembershipTierId === "string" && sessionUser.lastMembershipTierId.trim().length
-      ? sessionUser.lastMembershipTierId.trim().toLowerCase()
-      : null;
   const [currentTierOverride, setCurrentTierOverride] = useState<string | null | undefined>(undefined);
-  const [desiredTierOverride, setDesiredTierOverride] = useState<string | null | undefined>(undefined);
   const [allowances, setAllowances] = useState<Record<string, AllowanceState>>(initialAllowances ?? {});
   const [tokenIds, setTokenIds] = useState<Record<string, string[]>>(initialTokenIds ?? {});
   const walletAddress = sessionUser?.walletAddress as string | undefined;
@@ -296,9 +284,9 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
   const refreshSeq = useRef(0);
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
-const membershipResolvedRef = useRef(false);
-const previousSummaryRef = useRef<MembershipSummary | null>(initialMembershipSummary ?? null);
-const initialMembershipAppliedRef = useRef(false);
+  const membershipResolvedRef = useRef(false);
+  const previousSummaryRef = useRef<MembershipSummary | null>(initialMembershipSummary ?? null);
+  const initialMembershipAppliedRef = useRef(false);
   const nftFetchSeq = useRef(0);
   const lastFetchedAddresses = useRef<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -308,9 +296,10 @@ const initialMembershipAppliedRef = useRef(false);
   const [viewerUrl, setViewerUrl] = useState<string | null>(null);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
-const [authError, setAuthError] = useState<string | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
 
-const addressList = useMemo(() => {
+  const addressList = useMemo(() => {
     const raw = wallets && wallets.length
       ? wallets
       : walletAddress
@@ -318,7 +307,7 @@ const addressList = useMemo(() => {
       : [];
     return raw.map((a) => String(a).toLowerCase()).filter(Boolean);
   }, [wallets, walletAddress]);
-const addressesKey = useMemo(() => addressList.join(','), [addressList]);
+  const addressesKey = useMemo(() => addressList.join(','), [addressList]);
 
   useEffect(() => {
     if (currentTierOverride === undefined) return;
@@ -327,54 +316,72 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
     }
   }, [currentTierOverride, sessionCurrentMembershipTierId]);
 
-  useEffect(() => {
-    if (desiredTierOverride === undefined) return;
-    if ((desiredTierOverride ?? null) === (sessionDesiredMembershipTierId ?? null)) {
-      setDesiredTierOverride(undefined);
-    }
-  }, [desiredTierOverride, sessionDesiredMembershipTierId]);
   const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
   const effectiveCurrentTierId = currentTierOverride !== undefined ? currentTierOverride : sessionCurrentMembershipTierId;
-  const effectiveDesiredTierId = desiredTierOverride !== undefined ? desiredTierOverride : sessionDesiredMembershipTierId;
   const currentTier = useMemo<TierMembershipSummary | null>(() => {
     const explicit = findTierInSummary(membershipSummary, effectiveCurrentTierId ?? undefined);
     if (explicit) return explicit;
     return pickHighestActiveTier(membershipSummary);
   }, [membershipSummary, effectiveCurrentTierId]);
-  const desiredTier = useMemo<TierMembershipSummary | null>(() => {
-    if (!effectiveDesiredTierId) return null;
-    return findTierInSummary(membershipSummary, effectiveDesiredTierId);
-  }, [effectiveDesiredTierId, membershipSummary]);
+  const nextTier = useMemo<TierMembershipSummary | null>(() => pickNextActiveTier(membershipSummary), [membershipSummary]);
+
+  const normalizedSelectedTierId = useMemo(() => normalizeTierId(selectedTierId ?? null), [selectedTierId]);
+  const selectedTierConfig = useMemo(() => {
+    if (!normalizedSelectedTierId) return null;
+    return (
+      MEMBERSHIP_TIERS.find((tier) => {
+        const keys = [tier.id, tier.address, tier.checksumAddress]
+          .map((value) => (value ? String(value).toLowerCase() : ""))
+          .filter(Boolean);
+        return keys.includes(normalizedSelectedTierId);
+      }) ?? null
+    );
+  }, [MEMBERSHIP_TIERS, normalizedSelectedTierId]);
+  useEffect(() => {
+    if (!MEMBERSHIP_TIERS.length) return;
+    if (selectedTierConfig && normalizedSelectedTierId) return;
+
+    const highest = pickHighestActiveTier(membershipSummary);
+    const fallback =
+      normalizeTierId(
+        highest?.tier.id ??
+          highest?.tier.address ??
+          MEMBERSHIP_TIERS[0]?.id ??
+          MEMBERSHIP_TIERS[0]?.address ??
+          null,
+      ) ?? null;
+    if (fallback && fallback !== normalizedSelectedTierId) {
+      setSelectedTierId(fallback);
+    }
+  }, [MEMBERSHIP_TIERS, membershipSummary, normalizedSelectedTierId, selectedTierConfig]);
 
   useEffect(() => {
     setAllowances(initialAllowances ?? {});
     setTokenIds(initialTokenIds ?? {});
   }, [initialAllowances, initialTokenIds]);
   const normalizedCurrentTierId = normalizeTierId(currentTier?.tier.id ?? currentTier?.tier.address ?? null) ?? null;
-  const normalizedDesiredTierId = normalizeTierId(effectiveDesiredTierId ?? null) ?? null;
+  const nextTierLabel = useMemo(() => {
+    if (!nextTier) return null;
+    if (autoRenewEnabled) return null; // current tier set to auto-renew; no post-expiry downgrade expected
+    const currentExpiry = typeof currentTier?.expiry === 'number' ? currentTier.expiry : null;
+    const nextExpiry = typeof nextTier.expiry === 'number' ? nextTier.expiry : null;
+    // Show only if the next tier expires strictly after the current tier; equal expiry means nothing remains after expiry
+    if (currentExpiry && nextExpiry && nextExpiry <= currentExpiry) return null;
+    const nextId = normalizeTierId(nextTier.tier.id ?? nextTier.tier.address ?? null);
+    if (nextId && nextId === normalizedCurrentTierId) return null;
+    return resolveTierLabel(nextTier, nextTier?.tier.id);
+  }, [nextTier, normalizedCurrentTierId, autoRenewEnabled, currentTier?.expiry]);
   const currentTierLabel = useMemo(
     () => resolveTierLabel(currentTier, effectiveCurrentTierId ?? sessionCurrentMembershipTierId),
     [currentTier, effectiveCurrentTierId, sessionCurrentMembershipTierId]
   );
-  const desiredTierLabel = useMemo(
-    () => resolveTierLabel(desiredTier, effectiveDesiredTierId ?? sessionDesiredMembershipTierId),
-    [desiredTier, effectiveDesiredTierId, sessionDesiredMembershipTierId]
-  );
-  const pendingTierLabel =
-    (currentTier?.status === 'active' || membershipStatus === 'active') &&
-    normalizedDesiredTierId &&
-    normalizedDesiredTierId !== normalizedCurrentTierId &&
-    desiredTierLabel
-      ? desiredTierLabel
-      : null;
-  const tierSummaryText = pendingTierLabel
-    ? `Tier: ${currentTierLabel ?? 'None selected'} (switch to ${pendingTierLabel} pending upon expiration).`
+  const tierSummaryText = nextTierLabel
+    ? `Tier: ${currentTierLabel ?? 'None selected'}. Next after expiry: ${nextTierLabel}.`
     : `Tier: ${currentTierLabel ?? 'None selected'}.`;
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
-    if (desiredTier?.status === 'active') return desiredTier;
     if (currentTier?.status === 'active') return currentTier;
-    return desiredTier?.status === 'expired' ? desiredTier : null;
-  }, [currentTier, desiredTier]);
+    return null;
+  }, [currentTier]);
   const renewalTierAddress = renewalTier?.tier.checksumAddress ?? null;
   const renewalTierLabel = resolveTierLabel(renewalTier, renewalTier?.tier.id);
   const dismissAutoRenewMessage = useCallback(() => {
@@ -382,7 +389,7 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
     setAutoRenewPromptDismissed(true);
   }, []);
   const persistTierSelection = useCallback(
-    (values: { currentTierId?: string | null; desiredTierId?: string | null }) => {
+    (values: { currentTierId?: string | null }) => {
       if (!values || typeof values !== 'object') return;
 
       if (Object.prototype.hasOwnProperty.call(values, 'currentTierId')) {
@@ -395,19 +402,8 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
           }
         }
       }
-
-      if (Object.prototype.hasOwnProperty.call(values, 'desiredTierId')) {
-        const normalized = normalizeTierId(values.desiredTierId ?? null);
-        if (normalized !== undefined) {
-          const target = normalized ?? null;
-          const pending = desiredTierOverride !== undefined ? desiredTierOverride ?? null : sessionDesiredMembershipTierId ?? null;
-          if (target !== pending) {
-            setDesiredTierOverride(target);
-          }
-        }
-      }
     },
-    [currentTierOverride, desiredTierOverride, sessionCurrentMembershipTierId, sessionDesiredMembershipTierId]
+    [currentTierOverride, sessionCurrentMembershipTierId]
   );
   const autoRenewReady = autoRenewStateReady && membershipStatus === 'active' && !!renewalTierAddress;
   const needsAutoRenewStep = autoRenewReady && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed;
@@ -631,9 +627,22 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
   const handleQuickRegister = useCallback(
     (lockAddress: string) => {
       if (!lockAddress) return;
+      const normalized = lockAddress.trim().toLowerCase();
+      const tierMatch =
+        MEMBERSHIP_TIERS.find((tier) => {
+          const keys = [tier.id, tier.address, tier.checksumAddress]
+            .map((value) => (value ? String(value).toLowerCase() : ""))
+            .filter(Boolean);
+          return keys.includes(normalized);
+        }) ?? null;
+      if (tierMatch) {
+        setSelectedTierId(normalizeTierId(tierMatch.id) ?? tierMatch.checksumAddress ?? tierMatch.address);
+        openMembershipCheckout(tierMatch.checksumAddress);
+        return;
+      }
       openEventCheckout(lockAddress);
     },
-    [openEventCheckout],
+    [MEMBERSHIP_TIERS, openEventCheckout, openMembershipCheckout],
   );
 
   useEffect(() => {
@@ -758,35 +767,10 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
       previousSummaryRef.current = membershipSummary ?? null;
       return;
     }
-    if (!membershipSummary) {
-      previousSummaryRef.current = membershipSummary ?? null;
-      return;
-    }
-    if (desiredTierOverride !== undefined) {
-      previousSummaryRef.current = membershipSummary ?? null;
-      return;
-    }
-
-    const knownDesired = sessionDesiredMembershipTierId ?? null;
-    const detected = detectRecentlyActivatedTierId(membershipSummary, previousSummaryRef.current);
-    let candidate: string | null = null;
-    if (detected) {
-      candidate = detected;
-    } else if (!knownDesired) {
-      candidate = pickFallbackDesiredTierId(membershipSummary);
-    }
-
-    if (candidate && candidate !== knownDesired) {
-      void persistTierSelection({ desiredTierId: candidate });
-    }
-
     previousSummaryRef.current = membershipSummary ?? null;
   }, [
     authenticated,
     membershipSummary,
-    desiredTierOverride,
-    sessionDesiredMembershipTierId,
-    persistTierSelection,
   ]);
 
   const displayNfts = useMemo(() => {
@@ -1006,8 +990,30 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
       console.error('No wallet connected.');
       return;
     }
-    openMembershipCheckout(undefined);
-  }, [walletAddress, wallets, openMembershipCheckout]);
+    const fallbackTierId =
+      normalizedSelectedTierId ??
+      normalizeTierId(
+        membershipSummary?.highestActiveTier?.tier?.id ??
+          membershipSummary?.highestActiveTier?.tier?.address ??
+          MEMBERSHIP_TIERS[0]?.id ??
+          MEMBERSHIP_TIERS[0]?.address ??
+          null,
+      ) ??
+      null;
+    const targetTier =
+      selectedTierConfig ??
+      (fallbackTierId
+        ? MEMBERSHIP_TIERS.find((tier) => {
+            const keys = [tier.id, tier.address, tier.checksumAddress]
+              .map((value) => (value ? String(value).toLowerCase() : ''))
+              .filter(Boolean);
+            return keys.includes(fallbackTierId);
+          }) ?? null
+        : null) ??
+      null;
+    const targetId = targetTier?.checksumAddress ?? targetTier?.id ?? fallbackTierId ?? undefined;
+    openMembershipCheckout(targetId);
+  }, [MEMBERSHIP_TIERS, walletAddress, wallets, normalizedSelectedTierId, membershipSummary, selectedTierConfig, openMembershipCheckout]);
 
   return (
     <>
@@ -1728,6 +1734,85 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
               Review wallet requirements before continuing.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {MEMBERSHIP_TIERS.length ? (
+            <div className="space-y-3 rounded-lg border border-[rgba(193,197,226,0.6)] bg-white/80 p-4 text-sm text-[var(--brand-navy)]">
+              <div className="text-sm font-semibold text-[var(--brand-navy)]">Choose your membership tier</div>
+              <div className="space-y-2">
+                {MEMBERSHIP_TIERS.map((tier, index) => {
+                  const optionId =
+                    normalizeTierId(tier.id) ??
+                    normalizeTierId(tier.address) ??
+                    normalizeTierId(tier.checksumAddress) ??
+                    tier.id;
+                  const summaryTier =
+                    membershipSummary?.tiers?.find((entry) => {
+                      const keys = [entry.tier.id, entry.tier.address, entry.tier.checksumAddress]
+                        .map((value) => (value ? String(value).toLowerCase() : ""))
+                        .filter(Boolean);
+                      return optionId ? keys.includes(optionId) : false;
+                    }) ?? null;
+                  const label =
+                    tier.label ||
+                    summaryTier?.metadata?.name ||
+                    formatAddressShort(tier.checksumAddress) ||
+                    `Tier ${index + 1}`;
+                  const priceDisplay =
+                    (summaryTier?.metadata?.price && summaryTier.metadata.price.length
+                      ? summaryTier.metadata.price
+                      : null) || "Price shown at checkout";
+                  const expiryLabel =
+                    summaryTier?.expiry && summaryTier.expiry > 0
+                      ? new Date(summaryTier.expiry * 1000).toLocaleDateString(undefined, {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })
+                      : null;
+                  const statusLabel = summaryTier?.status ?? "none";
+                  const statusText =
+                    statusLabel === "active"
+                      ? `Active${expiryLabel ? ` · expires ${expiryLabel}` : ""}`
+                      : statusLabel === "expired"
+                      ? `Expired${expiryLabel ? ` · ${expiryLabel}` : ""}`
+                      : "Not owned yet";
+                  const benefit =
+                    summaryTier?.metadata?.description ||
+                    "Renews monthly; you can manage auto-renew after purchase.";
+                  const isSelected = normalizedSelectedTierId
+                    ? normalizedSelectedTierId === optionId
+                    : index === 0;
+
+                  return (
+                    <label
+                      key={tier.id}
+                      className={`flex cursor-pointer items-start gap-3 rounded-md border p-3 text-left transition ${
+                        isSelected
+                          ? "border-[rgba(67,119,243,0.45)] bg-[rgba(67,119,243,0.08)] shadow-[0_10px_30px_-24px_rgba(67,119,243,0.45)]"
+                          : "border-[rgba(193,197,226,0.6)] bg-white/70"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        className="mt-1"
+                        name="tier-selection"
+                        value={optionId ?? tier.checksumAddress}
+                        checked={isSelected}
+                        onChange={() => setSelectedTierId(optionId ?? tier.checksumAddress ?? tier.id)}
+                      />
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="font-medium">{label}</span>
+                          <span className="text-xs text-[var(--brand-navy)]">{priceDisplay}</span>
+                        </div>
+                        <div className="text-xs text-[var(--muted-ink)]">{statusText}</div>
+                        {benefit ? <div className="text-xs text-[var(--muted-ink)]">{benefit}</div> : null}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
           <div className="space-y-2 text-left text-[var(--muted-ink)]">
             <div>What to have in your wallet:</div>
             <ul className="list-disc pl-5 space-y-1">
@@ -1747,7 +1832,15 @@ const addressesKey = useMemo(() => addressList.join(','), [addressList]);
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => { setConfirmOpen(false); purchaseMembership(); }}>Continue</AlertDialogAction>
+            <AlertDialogAction
+              disabled={MEMBERSHIP_TIERS.length > 0 && !selectedTierConfig && !normalizedSelectedTierId}
+              onClick={() => {
+                setConfirmOpen(false);
+                purchaseMembership();
+              }}
+            >
+              Continue
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

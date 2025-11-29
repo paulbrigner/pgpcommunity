@@ -18,14 +18,7 @@ import {
 import { useUnlockCheckout } from "@/lib/unlock-checkout";
 import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
 import { snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
-import {
-  detectRecentlyActivatedTierId,
-  findTierInSummary,
-  normalizeTierId,
-  pickFallbackDesiredTierId,
-  pickHighestActiveTier,
-  resolveTierLabel,
-} from "@/lib/membership-tiers";
+import { findTierInSummary, normalizeTierId, pickHighestActiveTier, pickNextActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
 import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
 
 const MAX_AUTO_RENEW_MONTHS: number = 12;
@@ -51,10 +44,6 @@ export default function MembershipSettingsPage() {
     typeof sessionUser?.currentMembershipTierId === "string" && sessionUser.currentMembershipTierId.trim().length
       ? sessionUser.currentMembershipTierId.trim().toLowerCase()
       : null;
-  const sessionDesiredMembershipTierId =
-    typeof sessionUser?.lastMembershipTierId === "string" && sessionUser.lastMembershipTierId.trim().length
-      ? sessionUser.lastMembershipTierId.trim().toLowerCase()
-      : null;
   const wallets = useMemo(() => {
     const list = sessionUser?.wallets;
     return Array.isArray(list) ? list.map((item) => String(item)) : [];
@@ -71,7 +60,6 @@ export default function MembershipSettingsPage() {
     );
   }, [walletAddress, wallets]);
   const [currentTierOverride, setCurrentTierOverride] = useState<string | null | undefined>(undefined);
-  const [desiredTierOverride, setDesiredTierOverride] = useState<string | null | undefined>(undefined);
   const [allowances, setAllowances] = useState<Record<string, AllowanceState>>({});
 
   useEffect(() => {
@@ -80,13 +68,6 @@ export default function MembershipSettingsPage() {
       setCurrentTierOverride(undefined);
     }
   }, [currentTierOverride, sessionCurrentMembershipTierId]);
-
-  useEffect(() => {
-    if (desiredTierOverride === undefined) return;
-    if ((desiredTierOverride ?? null) === (sessionDesiredMembershipTierId ?? null)) {
-      setDesiredTierOverride(undefined);
-    }
-  }, [desiredTierOverride, sessionDesiredMembershipTierId]);
 
   const sessionMembershipSummary = sessionUser?.membershipSummary as MembershipSummary | null | undefined;
   const sessionMembershipStatus = (sessionMembershipSummary?.status ?? sessionUser?.membershipStatus) as
@@ -117,7 +98,7 @@ export default function MembershipSettingsPage() {
 
 
   const persistTierSelection = useCallback(
-    (values: { currentTierId?: string | null; desiredTierId?: string | null }) => {
+    (values: { currentTierId?: string | null }) => {
       if (!values || typeof values !== "object") return;
 
       if (Object.prototype.hasOwnProperty.call(values, "currentTierId")) {
@@ -131,18 +112,8 @@ export default function MembershipSettingsPage() {
         }
       }
 
-      if (Object.prototype.hasOwnProperty.call(values, "desiredTierId")) {
-        const normalized = normalizeTierId(values.desiredTierId ?? null);
-        if (normalized !== undefined) {
-          const target = normalized ?? null;
-          const pending = desiredTierOverride !== undefined ? desiredTierOverride ?? null : sessionDesiredMembershipTierId ?? null;
-          if (target !== pending) {
-            setDesiredTierOverride(target);
-          }
-        }
-      }
     },
-    [currentTierOverride, desiredTierOverride, sessionCurrentMembershipTierId, sessionDesiredMembershipTierId],
+    [currentTierOverride, sessionCurrentMembershipTierId],
   );
 
   const maxMonthsLabel = `${MAX_AUTO_RENEW_MONTHS} ${MAX_AUTO_RENEW_MONTHS === 1 ? "month" : "months"}`;
@@ -158,45 +129,39 @@ export default function MembershipSettingsPage() {
       : null;
 
   const effectiveCurrentTierId = currentTierOverride !== undefined ? currentTierOverride : sessionCurrentMembershipTierId;
-  const effectiveDesiredTierId = desiredTierOverride !== undefined ? desiredTierOverride : sessionDesiredMembershipTierId;
 
   const currentTier = useMemo<TierMembershipSummary | null>(() => {
     const explicit = findTierInSummary(membershipSummary, effectiveCurrentTierId ?? undefined);
     if (explicit) return explicit;
     return pickHighestActiveTier(membershipSummary);
   }, [membershipSummary, effectiveCurrentTierId]);
+  const nextTier = useMemo<TierMembershipSummary | null>(() => pickNextActiveTier(membershipSummary), [membershipSummary]);
   const currentTierAddress = currentTier?.tier.checksumAddress ?? null;
   const currentTierLabel = useMemo(
     () => resolveTierLabel(currentTier, effectiveCurrentTierId ?? sessionCurrentMembershipTierId),
     [currentTier, effectiveCurrentTierId, sessionCurrentMembershipTierId],
   );
 
-  const desiredTier = useMemo<TierMembershipSummary | null>(() => {
-    if (!effectiveDesiredTierId) return null;
-    return findTierInSummary(membershipSummary, effectiveDesiredTierId);
-  }, [effectiveDesiredTierId, membershipSummary]);
   const normalizedCurrentTierId = normalizeTierId(currentTier?.tier.id ?? currentTier?.tier.address ?? null) ?? null;
-  const normalizedDesiredTierId = normalizeTierId(effectiveDesiredTierId ?? null) ?? null;
-  const desiredTierLabel = useMemo(
-    () => resolveTierLabel(desiredTier, effectiveDesiredTierId ?? sessionDesiredMembershipTierId),
-    [desiredTier, effectiveDesiredTierId, sessionDesiredMembershipTierId],
-  );
-  const pendingTierLabel =
-    (currentTier?.status === "active" || membershipStatus === "active") &&
-    normalizedDesiredTierId &&
-    normalizedDesiredTierId !== normalizedCurrentTierId &&
-    desiredTierLabel
-      ? desiredTierLabel
-      : null;
-  const tierSummaryText = pendingTierLabel
-    ? `Tier: ${currentTierLabel ?? "None selected"} (switch to ${pendingTierLabel} pending upon expiration).`
+  const nextTierLabel = useMemo(() => {
+    if (!nextTier) return null;
+    const autoRenewEnabled = typeof autoRenewMonths === "number" && autoRenewMonths > 0;
+    if (autoRenewEnabled) return null;
+    const currentExpiry = typeof currentTier?.expiry === "number" ? currentTier.expiry : null;
+    const nextExpiry = typeof nextTier.expiry === "number" ? nextTier.expiry : null;
+    if (currentExpiry && nextExpiry && nextExpiry <= currentExpiry) return null;
+    const nextId = normalizeTierId(nextTier.tier.id ?? nextTier.tier.address ?? null);
+    if (nextId && nextId === normalizedCurrentTierId) return null;
+    return resolveTierLabel(nextTier, nextTier?.tier.id);
+  }, [nextTier, normalizedCurrentTierId, autoRenewMonths, currentTier?.expiry]);
+  const tierSummaryText = nextTierLabel
+    ? `Tier: ${currentTierLabel ?? "None selected"}. Next after expiry: ${nextTierLabel}.`
     : `Tier: ${currentTierLabel ?? "None selected"}.`;
 
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
-    if (desiredTier?.status === "active") return desiredTier;
     if (currentTier?.status === "active") return currentTier;
-    return desiredTier?.status === "expired" ? desiredTier : null;
-  }, [currentTier, desiredTier]);
+    return null;
+  }, [currentTier]);
   const renewalTierAddress = renewalTier?.tier.checksumAddress ?? null;
   const tierOptions = useMemo(() => {
     return MEMBERSHIP_TIERS.map((tier, index) => {
@@ -328,10 +293,6 @@ export default function MembershipSettingsPage() {
           }
         }
 
-        if (newTierDetected) {
-          void persistTierSelection({ desiredTierId: context.targetTierId });
-        }
-
         try {
           await update({});
         } catch {}
@@ -432,35 +393,10 @@ export default function MembershipSettingsPage() {
       previousSummaryRef.current = membershipSummary ?? null;
       return;
     }
-    if (!membershipSummary) {
-      previousSummaryRef.current = membershipSummary ?? null;
-      return;
-    }
-    if (desiredTierOverride !== undefined) {
-      previousSummaryRef.current = membershipSummary ?? null;
-      return;
-    }
-
-    const knownDesired = sessionDesiredMembershipTierId ?? null;
-    const detected = detectRecentlyActivatedTierId(membershipSummary, previousSummaryRef.current);
-    let candidate: string | null = null;
-    if (detected) {
-      candidate = detected;
-    } else if (!knownDesired) {
-      candidate = pickFallbackDesiredTierId(membershipSummary);
-    }
-
-    if (candidate && candidate !== knownDesired) {
-      void persistTierSelection({ desiredTierId: candidate });
-    }
-
     previousSummaryRef.current = membershipSummary ?? null;
   }, [
     authenticated,
     membershipSummary,
-    desiredTierOverride,
-    sessionDesiredMembershipTierId,
-    persistTierSelection,
   ]);
 
   const checkAutoRenewStatus = useCallback(() => {

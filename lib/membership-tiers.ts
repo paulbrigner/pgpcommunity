@@ -80,6 +80,23 @@ export const pickHighestActiveTier = (summary: MembershipSummary | null | undefi
   return sorted[0] ?? null;
 };
 
+export const pickNextActiveTier = (summary: MembershipSummary | null | undefined): TierMembershipSummary | null => {
+  if (!summary?.tiers?.length) return null;
+  const active = summary.tiers.filter((tier) => tier.status === 'active');
+  if (active.length < 2) return null;
+  const sorted = [...active].sort(compareActiveTiers);
+  const first = sorted[0];
+  const second = sorted[1] ?? null;
+  if (!second) return null;
+  // If expiries are identical, there is no later tier to fall back to
+  const firstExpiry = typeof first.expiry === 'number' ? first.expiry : null;
+  const secondExpiry = typeof second.expiry === 'number' ? second.expiry : null;
+  if (firstExpiry && secondExpiry && secondExpiry <= firstExpiry) {
+    return null;
+  }
+  return second;
+};
+
 export const resolveTierLabel = (
   tier: TierMembershipSummary | null | undefined,
   fallbackId?: string | null | undefined
@@ -142,4 +159,3 @@ export const pickFallbackDesiredTierId = (
   const highest = pickHighestActiveTier(summary);
   return normalize(highest?.tier.id) || null;
 };
-

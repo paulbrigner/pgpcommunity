@@ -42,6 +42,7 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function allowance(address owner, address spender) view returns (uint256)',
   'function approve(address spender, uint256 amount) returns (bool)',
+  'function balanceOf(address owner) view returns (uint256)',
 ];
 
 type CheckoutIntent =
@@ -480,6 +481,21 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
       });
 
       if (pricing.erc20Address && pricing.erc20Address !== ZeroAddress) {
+        const erc20Reader = new Contract(pricing.erc20Address, ERC20_ABI, browserProvider);
+        const balance: bigint = await erc20Reader.balanceOf(owner).catch(() => 0n);
+        const additionalPeriods =
+          typeof overrideAdditionalPeriods === 'number' && Number.isFinite(overrideAdditionalPeriods) && overrideAdditionalPeriods > 0
+            ? overrideAdditionalPeriods
+            : 1;
+        const requiredPayment = pricing.rawValue * BigInt(additionalPeriods);
+        if (balance < requiredPayment) {
+          const needed = formatUnits(requiredPayment, pricing.decimals);
+          const have = formatUnits(balance, pricing.decimals);
+          setError(`Insufficient ${pricing.symbol || 'token'} on Base. Need ${needed}, have ${have}.`);
+          setStatus('error');
+          return;
+        }
+
         let approvalTarget: bigint | null = null;
         if (explicitApproval) {
           approvalTarget = explicitApproval;

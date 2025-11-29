@@ -44,6 +44,7 @@ const ERC20_ABI = [
   'function approve(address spender, uint256 amount) returns (bool)',
   'function balanceOf(address owner) view returns (uint256)',
 ];
+const SAFE_ALLOWANCE_CAP = 2n ** 200n;
 
 type CheckoutIntent =
   | { kind: 'membership'; tierId?: string | null }
@@ -447,7 +448,15 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
             : intent.kind === 'membership' || intent.kind === 'renewal'
               ? MEMBERSHIP_RECURRING_PAYMENTS
               : undefined;
-      const recurringPayments = typeof recurringPaymentsPreference === 'number' ? recurringPaymentsPreference : undefined;
+      const membershipApprovalPeriods = Math.max(1, MEMBERSHIP_RECURRING_PAYMENTS || 0);
+      const recurringPayments =
+        typeof recurringPaymentsPreference === 'number'
+          ? intent.kind === 'membership' || intent.kind === 'renewal'
+            ? Math.min(recurringPaymentsPreference, membershipApprovalPeriods)
+            : recurringPaymentsPreference
+          : intent.kind === 'membership' || intent.kind === 'renewal'
+            ? membershipApprovalPeriods
+            : undefined;
       const rawTotalApproval = overrides?.totalApproval;
       let explicitApproval: bigint | null = null;
       if (typeof rawTotalApproval === 'bigint') {
@@ -460,6 +469,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           explicitApproval = parsed > 0n ? parsed : null;
         } catch {}
       }
+      let approvalTarget: bigint | null = explicitApproval;
 
       const prefetchedTokenIdList = prefetchedTokenIds?.[target.checksumAddress.toLowerCase()] || prefetchedTokenIds?.[target.lockAddress?.toLowerCase?.() ?? ''];
       const prefetchedTokenId = Array.isArray(prefetchedTokenIdList) && prefetchedTokenIdList.length ? prefetchedTokenIdList[0] : null;
@@ -496,18 +506,24 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           return;
         }
 
-        let approvalTarget: bigint | null = null;
-        if (explicitApproval) {
-          approvalTarget = explicitApproval;
-        } else if (typeof recurringPayments === 'number' && recurringPayments > 1) {
-          approvalTarget = pricing.rawValue * BigInt(recurringPayments);
-        } else if (intent.kind === 'membership' || intent.kind === 'renewal') {
-          approvalTarget = pricing.rawValue * BigInt(MEMBERSHIP_RECURRING_PAYMENTS);
-        } else {
-          approvalTarget = pricing.rawValue;
+        const approvalPeriods =
+          intent.kind === 'membership' || intent.kind === 'renewal'
+            ? membershipApprovalPeriods
+            : typeof recurringPayments === 'number' && recurringPayments > 0
+              ? recurringPayments
+              : 1;
+
+        if (!approvalTarget && pricing.rawValue > 0n && approvalPeriods > 0) {
+          approvalTarget = pricing.rawValue * BigInt(approvalPeriods);
         }
 
-        if (approvalTarget && approvalTarget > 0n && recurringPaymentsPreference !== 'forever') {
+        if (approvalTarget && approvalTarget >= SAFE_ALLOWANCE_CAP) {
+          setError('Calculated approval amount is unexpectedly large; refusing to request unlimited token approval.');
+          setStatus('error');
+          return;
+        }
+
+        if (approvalTarget && approvalTarget > 0n) {
           await ensureErc20Approval(
             browserProvider,
             owner,
@@ -535,7 +551,10 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           referrer: overrideReferrer ?? owner,
           data: overrideData,
           recurringPayments,
-          totalApproval: explicitApproval ? explicitApproval.toString() : undefined,
+          totalApproval:
+            pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
+              ? approvalTarget.toString()
+              : undefined,
         } as any);
         hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
         if (handlers.onMembershipComplete) {
@@ -548,21 +567,24 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           if (subgraphTokenId) {
             tokenIdForExtend = subgraphTokenId;
             const tx = await walletService.extendKey({
-              lockAddress: target.checksumAddress,
-              owner,
-              tokenId: tokenIdForExtend,
-              keyPrice: formatUnits(pricing.rawValue, pricing.decimals),
-              erc20Address: pricing.erc20Address ?? undefined,
-              decimals: pricing.decimals,
-              referrer: overrideReferrer ?? owner,
-              data: overrideData,
-              recurringPayments,
-              totalApproval: explicitApproval ? explicitApproval.toString() : undefined,
-            } as any);
-            hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
-            await handlers.onMembershipComplete?.(target);
-            setTxHash(hash);
-            setStatus('success');
+            lockAddress: target.checksumAddress,
+            owner,
+            tokenId: tokenIdForExtend,
+            keyPrice: formatUnits(pricing.rawValue, pricing.decimals),
+            erc20Address: pricing.erc20Address ?? undefined,
+            decimals: pricing.decimals,
+            referrer: overrideReferrer ?? owner,
+            data: overrideData,
+            recurringPayments,
+            totalApproval:
+              pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
+                ? approvalTarget.toString()
+                : undefined,
+          } as any);
+          hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
+          await handlers.onMembershipComplete?.(target);
+          setTxHash(hash);
+          setStatus('success');
             return;
           }
 
@@ -605,7 +627,10 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           data: overrideData,
           additionalPeriods: overrideAdditionalPeriods,
           recurringPayments: recurringPayments,
-          totalApproval: explicitApproval ? explicitApproval.toString() : undefined,
+          totalApproval:
+            pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
+              ? approvalTarget.toString()
+              : undefined,
         } as any);
         hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
         if (isEventTarget(target)) {

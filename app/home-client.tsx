@@ -62,6 +62,18 @@ const stripMarkdown = (value: string): string => {
 };
 
 const MAX_AUTO_RENEW_MONTHS = 12;
+const SAFE_ALLOWANCE_CAP = 2n ** 200n;
+
+const computeAutoRenewAllowance = (price: bigint): bigint => {
+  if (price <= 0n) {
+    throw new Error('Tier price unavailable');
+  }
+  const target = price * BigInt(MAX_AUTO_RENEW_MONTHS);
+  if (target >= SAFE_ALLOWANCE_CAP) {
+    throw new Error('Refusing to request an unlimited allowance. Please refresh and try again.');
+  }
+  return target;
+};
 
 const formatAddressShort = (value: string | null | undefined): string => {
   if (!value) return 'N/A';
@@ -198,10 +210,6 @@ export default function HomeClient({
   const authenticated = status === "authenticated";
   const ready = status !== "loading";
   const sessionUser = session?.user as any | undefined;
-  const sessionCurrentMembershipTierId =
-    typeof sessionUser?.currentMembershipTierId === "string" && sessionUser.currentMembershipTierId.trim().length
-      ? sessionUser.currentMembershipTierId.trim().toLowerCase()
-      : null;
   const [currentTierOverride, setCurrentTierOverride] = useState<string | null | undefined>(undefined);
   const [allowances, setAllowances] = useState<Record<string, AllowanceState>>(initialAllowances ?? {});
   const [tokenIds, setTokenIds] = useState<Record<string, string[]>>(initialTokenIds ?? {});
@@ -309,15 +317,8 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
   }, [wallets, walletAddress]);
   const addressesKey = useMemo(() => addressList.join(','), [addressList]);
 
-  useEffect(() => {
-    if (currentTierOverride === undefined) return;
-    if ((currentTierOverride ?? null) === (sessionCurrentMembershipTierId ?? null)) {
-      setCurrentTierOverride(undefined);
-    }
-  }, [currentTierOverride, sessionCurrentMembershipTierId]);
-
   const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
-  const effectiveCurrentTierId = currentTierOverride !== undefined ? currentTierOverride : sessionCurrentMembershipTierId;
+  const effectiveCurrentTierId = currentTierOverride !== undefined ? currentTierOverride : null;
   const currentTier = useMemo<TierMembershipSummary | null>(() => {
     const explicit = findTierInSummary(membershipSummary, effectiveCurrentTierId ?? undefined);
     if (explicit) return explicit;
@@ -372,8 +373,8 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     return resolveTierLabel(nextTier, nextTier?.tier.id);
   }, [nextTier, normalizedCurrentTierId, autoRenewEnabled, currentTier?.expiry]);
   const currentTierLabel = useMemo(
-    () => resolveTierLabel(currentTier, effectiveCurrentTierId ?? sessionCurrentMembershipTierId),
-    [currentTier, effectiveCurrentTierId, sessionCurrentMembershipTierId]
+    () => resolveTierLabel(currentTier, effectiveCurrentTierId),
+    [currentTier, effectiveCurrentTierId]
   );
   const tierSummaryText = nextTierLabel
     ? `Tier: ${currentTierLabel ?? 'None selected'}. Next after expiry: ${nextTierLabel}.`
@@ -396,14 +397,14 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
         const normalized = normalizeTierId(values.currentTierId ?? null);
         if (normalized !== undefined) {
           const target = normalized ?? null;
-          const pending = currentTierOverride !== undefined ? currentTierOverride ?? null : sessionCurrentMembershipTierId ?? null;
+          const pending = currentTierOverride !== undefined ? currentTierOverride ?? null : null;
           if (target !== pending) {
             setCurrentTierOverride(target);
           }
         }
       }
     },
-    [currentTierOverride, sessionCurrentMembershipTierId]
+    [currentTierOverride]
   );
   const autoRenewReady = autoRenewStateReady && membershipStatus === 'active' && !!renewalTierAddress;
   const needsAutoRenewStep = autoRenewReady && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed;
@@ -747,11 +748,9 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     if (currentTierOverride !== undefined) return;
     const highest = pickHighestActiveTier(membershipSummary);
     const bestId = normalizeTierId(highest?.tier.id ?? highest?.tier.address ?? null) ?? null;
-    const stored = sessionCurrentMembershipTierId ?? null;
-    if ((bestId ?? null) === (stored ?? null)) return;
     if (bestId) {
       void persistTierSelection({ currentTierId: bestId });
-    } else if (stored) {
+    } else {
       void persistTierSelection({ currentTierId: null });
     }
   }, [
@@ -759,7 +758,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     membershipSummary,
     currentTierOverride,
     persistTierSelection,
-    sessionCurrentMembershipTierId,
   ]);
 
   useEffect(() => {
@@ -960,7 +958,14 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
       }
       const owner = await signer.getAddress();
       const current: bigint = await erc20Reader.allowance(owner, renewalTierAddress);
-      const targetAllowance = price * 12n;
+      let targetAllowance: bigint;
+      try {
+        targetAllowance = computeAutoRenewAllowance(price);
+      } catch (err: any) {
+        setAutoRenewMessage(err?.message || 'Unable to calculate auto-renew approval amount.');
+        setAutoRenewProcessing(false);
+        return;
+      }
       const tierLabelForMessage = renewalTierLabel ? `the ${renewalTierLabel} tier` : 'your membership';
       if (current >= targetAllowance) {
         setAutoRenewMessage(`Auto-renew is already enabled for ${tierLabelForMessage} for up to 12 months at the current price.`);

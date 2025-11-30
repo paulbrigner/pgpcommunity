@@ -177,6 +177,7 @@ export default function ProfileSettingsPage() {
     }
   };
 
+
   const handleBack = () => {
     if (isDirty()) {
       const proceed = confirm("You have unsaved changes. Leave without saving?");
@@ -286,6 +287,7 @@ export default function ProfileSettingsPage() {
           </div>
         </form>
       </section>
+
 
       <section className="rounded-lg border p-6 shadow-sm space-y-4">
         <div className="space-y-1">

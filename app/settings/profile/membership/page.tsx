@@ -50,6 +50,11 @@ export default function MembershipSettingsPage() {
   const [enablingAutoRenew, setEnablingAutoRenew] = useState(false);
   const [tierSwitching, setTierSwitching] = useState(false);
   const [selectedTierAddress, setSelectedTierAddress] = useState<string>("");
+  const [refundSubmitting, setRefundSubmitting] = useState(false);
+  const [refundMessage, setRefundMessage] = useState<string | null>(null);
+  const [refundError, setRefundError] = useState<string | null>(null);
+  const [refundReason, setRefundReason] = useState("");
+  const [refundStatus, setRefundStatus] = useState<"pending" | "processing" | "completed" | "rejected" | null>(null);
 
   const sessionUser = session?.user as any | undefined;
   const wallets = useMemo(() => {
@@ -158,6 +163,49 @@ export default function MembershipSettingsPage() {
   const tierSummaryText = nextTierLabel
     ? `Tier: ${currentTierLabel ?? "None selected"}. Next after expiry: ${nextTierLabel}.`
     : `Tier: ${currentTierLabel ?? "None selected"}.`;
+
+  const requestRefund = async () => {
+    setRefundSubmitting(true);
+    setRefundMessage(null);
+    setRefundError(null);
+    try {
+      const res = await fetch("/api/membership/refund-request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: refundReason }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to request refund");
+      }
+      setRefundMessage("Refund request submitted. An admin will process it.");
+      setRefundReason("");
+      setRefundStatus("pending");
+    } catch (err: any) {
+      setRefundError(err?.message || "Failed to request refund");
+    } finally {
+      setRefundSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    const fetchRefundStatus = async () => {
+      try {
+        const res = await fetch("/api/membership/refund-request/status", { cache: "no-store" });
+        const data = await res.json();
+        if (res.ok && data?.latest) {
+          setRefundStatus(data.latest.status as any);
+        } else {
+          setRefundStatus(null);
+        }
+      } catch {
+        setRefundStatus(null);
+      }
+    };
+    if (authenticated) {
+      void fetchRefundStatus();
+    }
+  }, [authenticated]);
 
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
     if (currentTier?.status === "active") return currentTier;
@@ -643,6 +691,64 @@ export default function MembershipSettingsPage() {
             To stop automatic renewals, revoke the USDC approval granted to the membership lock. This prevents future renewals;
             your current period remains active until it expires.
           </p>
+        </div>
+        <div className="rounded-md border border-[rgba(11,11,67,0.1)] bg-white/80 p-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-[#0b0b43]">Request cancellation & refund</p>
+              <p className="text-xs text-muted-foreground">
+                We will cancel your membership and process a full refund for the current period. An admin will review and complete it.
+              </p>
+            </div>
+          </div>
+          {refundStatus === "pending" || refundStatus === "processing" ? (
+            <Alert className="mt-3">
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertTitle>Request received</AlertTitle>
+              <AlertDescription>Your cancellation/refund request is {refundStatus}. An admin will complete it.</AlertDescription>
+            </Alert>
+          ) : refundStatus === "completed" ? (
+            <Alert className="mt-3">
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertTitle>Refund completed</AlertTitle>
+              <AlertDescription>Your membership was canceled and refunded.</AlertDescription>
+            </Alert>
+          ) : (
+            <>
+              {refundMessage ? (
+                <Alert className="mt-3">
+                  <CheckCircle2 className="h-4 w-4" />
+                  <AlertTitle>Submitted</AlertTitle>
+                  <AlertDescription>{refundMessage}</AlertDescription>
+                </Alert>
+              ) : null}
+              {refundError ? (
+                <Alert variant="destructive" className="mt-3">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{refundError}</AlertDescription>
+                </Alert>
+              ) : null}
+              <div className="mt-3 space-y-2">
+                <label htmlFor="refund-reason" className="text-sm font-medium text-[#0b0b43]">
+                  Reason (optional)
+                </label>
+                <textarea
+                  id="refund-reason"
+                  rows={3}
+                  value={refundReason}
+                  onChange={(e) => setRefundReason(e.target.value)}
+                  className="w-full rounded-md border border-[rgba(11,11,67,0.15)] px-3 py-2 text-sm text-[#0b0b43] shadow-inner focus:border-[rgba(67,119,243,0.5)] focus:outline-none focus:ring-2 focus:ring-[rgba(67,119,243,0.12)]"
+                  placeholder="Tell us why you want to cancel"
+                />
+                <div className="flex gap-2">
+                  <Button variant="outlined-primary" onClick={requestRefund} isLoading={refundSubmitting}>
+                    {refundSubmitting ? "Submitting…" : "Request cancellation & refund"}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
         <div className="text-sm">
           {autoRenewChecking ? (

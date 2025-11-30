@@ -17,8 +17,9 @@ import { signInWithSiwe } from "@/lib/siwe/client";
 import { cn } from "@/lib/utils";
 
 export function MainNav() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const authenticated = status === "authenticated";
+  const isAdmin = !!(session?.user as any)?.isAdmin;
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -62,6 +63,12 @@ export function MainNav() {
           label: "Edit Profile",
           href: "/settings/profile",
         },
+        ...(isAdmin
+          ? [{
+              key: "admin",
+              label: "Admin",
+              href: "/admin",
+            }] : []),
         {
           key: "logout",
           label: "Log Out",
@@ -132,6 +139,14 @@ export function MainNav() {
               <NavigationMenuItem>
                 <NavigationMenuLink className={linkClasses} asChild>
                   <Link href="/settings/profile">Edit Profile</Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+            )}
+
+            {authenticated && isAdmin && (
+              <NavigationMenuItem>
+                <NavigationMenuLink className={linkClasses} asChild>
+                  <Link href="/admin">Admin</Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>
             )}

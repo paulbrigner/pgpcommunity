@@ -17,6 +17,12 @@ declare module "next-auth" {
       membershipExpiry?: number | null;
       membershipSummary?: any;
       membershipHighestTier?: string | null;
+      isAdmin?: boolean | null;
+      welcomeEmailSentAt?: string | null;
+      lastEmailSentAt?: string | null;
+      lastEmailType?: string | null;
+      emailBounceReason?: string | null;
+      emailSuppressed?: boolean | null;
     };
   }
 
@@ -29,6 +35,12 @@ declare module "next-auth" {
     email?: string | null;
     walletAddress?: string | null;
     wallets?: string[] | null;
+    isAdmin?: boolean | null;
+    welcomeEmailSentAt?: string | null;
+    lastEmailSentAt?: string | null;
+    lastEmailType?: string | null;
+    emailBounceReason?: string | null;
+    emailSuppressed?: boolean | null;
   }
 }
 
@@ -39,5 +51,6 @@ declare module "next-auth/jwt" {
     membershipStatus?: 'active' | 'expired' | 'none' | null;
     membershipExpiry?: number | null;
     membershipHighestTier?: string | null;
+    isAdmin?: boolean | null;
   }
 }

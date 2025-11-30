@@ -190,6 +190,10 @@ export const authOptions = {
           delete (token as any).walletAddress;
         }
       }
+      // Track admin flag from user when present
+      if (user && Object.prototype.hasOwnProperty.call(user, "isAdmin")) {
+        (token as any).isAdmin = !!(user as any).isAdmin;
+      }
       // Opportunistically enrich token with membership status/expiry, cached for 5 minutes
       try {
         const nowSec = Math.floor(Date.now() / 1000);
@@ -200,6 +204,10 @@ export const authOptions = {
             tableName: TABLE_NAME,
           });
           const userRecord = await adapter.getUser(token.sub);
+
+          if (userRecord && Object.prototype.hasOwnProperty.call(userRecord, "isAdmin")) {
+            (token as any).isAdmin = !!(userRecord as any).isAdmin;
+          }
 
           const wallets: string[] = Array.isArray((userRecord as any)?.wallets)
             ? ((userRecord as any).wallets as string[])
@@ -220,6 +228,9 @@ export const authOptions = {
         }
       } catch (_err) {
         // ignore membership enrichment errors
+      }
+      if (typeof (token as any).isAdmin !== "boolean") {
+        (token as any).isAdmin = false;
       }
       return token;
     },
@@ -252,6 +263,12 @@ export const authOptions = {
           (session.user as any).lastName = (userRecord as any)?.lastName ?? null;
           (session.user as any).xHandle = (userRecord as any)?.xHandle ?? null;
           (session.user as any).linkedinUrl = (userRecord as any)?.linkedinUrl ?? null;
+          (session.user as any).isAdmin = typeof (userRecord as any)?.isAdmin === "boolean" ? !!(userRecord as any).isAdmin : !!(token as any)?.isAdmin;
+          (session.user as any).welcomeEmailSentAt = (userRecord as any)?.welcomeEmailSentAt ?? null;
+          (session.user as any).lastEmailSentAt = (userRecord as any)?.lastEmailSentAt ?? null;
+          (session.user as any).lastEmailType = (userRecord as any)?.lastEmailType ?? null;
+          (session.user as any).emailBounceReason = (userRecord as any)?.emailBounceReason ?? null;
+          (session.user as any).emailSuppressed = typeof (userRecord as any)?.emailSuppressed === "boolean" ? !!(userRecord as any).emailSuppressed : null;
           // Membership info from JWT (cached server-side)
           (session.user as any).membershipStatus = (token as any)?.membershipStatus ?? null;
           (session.user as any).membershipExpiry = (token as any)?.membershipExpiry ?? null;
@@ -268,6 +285,12 @@ export const authOptions = {
           (session.user as any).walletAddress = token.walletAddress || null;
           (session.user as any).membershipSummary = null;
           (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
+          (session.user as any).isAdmin = !!(token as any)?.isAdmin;
+          (session.user as any).welcomeEmailSentAt = null;
+          (session.user as any).lastEmailSentAt = null;
+          (session.user as any).lastEmailType = null;
+          (session.user as any).emailBounceReason = null;
+          (session.user as any).emailSuppressed = null;
         }
       } catch (e) {
         console.error("session callback: failed to load wallets", e);
@@ -275,6 +298,12 @@ export const authOptions = {
         (session.user as any).walletAddress = token.walletAddress || null;
         (session.user as any).membershipSummary = null;
         (session.user as any).membershipHighestTier = (token as any)?.membershipHighestTier ?? null;
+        (session.user as any).isAdmin = !!(token as any)?.isAdmin;
+        (session.user as any).welcomeEmailSentAt = null;
+        (session.user as any).lastEmailSentAt = null;
+        (session.user as any).lastEmailType = null;
+        (session.user as any).emailBounceReason = null;
+        (session.user as any).emailSuppressed = null;
       }
       return session;
     },

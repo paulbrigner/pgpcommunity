@@ -17,6 +17,8 @@ export interface MembershipStateService {
     chainId?: number;
     forceRefresh?: boolean;
     hydrateMetadata?: boolean;
+    includeAllowances?: boolean;
+    includeTokenIds?: boolean;
   }): Promise<MembershipStateSnapshot>;
 
   getTierState(params: {
@@ -38,6 +40,8 @@ export type MembershipStateSnapshot = {
   highestActiveTier: TierStateSnapshot | null;
   tiers: TierStateSnapshot[];
   allowances: Record<string, AllowanceState>;
+  includesAllowances?: boolean;
+  includesTokenIds?: boolean;
 };
 
 export type TierStateSnapshot = {
@@ -84,31 +88,34 @@ class InMemoryMembershipStateService implements MembershipStateService {
   private cache = new Map<string, CacheEntry>();
   private pending = new Map<string, Promise<MembershipStateSnapshot>>();
 
-  async getState(params: { addresses: string[]; chainId?: number; forceRefresh?: boolean; hydrateMetadata?: boolean }) {
+  async getState(params: { addresses: string[]; chainId?: number; forceRefresh?: boolean; hydrateMetadata?: boolean; includeAllowances?: boolean; includeTokenIds?: boolean }) {
     const { normalized, chainId, cacheKey } = this.prepareParams(params.addresses, params.chainId);
+    const includeAllowances = params.includeAllowances !== false;
+    const includeTokenIds = params.includeTokenIds !== false;
+    const variantKey = `${cacheKey}:${includeAllowances ? 'a1' : 'a0'}:${includeTokenIds ? 't1' : 't0'}`;
     if (!normalized.length) {
       return this.emptySnapshot(chainId);
     }
 
     if (!params.forceRefresh) {
-      const cached = this.cache.get(cacheKey);
+      const cached = this.cache.get(variantKey);
       if (cached && cached.expiresAt > Date.now()) {
         return cached.snapshot;
       }
     }
 
-    if (!params.forceRefresh && this.pending.has(cacheKey)) {
-      return this.pending.get(cacheKey)!;
+    if (!params.forceRefresh && this.pending.has(variantKey)) {
+      return this.pending.get(variantKey)!;
     }
 
-    const fetchPromise = this.fetchSnapshot(normalized, chainId);
-    this.pending.set(cacheKey, fetchPromise);
+    const fetchPromise = this.fetchSnapshot(normalized, chainId, { includeAllowances, includeTokenIds });
+    this.pending.set(variantKey, fetchPromise);
     try {
       const snapshot = await fetchPromise;
-      this.cache.set(cacheKey, { snapshot, expiresAt: Date.now() + DEFAULT_CACHE_TTL_MS });
+      this.cache.set(variantKey, { snapshot, expiresAt: Date.now() + DEFAULT_CACHE_TTL_MS });
       return snapshot;
     } finally {
-      this.pending.delete(cacheKey);
+      this.pending.delete(variantKey);
     }
   }
 
@@ -121,14 +128,24 @@ class InMemoryMembershipStateService implements MembershipStateService {
 
   invalidate(addresses: string[], chainId?: number) {
     const { cacheKey } = this.prepareParams(addresses, chainId);
-    return this.cache.delete(cacheKey);
+    let deleted = false;
+    for (const key of this.cache.keys()) {
+      if (key.startsWith(`${cacheKey}:`)) {
+        this.cache.delete(key);
+        deleted = true;
+      }
+    }
+    return deleted;
   }
 
-  prime(snapshot: MembershipStateSnapshot, params: { addresses: string[]; chainId?: number; ttlMs?: number }) {
+  prime(snapshot: MembershipStateSnapshot, params: { addresses: string[]; chainId?: number; ttlMs?: number; includeAllowances?: boolean; includeTokenIds?: boolean }) {
     const { normalized, cacheKey } = this.prepareParams(params.addresses, params.chainId);
     if (!normalized.length) return;
     const ttl = typeof params.ttlMs === 'number' && params.ttlMs > 0 ? params.ttlMs : DEFAULT_CACHE_TTL_MS;
-    this.cache.set(cacheKey, { snapshot, expiresAt: Date.now() + ttl });
+    const includeAllowances = params.includeAllowances !== false;
+    const includeTokenIds = params.includeTokenIds !== false;
+    const variantKey = `${cacheKey}:${includeAllowances ? 'a1' : 'a0'}:${includeTokenIds ? 't1' : 't0'}`;
+    this.cache.set(variantKey, { snapshot, expiresAt: Date.now() + ttl });
   }
 
   private prepareParams(addresses: string[], chainId?: number) {
@@ -148,7 +165,11 @@ class InMemoryMembershipStateService implements MembershipStateService {
     };
   }
 
-  private async fetchSnapshot(addresses: string[], chainId: number): Promise<MembershipStateSnapshot> {
+  private async fetchSnapshot(
+    addresses: string[],
+    chainId: number,
+    opts?: { includeAllowances?: boolean; includeTokenIds?: boolean },
+  ): Promise<MembershipStateSnapshot> {
     let summary: MembershipSummary;
     try {
       summary = await getMembershipSummary(addresses, BASE_RPC_URL, chainId);
@@ -163,7 +184,7 @@ class InMemoryMembershipStateService implements MembershipStateService {
             tier: tierSummary.tier,
             status: tierSummary.status,
             expiry: tierSummary.expiry ?? null,
-            tokenIds: await this.fetchTokenIds(addresses, tierSummary.tier.checksumAddress, chainId),
+            tokenIds: opts?.includeTokenIds === false ? [] : await this.fetchTokenIds(addresses, tierSummary.tier.checksumAddress, chainId),
             metadata: tierSummary.metadata,
           })),
         )
@@ -171,7 +192,7 @@ class InMemoryMembershipStateService implements MembershipStateService {
 
     const highestActive = tiers.find((tier) => tier.status === 'active') || null;
 
-    const allowances = await this.fetchAllowances(addresses, chainId);
+    const allowances = opts?.includeAllowances === false ? {} : await this.fetchAllowances(addresses, chainId);
 
     return {
       chainId,
@@ -179,6 +200,8 @@ class InMemoryMembershipStateService implements MembershipStateService {
       tiers,
       highestActiveTier: highestActive,
       allowances,
+      includesAllowances: opts?.includeAllowances !== false,
+      includesTokenIds: opts?.includeTokenIds !== false,
     };
   }
 

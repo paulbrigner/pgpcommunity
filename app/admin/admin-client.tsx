@@ -23,6 +23,9 @@ type Props = {
   currentAdminId?: string | null;
 };
 
+// Toggle automatic detail hydration; keep off to avoid unintended requeue loops.
+const AUTO_DETAIL_ENABLED = false;
+
 type StatTone = "emerald" | "amber" | "rose" | "slate";
 
 const statusClasses: Record<AdminMember["membershipStatus"], string> = {
@@ -75,6 +78,21 @@ function emailStatus(member: AdminMember) {
   return { label: "Welcome not sent", icon: MailQuestion, tone: "muted" as const };
 }
 
+function computeMetaFromMembers(members: AdminMember[]) {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return {
+    total: members.length,
+    active: members.filter((m) => m.membershipStatus === "active").length,
+    expired: members.filter((m) => m.membershipStatus === "expired").length,
+    none: members.filter((m) => m.membershipStatus === "none").length,
+    autoRenewOn: members.filter((m) => m.autoRenew === true).length,
+    autoRenewOff: members.filter((m) => m.autoRenew === false).length,
+    expiringSoon: members.filter(
+      (m) => typeof m.membershipExpiry === "number" && m.membershipExpiry > nowSec && m.membershipExpiry < nowSec + 30 * 24 * 60 * 60,
+    ).length,
+  };
+}
+
 export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   const filteredInitialRoster = useMemo(() => {
     if (!initialRoster) return null;
@@ -121,6 +139,12 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   >([]);
   const [refundLoading, setRefundLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "expired" | "none">("active");
+  const [detailQueue, setDetailQueue] = useState<string[]>([]);
+  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
+  const [detailLoaded, setDetailLoaded] = useState<Record<string, boolean>>({});
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailsInFlight, setDetailsInFlight] = useState(false);
+  const [detailFailed, setDetailFailed] = useState<Record<string, boolean>>({});
   const handleModalOpenChange = (open: boolean) => {
     setEmailModalOpen(open);
     if (!open) {
@@ -153,22 +177,53 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     });
   }, [roster, query, statusFilter]);
 
-  const meta = roster?.meta || {
-    total: 0,
-    active: 0,
-    expired: 0,
-    none: 0,
-    autoRenewOn: 0,
-    autoRenewOff: 0,
-    expiringSoon: 0,
+  const meta = useMemo(() => computeMetaFromMembers(roster?.members || []), [roster]);
+  const hasMissingDetails = useMemo(
+    () => filteredMembers.some((m) => !detailLoaded[m.id]),
+    [filteredMembers, detailLoaded],
+  );
+  const hasFailedDetails = useMemo(() => Object.keys(detailFailed).length > 0, [detailFailed]);
+
+  const queueDetails = (ids: string[], resetFailures = false) => {
+    if (resetFailures) {
+      setDetailFailed({});
+    }
+    setDetailQueue(ids);
+    setDetailsInFlight(false);
+    setDetailError(null);
   };
+
+  /* eslint-disable react-hooks/exhaustive-deps */
+  useEffect(() => {
+    if (!AUTO_DETAIL_ENABLED) return;
+    const visibleIds = new Set(filteredMembers.map((m) => m.id));
+    setDetailQueue((prev) => {
+      let changed = false;
+      let next = prev.filter((id) => {
+        const keep = visibleIds.has(id);
+        if (!keep) changed = true;
+        return keep;
+      });
+      for (const member of filteredMembers) {
+        if (!detailLoaded[member.id] && !detailLoading[member.id] && !detailFailed[member.id] && !next.includes(member.id)) {
+          next = [...next, member.id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [filteredMembers, detailLoaded, detailFailed]);
+  /* eslint-enable react-hooks/exhaustive-deps */
 
   const handleRefresh = async () => {
     setLoading(true);
     setError(null);
     setEmailNotice(null);
+    setDetailError(null);
+    setDetailFailed({});
+    setDetailRequestedAt(null);
     try {
-      const res = await fetch("/api/admin/members", { cache: "no-store" });
+      const res = await fetch("/api/admin/members?fields=core", { cache: "no-store" });
       if (!res.ok) {
         throw new Error(`Refresh failed (${res.status})`);
       }
@@ -177,6 +232,10 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
         ? { ...data, members: data.members.filter((m) => m.id !== currentAdminId) }
         : data;
       setRoster(filtered);
+      setDetailLoaded({});
+      setDetailLoading({});
+      setDetailQueue([]);
+      setDetailsInFlight(false);
     } catch (err: any) {
       const message = typeof err?.message === "string" ? err.message : "Failed to refresh roster";
       setError(message);
@@ -184,6 +243,50 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       setLoading(false);
     }
   };
+
+  const fetchFullDetails = async () => {
+    if (detailsInFlight) return;
+    setDetailsInFlight(true);
+    setDetailError(null);
+    setDetailFailed({});
+    try {
+      const params = new URLSearchParams();
+      params.set("fields", "all");
+      if (statusFilter) params.set("status", statusFilter);
+      const res = await fetch(`/api/admin/members?${params.toString()}`, { cache: "no-store" });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to load member details");
+      }
+      const filtered = currentAdminId
+        ? { ...data, members: (data?.members || []).filter((m: any) => m.id !== currentAdminId) }
+        : data;
+      setRoster(filtered);
+      setDetailLoaded(
+        (filtered?.members || []).reduce<Record<string, boolean>>((acc, m: any) => {
+          if (m?.id) acc[m.id] = true;
+          return acc;
+        }, {}),
+      );
+      setDetailQueue([]);
+      setDetailLoading({});
+      setDetailFailed({});
+    } catch (err: any) {
+      const msg = typeof err?.message === "string" ? err.message : "Failed to load member details";
+      setDetailError(msg);
+    } finally {
+      setDetailsInFlight(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!AUTO_DETAIL_ENABLED) return;
+    if (detailsInFlight) return;
+    if (detailQueue.length) return;
+    const remaining = filteredMembers.filter((m) => !detailLoaded[m.id] && !detailFailed[m.id]);
+    if (!remaining.length) return;
+    queueDetails(remaining.map((m) => m.id), Object.keys(detailFailed).length > 0);
+  }, [detailQueue, filteredMembers, detailLoaded, detailFailed, detailsInFlight]);
 
   const updateMemberEmailMeta = (memberId: string, sentAt: string, emailType: string, markWelcome: boolean) => {
     setRoster((prev) => {
@@ -555,6 +658,94 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     void fetchRefundRequests();
   }, []);
 
+  useEffect(() => {
+    if (detailsInFlight) return;
+    const visibleIds = new Set(filteredMembers.map((m) => m.id));
+    const visibleQueue = detailQueue.filter((id) => visibleIds.has(id));
+    if (!visibleQueue.length) return;
+
+    const batch = visibleQueue.slice(0, 8);
+    const controller = new AbortController();
+    setDetailsInFlight(true);
+    setDetailLoading((prev) => ({
+      ...prev,
+      ...batch.reduce<Record<string, boolean>>((acc, id) => {
+        acc[id] = true;
+        return acc;
+      }, {}),
+    }));
+
+    (async () => {
+      try {
+        const res = await fetch("/api/admin/members/details", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userIds: batch, fields: ["balances", "allowances"] }),
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data?.error || "Failed to load member details");
+        }
+        const members = Array.isArray(data?.members) ? data.members : [];
+        if (members.length) {
+          setRoster((prev) => {
+            if (!prev) return prev;
+            const map = new Map(prev.members.map((m) => [m.id, m]));
+            for (const entry of members) {
+              const current = map.get(entry.id);
+              if (current) {
+                map.set(entry.id, {
+                  ...current,
+                  ...entry,
+                  allowances: { ...current.allowances, ...entry.allowances },
+                });
+              }
+            }
+            return { ...prev, members: Array.from(map.values()) };
+          });
+          setDetailLoaded((prev) => ({
+            ...prev,
+            ...members.reduce<Record<string, boolean>>((acc, member) => {
+              acc[member.id] = true;
+              return acc;
+            }, {}),
+          }));
+          setDetailFailed((prev) => {
+            const next = { ...prev };
+            batch.forEach((id) => {
+              delete next[id];
+            });
+            return next;
+          });
+        }
+        setDetailError(null);
+      } catch (err: any) {
+        if (err?.name === "AbortError") return;
+        const msg = typeof err?.message === "string" ? err.message : "Failed to load member details";
+        setDetailError(msg);
+        setDetailFailed((prev) => ({
+          ...prev,
+          ...batch.reduce<Record<string, boolean>>((acc, id) => {
+            acc[id] = true;
+            return acc;
+          }, {}),
+        }));
+      } finally {
+        setDetailQueue((prev) => prev.filter((id) => !batch.includes(id)));
+        setDetailLoading((prev) => {
+          const next = { ...prev };
+          batch.forEach((id) => delete next[id]);
+          return next;
+        });
+        setDetailsInFlight(false);
+      }
+    })();
+
+    return () => controller.abort();
+  }, [detailQueue, detailsInFlight, filteredMembers]);
+
   const updateRefundStatus = async (id: string, status: "completed" | "rejected") => {
     try {
       const res = await fetch("/api/admin/refund/requests/update", {
@@ -770,6 +961,19 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                 <RefreshCcw className="h-4 w-4" aria-hidden="true" />
                 Refresh
               </Button>
+              {(hasMissingDetails || hasFailedDetails) && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full sm:w-auto text-[var(--brand-denim)]"
+                  onClick={() => {
+                    void fetchFullDetails();
+                  }}
+                  disabled={detailsInFlight}
+                >
+                  Retry details
+                </Button>
+              )}
             </div>
           </div>
 
@@ -790,6 +994,16 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
               {emailNotice.message}
             </div>
           )}
+          {detailError && (
+            <div className="bg-amber-50/80 px-5 py-3 text-sm text-amber-900">
+              {detailError}
+            </div>
+          )}
+          {hasFailedDetails && !detailError && (
+            <div className="bg-amber-50/80 px-5 py-3 text-sm text-amber-900">
+              Some member details failed to load. Use “Retry details” to try again.
+            </div>
+          )}
 
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-[rgba(11,11,67,0.06)] text-sm text-[#0b0b43]">
@@ -808,153 +1022,177 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
               <tbody className="divide-y divide-[rgba(11,11,67,0.06)] bg-white/70">
                 {filteredMembers.length === 0 && (
                   <tr>
-                    <td className="px-5 py-6 text-sm text-muted-foreground" colSpan={7}>
+                    <td className="px-5 py-6 text-sm text-muted-foreground" colSpan={8}>
                       No members match this filter.
                     </td>
                   </tr>
                 )}
-                {filteredMembers.map((member) => (
-                  <tr key={member.id} className="transition hover:bg-white">
-                    <td className="px-5 py-4 align-top">
-                      <div className="font-semibold text-[#0b0b43]">
-                        {member.name || `${member.firstName || ""} ${member.lastName || ""}`.trim() || "Unknown"}
-                      </div>
-                      <div className="text-xs text-muted-foreground">{member.email || "No email on file"}</div>
-                    </td>
-                    <td className="px-5 py-4 align-top">
-                      <div className="flex items-center gap-2 text-sm font-mono text-[#0b0b43]">
-                        <Wallet className="h-4 w-4 text-[var(--brand-denim)]" aria-hidden="true" />
-                        {(() => {
-                          const href = walletLink(member.primaryWallet);
-                          if (href) {
-                            return (
-                              <a
-                                href={href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-[var(--brand-denim)] underline decoration-dotted underline-offset-4 hover:text-[#0b0b43]"
-                              >
-                                {formatWallet(member.primaryWallet)}
-                              </a>
-                            );
-                          }
-                          return formatWallet(member.primaryWallet);
-                        })()}
-                      </div>
-                      {member.wallets.length > 1 && (
-                        <div className="text-[0.72rem] text-muted-foreground">
-                          +{member.wallets.length - 1} linked wallet{member.wallets.length - 1 === 1 ? "" : "s"}
+                {filteredMembers.map((member) => {
+                  const isDetailLoading = !!detailLoading[member.id];
+                  const autoRenewState = member.autoRenew;
+                  const autoRenewLabel = isDetailLoading
+                    ? "Loading..."
+                    : autoRenewState === true
+                      ? "On"
+                      : autoRenewState === false
+                        ? "Off"
+                        : "N/A";
+                  const autoRenewDetail = isDetailLoading
+                    ? "Fetching allowance..."
+                    : autoRenewState === false
+                      ? "Allowance missing"
+                      : autoRenewState === true
+                        ? "Allowance present"
+                        : "No active tier";
+                  const autoRenewTone =
+                    autoRenewState === true
+                      ? autoRenewClasses.on
+                      : autoRenewState === false
+                        ? autoRenewClasses.off
+                        : autoRenewClasses.na;
+                  return (
+                    <tr key={member.id} className="transition hover:bg-white">
+                      <td className="px-5 py-4 align-top">
+                        <div className="font-semibold text-[#0b0b43]">
+                          {member.name || `${member.firstName || ""} ${member.lastName || ""}`.trim() || "Unknown"}
                         </div>
-                      )}
-                    </td>
-                  <td className="px-5 py-4 align-top">
-                    <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs font-semibold", statusClasses[member.membershipStatus])}>
-                      {member.membershipStatus === "none" ? "No membership" : member.membershipStatus.charAt(0).toUpperCase() + member.membershipStatus.slice(1)}
-                    </span>
-                    {member.highestActiveTierLabel && (
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        Tier: {member.highestActiveTierLabel}
-                        {member.highestActiveTierExpiry ? ` · ${formatExpiry(member.highestActiveTierExpiry).label}` : ""}
-                      </div>
-                    )}
-                    {member.nextActiveTierLabel && (
-                      <div className="text-[0.72rem] text-muted-foreground">
-                        Next after expiry: {member.nextActiveTierLabel}
-                        {member.nextActiveTierExpiry ? ` · ${formatExpiry(member.nextActiveTierExpiry).label}` : ""}
-                      </div>
-                    )}
-                  </td>
-                    <td className="px-5 py-4 align-top">
-                    {(() => {
-                      const expiry = formatExpiry(member.membershipExpiry);
-                      return (
-                        <>
-                          <div className="text-sm font-medium text-[#0b0b43]">{expiry.label}</div>
-                          <div className="text-xs text-muted-foreground">{expiry.detail || ""}</div>
-                        </>
-                      );
-                    })()}
-                  </td>
-                    <td className="px-5 py-4 align-top">
-                      <span
-                        className={cn(
-                          "inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
-                          member.autoRenew === true
-                            ? autoRenewClasses.on
-                            : member.autoRenew === false
-                              ? autoRenewClasses.off
-                              : autoRenewClasses.na,
+                        <div className="text-xs text-muted-foreground">{member.email || "No email on file"}</div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex items-center gap-2 text-sm font-mono text-[#0b0b43]">
+                          <Wallet className="h-4 w-4 text-[var(--brand-denim)]" aria-hidden="true" />
+                          {(() => {
+                            const href = walletLink(member.primaryWallet);
+                            if (href) {
+                              return (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-[var(--brand-denim)] underline decoration-dotted underline-offset-4 hover:text-[#0b0b43]"
+                                >
+                                  {formatWallet(member.primaryWallet)}
+                                </a>
+                              );
+                            }
+                            return formatWallet(member.primaryWallet);
+                          })()}
+                        </div>
+                        {member.wallets.length > 1 && (
+                          <div className="text-[0.72rem] text-muted-foreground">
+                            +{member.wallets.length - 1} linked wallet{member.wallets.length - 1 === 1 ? "" : "s"}
+                          </div>
                         )}
-                      >
-                        {member.autoRenew === true ? "On" : member.autoRenew === false ? "Off" : "N/A"}
-                      </span>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {member.autoRenew === false ? "Allowance missing" : member.autoRenew === true ? "Allowance present" : "No active tier"}
-                      </div>
-                    </td>
-                    <td className="px-5 py-4 align-top">
-                      <div className="text-sm font-semibold text-[#0b0b43]">{formatBalance(member.ethBalance, "ETH")}</div>
-                      <div className="text-xs text-muted-foreground">{formatBalance(member.usdcBalance, "USDC")}</div>
-                    </td>
-                    <td className="px-5 py-4 align-top">
-                      <EmailBadge member={member} />
-                      {member.lastEmailSentAt && (
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <span className={cn("inline-flex rounded-full border px-3 py-1 text-xs font-semibold", statusClasses[member.membershipStatus])}>
+                          {member.membershipStatus === "none" ? "No membership" : member.membershipStatus.charAt(0).toUpperCase() + member.membershipStatus.slice(1)}
+                        </span>
+                        {member.highestActiveTierLabel && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Tier: {member.highestActiveTierLabel}
+                            {member.highestActiveTierExpiry ? ` · ${formatExpiry(member.highestActiveTierExpiry).label}` : ""}
+                          </div>
+                        )}
+                        {member.nextActiveTierLabel && (
+                          <div className="text-[0.72rem] text-muted-foreground">
+                            Next after expiry: {member.nextActiveTierLabel}
+                            {member.nextActiveTierExpiry ? ` · ${formatExpiry(member.nextActiveTierExpiry).label}` : ""}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        {(() => {
+                          const expiry = formatExpiry(member.membershipExpiry);
+                          return (
+                            <>
+                              <div className="text-sm font-medium text-[#0b0b43]">{expiry.label}</div>
+                              <div className="text-xs text-muted-foreground">{expiry.detail || ""}</div>
+                            </>
+                          );
+                        })()}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <span
+                          className={cn(
+                            "inline-flex rounded-full border px-3 py-1 text-xs font-semibold",
+                            isDetailLoading ? autoRenewClasses.na : autoRenewTone,
+                          )}
+                        >
+                          {autoRenewLabel}
+                        </span>
                         <div className="mt-1 text-xs text-muted-foreground">
-                          Last: {member.lastEmailType || "Email"} -{" "}
-                          {DateTime.fromISO(member.lastEmailSentAt).isValid
-                            ? DateTime.fromISO(member.lastEmailSentAt).toRelative()
-                            : member.lastEmailSentAt}
+                          {autoRenewDetail}
                         </div>
-                      )}
-                    </td>
-                    <td className="px-5 py-4 align-top">
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-rose-300 text-rose-700 hover:bg-rose-50 disabled:border-rose-200 disabled:text-rose-300"
-                          onClick={() => {
-                            setRefundConfirmMember(member);
-                            setRefundConfirmOpen(true);
-                          }}
-                          isLoading={!!refundProcessing[member.id]}
-                          disabled={!member.highestActiveTierLock}
-                        >
-                          Cancel & refund
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outlined-primary"
-                          onClick={() => openWelcomeModal(member)}
-                          isLoading={!!sendingEmail[member.id]}
-                          disabled={!member.email}
-                        >
-                          {member.welcomeEmailSentAt ? "Customize & resend welcome" : "Send welcome"}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openCustomModal(member)}
-                          isLoading={!!sendingEmail[member.id]}
-                          disabled={!member.email}
-                        >
-                          Send custom
-                        </Button>
-                        <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b0b43]">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4 rounded border border-[rgba(11,11,67,0.3)] accent-[var(--brand-denim)]"
-                            checked={member.isAdmin}
-                            onChange={(e) => toggleAdmin(member, e.target.checked)}
-                            disabled={!!adminUpdating[member.id]}
-                          />
-                          Admin
-                        </label>
-                      </div>
-                      {adminError && <div className="mt-1 text-xs text-rose-700">{adminError}</div>}
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="text-sm font-semibold text-[#0b0b43]">
+                          {isDetailLoading ? "Loading..." : formatBalance(member.ethBalance, "ETH")}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {isDetailLoading ? "Loading..." : formatBalance(member.usdcBalance, "USDC")}
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <EmailBadge member={member} />
+                        {member.lastEmailSentAt && (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            Last: {member.lastEmailType || "Email"} -{" "}
+                            {DateTime.fromISO(member.lastEmailSentAt).isValid
+                              ? DateTime.fromISO(member.lastEmailSentAt).toRelative()
+                              : member.lastEmailSentAt}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-rose-300 text-rose-700 hover:bg-rose-50 disabled:border-rose-200 disabled:text-rose-300"
+                            onClick={() => {
+                              setRefundConfirmMember(member);
+                              setRefundConfirmOpen(true);
+                            }}
+                            isLoading={!!refundProcessing[member.id]}
+                            disabled={!member.highestActiveTierLock}
+                          >
+                            Cancel & refund
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outlined-primary"
+                            onClick={() => openWelcomeModal(member)}
+                            isLoading={!!sendingEmail[member.id]}
+                            disabled={!member.email}
+                          >
+                            {member.welcomeEmailSentAt ? "Customize & resend welcome" : "Send welcome"}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => openCustomModal(member)}
+                            isLoading={!!sendingEmail[member.id]}
+                            disabled={!member.email}
+                          >
+                            Send custom
+                          </Button>
+                          <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b0b43]">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 rounded border border-[rgba(11,11,67,0.3)] accent-[var(--brand-denim)]"
+                              checked={member.isAdmin}
+                              onChange={(e) => toggleAdmin(member, e.target.checked)}
+                              disabled={!!adminUpdating[member.id]}
+                            />
+                            Admin
+                          </label>
+                        </div>
+                        {adminError && <div className="mt-1 text-xs text-rose-700">{adminError}</div>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

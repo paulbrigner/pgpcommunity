@@ -64,6 +64,13 @@ export type AdminRoster = {
   };
 };
 
+export type BuildAdminRosterOptions = {
+  includeAllowances?: boolean;
+  includeBalances?: boolean;
+  includeTokenIds?: boolean;
+  statusFilter?: "all" | "active" | "expired" | "none";
+};
+
 const ERC20_BALANCE_ABI = ["function balanceOf(address owner) view returns (uint256)"] as const;
 const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
 const usdcContract = USDC_ADDRESS ? new Contract(USDC_ADDRESS, ERC20_BALANCE_ABI, provider) : null;
@@ -146,89 +153,103 @@ function deriveAutoRenew(allowances: Record<string, AllowanceState>, highestTier
   }
 }
 
-export async function buildAdminRoster(): Promise<AdminRoster> {
-  const users = await scanUsers();
-  const members: AdminMember[] = [];
+async function buildAdminMemberEntry(user: RawUser, options: BuildAdminRosterOptions): Promise<AdminMember | null> {
+  if (!user.id) return null;
+  const includeAllowances = options.includeAllowances !== false;
+  const includeBalances = options.includeBalances !== false;
+  const includeTokenIds = options.includeTokenIds !== false;
 
-  for (const user of users) {
-    if (!user.id) continue;
-    const wallets = normalizeWallets(user.wallets);
-    const primaryWallet = user.walletAddress?.toLowerCase?.() || wallets[0] || null;
-    const addresses = wallets.length ? wallets : primaryWallet ? [primaryWallet] : [];
+  const wallets = normalizeWallets(user.wallets);
+  const primaryWallet = user.walletAddress?.toLowerCase?.() || wallets[0] || null;
+  const addresses = wallets.length ? wallets : primaryWallet ? [primaryWallet] : [];
 
-    let membershipStatus: AdminMember["membershipStatus"] = "none";
-    let membershipExpiry: number | null = null;
-    let highestActiveTierId: string | null = null;
-    let highestActiveTierLabel: string | null = null;
-    let highestActiveTierExpiry: number | null = null;
-    let highestActiveTierLock: string | null = null;
-    let highestActiveTierTokenId: string | null = null;
-    let nextActiveTierId: string | null = null;
-    let nextActiveTierLabel: string | null = null;
-    let nextActiveTierExpiry: number | null = null;
-    let autoRenew: boolean | null = null;
-    let allowances: Record<string, AllowanceState> = {};
-    let membershipCheckedAt: number | null = null;
+  let membershipStatus: AdminMember["membershipStatus"] = "none";
+  let membershipExpiry: number | null = null;
+  let highestActiveTierId: string | null = null;
+  let highestActiveTierLabel: string | null = null;
+  let highestActiveTierExpiry: number | null = null;
+  let highestActiveTierLock: string | null = null;
+  let highestActiveTierTokenId: string | null = null;
+  let nextActiveTierId: string | null = null;
+  let nextActiveTierLabel: string | null = null;
+  let nextActiveTierExpiry: number | null = null;
+  let autoRenew: boolean | null = null;
+  let allowances: Record<string, AllowanceState> = {};
+  let membershipCheckedAt: number | null = null;
 
-    if (addresses.length) {
-      try {
-        const snapshot = await membershipStateService.getState({ addresses, forceRefresh: true });
-        membershipCheckedAt = snapshot.fetchedAt;
-        const { summary, allowances: allowanceMap } = snapshotToMembershipSummary(snapshot);
-        allowances = allowanceMap;
-        membershipStatus = summary.status ?? "none";
-        const highest = pickHighestActiveTier(summary);
-        const next = pickNextActiveTier(summary);
-        membershipExpiry = highest?.expiry ?? summary.expiry ?? null;
-        highestActiveTierId = highest?.tier?.id ?? summary.highestActiveTier?.tier?.id ?? null;
-        highestActiveTierLabel = resolveTierLabel(highest || summary.highestActiveTier, highestActiveTierId);
-        highestActiveTierExpiry = highest?.expiry ?? null;
-        highestActiveTierLock = highest?.tier?.checksumAddress ?? summary.highestActiveTier?.tier?.checksumAddress ?? null;
-        highestActiveTierTokenId = Array.isArray(highest?.tokenIds) && highest?.tokenIds.length ? highest.tokenIds[0] : null;
-        nextActiveTierId = next?.tier?.id ?? null;
-        nextActiveTierLabel = resolveTierLabel(next, nextActiveTierId);
-        nextActiveTierExpiry = next?.expiry ?? null;
-        autoRenew = deriveAutoRenew(allowances, highestActiveTierId);
-      } catch (err) {
-        console.error("Admin roster: failed to build membership summary for user", user.id, err);
-        membershipStatus = "unknown";
-        allowances = {};
-      }
+  if (addresses.length) {
+    try {
+      const snapshot = await membershipStateService.getState({
+        addresses,
+        forceRefresh: true,
+        includeAllowances,
+        includeTokenIds,
+      });
+      membershipCheckedAt = snapshot.fetchedAt;
+      const { summary, allowances: allowanceMap } = snapshotToMembershipSummary(snapshot);
+      allowances = includeAllowances ? allowanceMap : {};
+      membershipStatus = summary.status ?? "none";
+      const highest = pickHighestActiveTier(summary);
+      const next = pickNextActiveTier(summary);
+      membershipExpiry = highest?.expiry ?? summary.expiry ?? null;
+      highestActiveTierId = highest?.tier?.id ?? summary.highestActiveTier?.tier?.id ?? null;
+      highestActiveTierLabel = resolveTierLabel(highest || summary.highestActiveTier, highestActiveTierId);
+      highestActiveTierExpiry = highest?.expiry ?? null;
+      highestActiveTierLock = highest?.tier?.checksumAddress ?? summary.highestActiveTier?.tier?.checksumAddress ?? null;
+      highestActiveTierTokenId = Array.isArray(highest?.tokenIds) && highest?.tokenIds.length ? highest.tokenIds[0] : null;
+      nextActiveTierId = next?.tier?.id ?? null;
+      nextActiveTierLabel = resolveTierLabel(next, nextActiveTierId);
+      nextActiveTierExpiry = next?.expiry ?? null;
+      autoRenew = includeAllowances ? deriveAutoRenew(allowances, highestActiveTierId) : null;
+    } catch (err) {
+      console.error("Admin roster: failed to build membership summary for user", user.id, err);
+      membershipStatus = "unknown";
+      allowances = {};
     }
-
-    const balances = await fetchBalances(primaryWallet);
-
-    members.push({
-      id: user.id,
-      name: user.name || null,
-      email: user.email || null,
-      firstName: user.firstName || null,
-      lastName: user.lastName || null,
-      wallets,
-      primaryWallet,
-      membershipStatus,
-      membershipExpiry,
-      highestActiveTierId,
-      highestActiveTierLabel,
-      highestActiveTierExpiry,
-      highestActiveTierLock,
-      highestActiveTierTokenId,
-      nextActiveTierId,
-      nextActiveTierLabel,
-      nextActiveTierExpiry,
-      autoRenew,
-      allowances,
-      ethBalance: balances.ethBalance,
-      usdcBalance: balances.usdcBalance,
-      isAdmin: !!user.isAdmin,
-      welcomeEmailSentAt: user.welcomeEmailSentAt || null,
-      lastEmailSentAt: user.lastEmailSentAt || null,
-      lastEmailType: user.lastEmailType || null,
-      emailBounceReason: user.emailBounceReason || null,
-      emailSuppressed: typeof user.emailSuppressed === "boolean" ? !!user.emailSuppressed : null,
-      membershipCheckedAt,
-    });
   }
+
+  if (options.statusFilter && options.statusFilter !== "all" && membershipStatus !== options.statusFilter) {
+    return null;
+  }
+
+  const balances = includeBalances ? await fetchBalances(primaryWallet) : { ethBalance: null, usdcBalance: null };
+
+  return {
+    id: user.id,
+    name: user.name || null,
+    email: user.email || null,
+    firstName: user.firstName || null,
+    lastName: user.lastName || null,
+    wallets,
+    primaryWallet,
+    membershipStatus,
+    membershipExpiry,
+    highestActiveTierId,
+    highestActiveTierLabel,
+    highestActiveTierExpiry,
+    highestActiveTierLock,
+    highestActiveTierTokenId,
+    nextActiveTierId,
+    nextActiveTierLabel,
+    nextActiveTierExpiry,
+    autoRenew,
+    allowances,
+    ethBalance: balances.ethBalance,
+    usdcBalance: balances.usdcBalance,
+    isAdmin: !!user.isAdmin,
+    welcomeEmailSentAt: user.welcomeEmailSentAt || null,
+    lastEmailSentAt: user.lastEmailSentAt || null,
+    lastEmailType: user.lastEmailType || null,
+    emailBounceReason: user.emailBounceReason || null,
+    emailSuppressed: typeof user.emailSuppressed === "boolean" ? !!user.emailSuppressed : null,
+    membershipCheckedAt,
+  };
+}
+
+export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
+  const users = await scanUsers();
+  const entries = await Promise.all(users.map((user) => buildAdminMemberEntry(user, options)));
+  const members: AdminMember[] = entries.filter((m): m is AdminMember => !!m);
 
   const nowSec = Math.floor(Date.now() / 1000);
   const statusRank = (status: AdminMember["membershipStatus"]) => {
@@ -264,4 +285,29 @@ export async function buildAdminRoster(): Promise<AdminRoster> {
   };
 
   return { members, meta };
+}
+
+export async function buildAdminMembersByIds(userIds: string[], options: BuildAdminRosterOptions = {}): Promise<AdminMember[]> {
+  const ids = Array.from(
+    new Set(
+      (userIds || [])
+        .map((id) => (typeof id === "string" ? id.trim() : ""))
+        .filter((id) => id.length > 0),
+    ),
+  );
+  if (!ids.length) return [];
+
+  const users: RawUser[] = [];
+  for (const id of ids) {
+    const res = await documentClient.get({
+      TableName: TABLE_NAME,
+      Key: { pk: `USER#${id}`, sk: `USER#${id}` },
+    });
+    if (res.Item) {
+      users.push(res.Item as RawUser);
+    }
+  }
+
+  const entries = await Promise.all(users.map((user) => buildAdminMemberEntry(user, options)));
+  return entries.filter((m): m is AdminMember => !!m);
 }

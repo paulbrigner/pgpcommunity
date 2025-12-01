@@ -15,7 +15,11 @@ export default async function AdminPage() {
     console.error("Admin page session load failed", err);
   }
   try {
-    roster = await buildAdminRoster();
+    roster = await buildAdminRoster({
+      includeAllowances: false,
+      includeBalances: false,
+      includeTokenIds: false,
+    });
   } catch (err) {
     console.error("Admin page failed to load roster", err);
   }

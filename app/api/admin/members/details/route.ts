@@ -50,21 +50,11 @@ export async function POST(request: NextRequest) {
     const includeBalances = hasCore ? false : hasFields ? hasAll || fields.has("balances") : true;
     const includeTokenIds = hasCore ? false : hasFields ? hasAll || fields.has("tokenids") : false;
 
-    console.info("[ADMIN MEMBERS DETAILS] request", {
-      userCount: userIds.length,
-      includeAllowances,
-      includeBalances,
-      includeTokenIds,
-      userIds,
-    });
-
     const members = await buildAdminMembersByIds(userIds, {
       includeAllowances,
       includeBalances,
       includeTokenIds,
     });
-
-    console.info("[ADMIN MEMBERS DETAILS] response", { userCount: members.length });
 
     return NextResponse.json({ members });
   } catch (err) {

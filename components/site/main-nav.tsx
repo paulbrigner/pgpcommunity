@@ -5,7 +5,7 @@ import { useSession, signOut } from "next-auth/react";
 import { usePathname, useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
-import { Menu, X } from "lucide-react";
+import { Loader2, Menu, X } from "lucide-react";
 import {
   NavigationMenu,
   NavigationMenuItem,
@@ -30,10 +30,15 @@ export function MainNav() {
   }, [pathname, searchParams]);
 
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [navLoading, setNavLoading] = useState(false);
 
   const linkClasses = cn(
     navigationMenuTriggerStyle(),
     "rounded-full border border-white/10 bg-transparent px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-[var(--brand-cloud)] transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+  );
+  const externalLinkClasses = cn(
+    navigationMenuTriggerStyle(),
+    "rounded-full border border-amber-300/60 bg-white/5 px-4 py-2 text-[0.68rem] font-semibold uppercase tracking-[0.28em] text-amber-100 shadow-[0_0_0_1px_rgba(255,255,255,0.06)] transition hover:border-amber-200 hover:bg-amber-50/10 hover:text-white"
   );
 
   const handleSignIn = async () => {
@@ -45,6 +50,7 @@ export function MainNav() {
 
   useEffect(() => {
     setMobileOpen(false);
+    setNavLoading(false);
   }, [pathname, status]);
 
   const closeMobileMenu = () => setMobileOpen(false);
@@ -57,7 +63,6 @@ export function MainNav() {
   const mobileMenuItems = authenticated
     ? [
         { key: "home", label: "Home", href: "/" },
-        { key: "pgp", label: "PGP* for Crypto", href: "https://pgpforcrypto.org", external: true },
         {
           key: "profile",
           label: "Edit Profile",
@@ -68,7 +73,13 @@ export function MainNav() {
               key: "admin",
               label: "Admin",
               href: "/admin",
+              action: () => {
+                setNavLoading(true);
+                closeMobileMenu();
+                router.push("/admin");
+              },
             }] : []),
+        { key: "pgp", label: "PGP* for Crypto", href: "https://pgpforcrypto.org", external: true },
         {
           key: "logout",
           label: "Log Out",
@@ -84,7 +95,6 @@ export function MainNav() {
       ]
     : [
         { key: "home", label: "Home", href: "/" },
-        { key: "pgp", label: "PGP* for Crypto", href: "https://pgpforcrypto.org", external: true },
         {
           key: "join",
           label: "Join",
@@ -98,6 +108,7 @@ export function MainNav() {
             await handleSignIn();
           },
         },
+        { key: "pgp", label: "PGP* for Crypto", href: "https://pgpforcrypto.org", external: true },
       ];
 
   return (
@@ -127,14 +138,6 @@ export function MainNav() {
               </NavigationMenuLink>
             </NavigationMenuItem>
 
-            <NavigationMenuItem>
-              <NavigationMenuLink className={linkClasses} asChild>
-                <Link href="https://pgpforcrypto.org" target="_blank" rel="noopener noreferrer">
-                  PGP* for Crypto
-                </Link>
-              </NavigationMenuLink>
-            </NavigationMenuItem>
-
             {authenticated && (
               <NavigationMenuItem>
                 <NavigationMenuLink className={linkClasses} asChild>
@@ -145,9 +148,16 @@ export function MainNav() {
 
             {authenticated && isAdmin && (
               <NavigationMenuItem>
-                <NavigationMenuLink className={linkClasses} asChild>
-                  <Link href="/admin">Admin</Link>
-                </NavigationMenuLink>
+                <button
+                  type="button"
+                  className={linkClasses}
+                  onClick={() => {
+                    setNavLoading(true);
+                    router.push("/admin");
+                  }}
+                >
+                  Admin
+                </button>
               </NavigationMenuItem>
             )}
 
@@ -185,6 +195,20 @@ export function MainNav() {
                   Log Out
                 </button>
               </NavigationMenuItem>
+            )}
+
+            <NavigationMenuItem className="pl-3">
+              <NavigationMenuLink className={externalLinkClasses} asChild>
+                <Link href="https://pgpforcrypto.org" target="_blank" rel="noopener noreferrer">
+                  PGP* for Crypto
+                </Link>
+              </NavigationMenuLink>
+            </NavigationMenuItem>
+            {navLoading && (
+              <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-white/10 px-3 py-1 text-xs text-white">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                Loading…
+              </span>
             )}
           </NavigationMenuList>
         </NavigationMenu>

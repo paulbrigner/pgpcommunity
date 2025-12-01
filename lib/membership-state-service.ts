@@ -84,8 +84,8 @@ type CacheEntry = {
   snapshot: MembershipStateSnapshot;
   expiresAt: number;
 };
-const ALLOWANCE_BATCH_SIZE = 3;
-const ALLOWANCE_BATCH_DELAY_MS = 300;
+const ALLOWANCE_BATCH_SIZE = 1;
+const ALLOWANCE_BATCH_DELAY_MS = 500;
 const BALANCE_RETRIES = 2;
 const BALANCE_RETRY_DELAY_MS = 300;
 

@@ -180,10 +180,6 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   }, [roster, query, statusFilter]);
 
   const meta = useMemo(() => computeMetaFromMembers(roster?.members || []), [roster]);
-  const hasMissingDetails = useMemo(
-    () => filteredMembers.some((m) => !detailLoaded[m.id]),
-    [filteredMembers, detailLoaded],
-  );
   const hasFailedDetails = useMemo(() => Object.keys(detailFailed).length > 0, [detailFailed]);
 
   const queueDetails = (ids: string[], resetFailures = false) => {
@@ -253,41 +249,6 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       setError(message);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchFullDetails = async () => {
-    if (detailsInFlight) return;
-    setDetailsInFlight(true);
-    setDetailError(null);
-    setDetailFailed({});
-    try {
-      const params = new URLSearchParams();
-      params.set("fields", "all");
-      if (statusFilter) params.set("status", statusFilter);
-      const res = await fetch(`/api/admin/members?${params.toString()}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data?.error || "Failed to load member details");
-      }
-      const filtered = currentAdminId
-        ? { ...data, members: (data?.members || []).filter((m: any) => m.id !== currentAdminId) }
-        : data;
-      setRoster(filtered);
-      setDetailLoaded(
-        (filtered?.members || []).reduce((acc: Record<string, boolean>, m: any) => {
-          if (m?.id) acc[m.id] = true;
-          return acc;
-        }, {} as Record<string, boolean>),
-      );
-      setDetailQueue([]);
-      setDetailLoading({});
-      setDetailFailed({});
-    } catch (err: any) {
-      const msg = typeof err?.message === "string" ? err.message : "Failed to load member details";
-      setDetailError(msg);
-    } finally {
-      setDetailsInFlight(false);
     }
   };
 
@@ -676,7 +637,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     const visibleQueue = detailQueue.filter((id) => visibleIds.has(id));
     if (!visibleQueue.length) return;
 
-    const batch = visibleQueue.slice(0, 8);
+    const batch = visibleQueue.slice(0, 3);
     setDetailsInFlight(true);
     const startedAt = Date.now();
     if (DEBUG_DETAILS) {
@@ -924,9 +885,8 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   return (
     <>
       <div className="space-y-6">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 justify-items-center max-w-5xl mx-auto">
           <StatCard label="Active members" value={meta.active} detail={`${meta.total} total`} tone="emerald" icon={ShieldCheck} />
-          <StatCard label="Expiring in 30 days" value={meta.expiringSoon} detail="Based on current expiry timestamps" tone="amber" icon={AlertTriangle} />
           <StatCard label="Auto-renew off" value={meta.autoRenewOff} detail="Members without USDC allowance" tone="rose" icon={Wallet} />
           <StatCard label="No membership" value={meta.none} detail="Signed up but not holding a key" tone="slate" icon={MailQuestion} />
         </div>
@@ -1384,7 +1344,7 @@ function StatCard({
     slate: "bg-slate-50 text-slate-900 border-slate-100",
   };
   return (
-    <div className={cn("rounded-2xl border p-4 shadow-sm", tones[tone])}>
+    <div className={cn("w-full max-w-sm rounded-2xl border p-4 shadow-sm", tones[tone])}>
       <div className="flex items-center gap-3">
         <div className="rounded-full bg-white/70 p-2 shadow-inner">
           <Icon className="h-5 w-5" aria-hidden="true" />

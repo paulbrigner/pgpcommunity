@@ -77,7 +77,7 @@ const provider = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
 const usdcContract = USDC_ADDRESS ? new Contract(USDC_ADDRESS, ERC20_BALANCE_ABI, provider) : null;
 const balanceCache = new Map<string, { ethBalance: string | null; usdcBalance: string | null }>();
 const LOG_RPC_DEBUG = process.env.RPC_DEBUG === "true";
-const MAX_CONCURRENCY = 3;
+const MAX_CONCURRENCY = 2;
 const BALANCE_RETRIES = 2;
 const BALANCE_RETRY_DELAY_MS = 300;
 const rpcDebugInfo = (() => {

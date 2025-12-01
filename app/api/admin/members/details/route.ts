@@ -21,12 +21,12 @@ export async function POST(request: NextRequest) {
     } catch {
       body = {};
     }
-    const userIds = Array.isArray(body?.userIds)
+    const userIds: string[] = Array.isArray(body?.userIds)
       ? Array.from(
           new Set(
             body.userIds
-              .map((id: any) => (typeof id === "string" ? id.trim() : ""))
-              .filter((id: string) => id.length > 0),
+              .map((id: unknown) => (typeof id === "string" ? id.trim() : ""))
+              .filter((id: string): id is string => id.length > 0),
           ),
         )
       : [];

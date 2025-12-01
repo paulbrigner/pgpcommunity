@@ -706,10 +706,10 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           });
           setDetailLoaded((prev) => ({
             ...prev,
-            ...members.reduce<Record<string, boolean>>((acc, member) => {
+            ...members.reduce((acc: Record<string, boolean>, member: AdminMember) => {
               acc[member.id] = true;
               return acc;
-            }, {}),
+            }, {} as Record<string, boolean>),
           }));
           setDetailFailed((prev) => {
             const next = { ...prev };

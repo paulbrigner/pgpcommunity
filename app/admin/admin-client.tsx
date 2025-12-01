@@ -262,10 +262,10 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
         : data;
       setRoster(filtered);
       setDetailLoaded(
-        (filtered?.members || []).reduce<Record<string, boolean>>((acc, m: any) => {
+        (filtered?.members || []).reduce((acc: Record<string, boolean>, m: any) => {
           if (m?.id) acc[m.id] = true;
           return acc;
-        }, {}),
+        }, {} as Record<string, boolean>),
       );
       setDetailQueue([]);
       setDetailLoading({});

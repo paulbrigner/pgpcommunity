@@ -1,5 +1,6 @@
-import { JsonRpcProvider, Contract } from 'ethers';
+import { Contract } from 'ethers';
 import { LOCKSMITH_BASE_URL, MEMBERSHIP_TIERS, MembershipTierConfig } from '@/lib/config';
+import { getRpcProvider } from '@/lib/rpc/provider';
 
 const ABI = [
   'function getHasValidKey(address _owner) view returns (bool)',
@@ -69,7 +70,7 @@ async function callWithRetries<T>(fn: () => Promise<T>, attempts = 3, delayMs = 
 }
 
 async function evaluateLockMembership(addresses: string[], rpcUrl: string, networkId: number, lockAddress: string): Promise<{ status: TierStatus; expiry: number | null }>{
-  const provider = new JsonRpcProvider(rpcUrl, networkId);
+  const provider = getRpcProvider(rpcUrl, networkId);
   const contract = new Contract(lockAddress, ABI, provider);
   const now = Math.floor(Date.now() / 1000);
   let maxExpiry: number | null = null;

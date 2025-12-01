@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { BrowserProvider, Contract, JsonRpcProvider, ZeroAddress, formatUnits } from 'ethers';
+import { BrowserProvider, Contract, ZeroAddress, formatUnits } from 'ethers';
 import { WalletService } from '@unlock-protocol/unlock-js';
 import { networks } from '@unlock-protocol/networks';
 import { Button } from '@/components/ui/button';
@@ -19,6 +19,7 @@ import {
   UNLOCK_SUBGRAPH_URL,
 } from '@/lib/config';
 import { decodeUnlockError } from '@/lib/membership';
+import { getRpcProvider } from '@/lib/rpc/provider';
 import {
   getEventCheckoutTarget,
   getMembershipCheckoutTarget,
@@ -45,6 +46,7 @@ const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
 ];
 const SAFE_ALLOWANCE_CAP = 2n ** 200n;
+const sharedRpc = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
 
 type CheckoutIntent =
   | { kind: 'membership'; tierId?: string | null }
@@ -90,7 +92,7 @@ const ensureBaseNetwork = async (provider: any) => {
 };
 
 const fetchPricing = async (target: CheckoutTarget): Promise<PricingInfo> => {
-  const rpc = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+  const rpc = sharedRpc;
   const lock = new Contract(target.checksumAddress, LOCK_ABI, rpc);
   const [keyPrice, tokenAddress] = await Promise.all([
     lock.keyPrice(),
@@ -156,7 +158,7 @@ const formatErrorMessage = (error: unknown) => {
 
 const findExistingMembershipTokenId = async (lockAddress: string, owner: string, walletService?: WalletService): Promise<string | null> => {
   try {
-    const rpc = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+    const rpc = sharedRpc;
     const lock = new Contract(lockAddress, LOCK_ABI, rpc);
     const balance: bigint = await lock.balanceOf(owner).catch(() => 0n);
     if (balance <= 0n) {
@@ -187,7 +189,7 @@ const findExistingMembershipTokenId = async (lockAddress: string, owner: string,
 
 const fetchAnyTokenId = async (lockAddress: string, owner: string): Promise<string | null> => {
   try {
-    const rpc = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+    const rpc = sharedRpc;
     const lock = new Contract(lockAddress, LOCK_ABI, rpc);
     const balance: bigint = await lock.balanceOf(owner).catch(() => 0n);
     if (balance <= 0n) return null;
@@ -210,7 +212,7 @@ const fetchAnyTokenId = async (lockAddress: string, owner: string): Promise<stri
 
 const hasAnyKey = async (lockAddress: string, owner: string): Promise<boolean> => {
   try {
-    const rpc = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+    const rpc = sharedRpc;
     const lock = new Contract(lockAddress, LOCK_ABI, rpc);
     const hasValid: boolean = await lock.getHasValidKey(owner).catch(() => false);
     if (hasValid) return true;
@@ -422,7 +424,8 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
         },
       } as any);
       const signer = await browserProvider.getSigner();
-      await walletService.connect(browserProvider as unknown as JsonRpcProvider, signer);
+      // walletService.connect expects an ethers v5 provider; BrowserProvider (v6) is compatible at runtime.
+      await walletService.connect(browserProvider as any, signer);
       const owner = await signer.getAddress();
 
       const overrides = target.overrides;

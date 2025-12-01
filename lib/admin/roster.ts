@@ -1,8 +1,9 @@
-import { Contract, JsonRpcProvider, formatUnits } from "ethers";
+import { Contract, formatUnits } from "ethers";
 import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
 import { BASE_NETWORK_ID, BASE_RPC_URL, MEMBERSHIP_TIERS, USDC_ADDRESS } from "@/lib/config";
 import { membershipStateService, snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import { pickHighestActiveTier, pickNextActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
+import { getRpcProvider } from "@/lib/rpc/provider";
 
 type RawUser = {
   id?: string;
@@ -72,9 +73,32 @@ export type BuildAdminRosterOptions = {
 };
 
 const ERC20_BALANCE_ABI = ["function balanceOf(address owner) view returns (uint256)"] as const;
-const provider = new JsonRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+const provider = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
 const usdcContract = USDC_ADDRESS ? new Contract(USDC_ADDRESS, ERC20_BALANCE_ABI, provider) : null;
 const balanceCache = new Map<string, { ethBalance: string | null; usdcBalance: string | null }>();
+const LOG_RPC_DEBUG = process.env.RPC_DEBUG === "true";
+const MAX_CONCURRENCY = 3;
+const BALANCE_RETRIES = 2;
+const BALANCE_RETRY_DELAY_MS = 300;
+const rpcDebugInfo = (() => {
+  try {
+    const u = new URL(BASE_RPC_URL || "");
+    const parts = u.pathname.split("/").filter(Boolean);
+    const token = parts[parts.length - 1] || "";
+    return {
+      host: u.host,
+      protocol: u.protocol.replace(":", ""),
+      pathDepth: parts.length,
+      keyLength: token.length || undefined,
+      keyPreview: token.length >= 8 ? `${token.slice(0, 4)}...${token.slice(-4)}` : token || undefined,
+    };
+  } catch {
+    return { invalidUrl: true };
+  }
+})();
+if (LOG_RPC_DEBUG && typeof window === "undefined") {
+  console.info("[RPC DEBUG] Admin roster provider init", { networkId: BASE_NETWORK_ID, rpc: rpcDebugInfo });
+}
 
 async function scanUsers(): Promise<RawUser[]> {
   const items: RawUser[] = [];
@@ -114,25 +138,82 @@ async function fetchBalances(address: string | null): Promise<{ ethBalance: stri
   const cached = balanceCache.get(key);
   if (cached) return cached;
 
+  const shouldRetry = (err: any) => {
+    const code = err?.code ?? err?.statusCode ?? err?.error?.code;
+    if (code === 429 || code === 503) return true;
+    const msg = typeof err?.message === "string" ? err.message.toLowerCase() : "";
+    return msg.includes("compute units per second") || msg.includes("rate limit") || msg.includes("throttle");
+  };
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const withRetry = async <T>(fn: () => Promise<T>): Promise<T> => {
+    let attempt = 0;
+    let lastErr: any;
+    while (attempt <= BALANCE_RETRIES) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        if (attempt >= BALANCE_RETRIES || !shouldRetry(err)) break;
+        await sleep(BALANCE_RETRY_DELAY_MS * (attempt + 1));
+      }
+      attempt += 1;
+    }
+    throw lastErr;
+  };
+
   let ethBalance: string | null = null;
   let usdcBalance: string | null = null;
   try {
-    const wei = await provider.getBalance(address);
+    const wei = await withRetry(() => provider.getBalance(address));
     ethBalance = formatUnits(wei, 18);
   } catch (err) {
-    console.warn("Admin roster: failed to fetch ETH balance", address, err);
+    if (LOG_RPC_DEBUG) {
+      console.warn("Admin roster: failed to fetch ETH balance", address, err);
+    }
   }
   if (usdcContract) {
     try {
-      const bal = await usdcContract.balanceOf(address);
+      const bal = await withRetry(() => usdcContract.balanceOf(address));
       usdcBalance = formatUnits(bal, 6);
     } catch (err) {
-      console.warn("Admin roster: failed to fetch USDC balance", address, err);
+      if (LOG_RPC_DEBUG) {
+        console.warn("Admin roster: failed to fetch USDC balance", address, err);
+      }
     }
   }
   const result = { ethBalance, usdcBalance };
   balanceCache.set(key, result);
   return result;
+}
+
+async function mapWithLimit<T, U>(items: T[], limit: number, fn: (item: T) => Promise<U>): Promise<U[]> {
+  const results: U[] = new Array(items.length);
+  let index = 0;
+  let active = 0;
+
+  return new Promise((resolve, reject) => {
+    const next = () => {
+      if (index >= items.length && active === 0) {
+        resolve(results);
+        return;
+      }
+      while (active < limit && index < items.length) {
+        const current = index++;
+        active++;
+        fn(items[current])
+          .then((value) => {
+            results[current] = value;
+          })
+          .catch(reject)
+          .finally(() => {
+            active--;
+            next();
+          });
+      }
+    };
+    next();
+  });
 }
 
 function deriveAutoRenew(allowances: Record<string, AllowanceState>, highestTierId: string | null): boolean | null {
@@ -248,7 +329,7 @@ async function buildAdminMemberEntry(user: RawUser, options: BuildAdminRosterOpt
 
 export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
   const users = await scanUsers();
-  const entries = await Promise.all(users.map((user) => buildAdminMemberEntry(user, options)));
+  const entries = await mapWithLimit(users, MAX_CONCURRENCY, (user) => buildAdminMemberEntry(user, options));
   const members: AdminMember[] = entries.filter((m): m is AdminMember => !!m);
 
   const nowSec = Math.floor(Date.now() / 1000);
@@ -308,6 +389,6 @@ export async function buildAdminMembersByIds(userIds: string[], options: BuildAd
     }
   }
 
-  const entries = await Promise.all(users.map((user) => buildAdminMemberEntry(user, options)));
+  const entries = await mapWithLimit(users, MAX_CONCURRENCY, (user) => buildAdminMemberEntry(user, options));
   return entries.filter((m): m is AdminMember => !!m);
 }

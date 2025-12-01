@@ -1,4 +1,4 @@
-import { Contract, JsonRpcProvider } from 'ethers';
+import { Contract } from 'ethers';
 import {
   BASE_NETWORK_ID,
   BASE_RPC_URL,
@@ -10,6 +10,7 @@ import {
   type MembershipTierConfig,
 } from '@/lib/config';
 import { getMembershipSummary, type MembershipSummary, type TierMembershipSummary } from '@/lib/membership-server';
+import { getRpcProvider } from '@/lib/rpc/provider';
 
 export interface MembershipStateService {
   getState(params: {
@@ -83,6 +84,57 @@ type CacheEntry = {
   snapshot: MembershipStateSnapshot;
   expiresAt: number;
 };
+const ALLOWANCE_BATCH_SIZE = 3;
+const ALLOWANCE_BATCH_DELAY_MS = 300;
+const BALANCE_RETRIES = 2;
+const BALANCE_RETRY_DELAY_MS = 300;
+
+function isThrottle(err: any): boolean {
+  const code = err?.code ?? err?.statusCode ?? err?.error?.code;
+  if (code === 429 || code === 503) return true;
+  const msg = typeof err?.message === 'string' ? err.message.toLowerCase() : '';
+  return msg.includes('compute units per second') || msg.includes('rate limit') || msg.includes('throttle');
+}
+
+function describeRpc(url: string | undefined) {
+  if (!url) return { urlMissing: true };
+  try {
+    const u = new URL(url);
+    const parts = u.pathname.split('/').filter(Boolean);
+    const token = parts[parts.length - 1] || '';
+    return {
+      host: u.host,
+      protocol: u.protocol.replace(':', ''),
+      pathDepth: parts.length,
+      keyLength: token.length || undefined,
+      keyPreview: token.length >= 8 ? `${token.slice(0, 4)}...${token.slice(-4)}` : token || undefined,
+    };
+  } catch {
+    return { invalidUrl: true };
+  }
+}
+
+const rpcDebugInfo = describeRpc(BASE_RPC_URL);
+const LOG_RPC_DEBUG = process.env.RPC_DEBUG === 'true';
+if (LOG_RPC_DEBUG && typeof window === 'undefined') {
+  try {
+    const providerProbe = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+    void providerProbe
+      .getNetwork()
+      .then((net) => {
+        console.info('[RPC DEBUG] MembershipStateService network detected', {
+          chainId: Number(net.chainId),
+          name: net.name,
+          rpc: rpcDebugInfo,
+        });
+      })
+      .catch((err) => {
+        console.error('[RPC DEBUG] MembershipStateService network detection failed', { rpc: rpcDebugInfo, error: err });
+      });
+  } catch (err) {
+    console.error('[RPC DEBUG] MembershipStateService provider init failed', { rpc: rpcDebugInfo, error: err });
+  }
+}
 
 class InMemoryMembershipStateService implements MembershipStateService {
   private cache = new Map<string, CacheEntry>();
@@ -288,7 +340,9 @@ class InMemoryMembershipStateService implements MembershipStateService {
         .filter((id): id is string => !!id);
       return { tokenIds: Array.from(new Set(tokenIds)), ownersWithKeys };
     } catch (err) {
-      console.warn('MembershipStateService: subgraph tokenIds fetch failed', lockAddress, err);
+      if (LOG_RPC_DEBUG) {
+        console.warn('MembershipStateService: subgraph tokenIds fetch failed', lockAddress, err);
+      }
       return { tokenIds: [], ownersWithKeys: new Set() };
     }
   }
@@ -296,7 +350,7 @@ class InMemoryMembershipStateService implements MembershipStateService {
   private async fetchTokenIds(addresses: string[], lockAddress: string, chainId: number): Promise<string[]> {
     if (!addresses.length) return [];
     const discoveredOwners = new Set<string>();
-    const provider = new JsonRpcProvider(BASE_RPC_URL, chainId);
+    const provider = getRpcProvider(BASE_RPC_URL, chainId);
     const contract = new Contract(lockAddress, LOCK_ABI, provider);
     const ids = new Set<string>();
 
@@ -323,7 +377,9 @@ class InMemoryMembershipStateService implements MembershipStateService {
           }
         }
       } catch (err) {
-        console.warn('MembershipStateService: tokenIds fetch failed', lockAddress, owner, err);
+        if (LOG_RPC_DEBUG && !isThrottle(err)) {
+          console.warn('MembershipStateService: tokenIds fetch failed', lockAddress, owner, err);
+        }
       }
     }
 
@@ -335,23 +391,48 @@ class InMemoryMembershipStateService implements MembershipStateService {
       return {};
     }
 
-    const provider = new JsonRpcProvider(BASE_RPC_URL, chainId);
+    const provider = getRpcProvider(BASE_RPC_URL, chainId);
     const erc20 = new Contract(USDC_ADDRESS, ERC20_ABI, provider);
-    
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const withRetry = async <T>(fn: () => Promise<T>) => {
+      let attempt = 0;
+      let lastErr: any;
+      while (attempt <= BALANCE_RETRIES) {
+        try {
+          return await fn();
+        } catch (err) {
+          lastErr = err;
+          if (attempt >= BALANCE_RETRIES || !isThrottle(err)) break;
+          await sleep(BALANCE_RETRY_DELAY_MS * (attempt + 1));
+        }
+        attempt += 1;
+      }
+      throw lastErr;
+    };
     const now = Date.now();
     const map: Record<string, AllowanceState> = {};
 
     await Promise.all(
       MEMBERSHIP_TIERS.map(async (tier) => {
         let maxAllowance = 0n;
-        for (const owner of addresses) {
-          try {
-            const value: bigint = await erc20.allowance(owner, tier.checksumAddress);
-            if (value > maxAllowance) {
-              maxAllowance = value;
-            }
-          } catch (err) {
-            console.warn('MembershipStateService: allowance fetch failed', owner, tier.checksumAddress, err);
+        for (let i = 0; i < addresses.length; i += ALLOWANCE_BATCH_SIZE) {
+          const batch = addresses.slice(i, i + ALLOWANCE_BATCH_SIZE);
+          await Promise.all(
+            batch.map(async (owner) => {
+              try {
+                const value: bigint = await withRetry(() => erc20.allowance(owner, tier.checksumAddress));
+                if (value > maxAllowance) {
+                  maxAllowance = value;
+                }
+              } catch (err) {
+                if (LOG_RPC_DEBUG && !isThrottle(err)) {
+                  console.warn('MembershipStateService: allowance fetch failed', owner, tier.checksumAddress, err);
+                }
+              }
+            }),
+          );
+          if (i + ALLOWANCE_BATCH_SIZE < addresses.length) {
+            await sleep(ALLOWANCE_BATCH_DELAY_MS);
           }
         }
 
@@ -360,7 +441,9 @@ class InMemoryMembershipStateService implements MembershipStateService {
           const lock = new Contract(tier.checksumAddress, LOCK_ABI, provider);
           keyPriceRaw = await lock.keyPrice();
         } catch (err) {
-          console.warn('MembershipStateService: keyPrice fetch failed', tier.checksumAddress, err);
+          if (LOG_RPC_DEBUG && !isThrottle(err)) {
+            console.warn('MembershipStateService: keyPrice fetch failed', tier.checksumAddress, err);
+          }
         }
 
         const key = tier.checksumAddress.toLowerCase();

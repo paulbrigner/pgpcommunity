@@ -12,7 +12,8 @@ import {
   MEMBERSHIP_TIER_ADDRESSES,
 } from '@/lib/config';
 import unlockNetworks from '@unlock-protocol/networks';
-import { JsonRpcProvider, Contract } from 'ethers';
+import { Contract } from 'ethers';
+import { getRpcProvider } from '@/lib/rpc/provider';
 
 const ALCHEMY_API_KEY = (() => {
   try {
@@ -34,14 +35,7 @@ const lockAddress = (PRIMARY_LOCK_ADDRESS || '').toLowerCase();
 let cachedLockDeployer: string | null = null;
 let cachedLockOwner: string | null = null;
 
-const provider = (() => {
-  try {
-    return BASE_RPC_URL ? new JsonRpcProvider(BASE_RPC_URL) : null;
-  } catch (err) {
-    console.error('Failed to create provider for NFT route', err);
-    return null;
-  }
-})();
+const provider = BASE_RPC_URL ? getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID) : null;
 
 const normalizeImageUrl = (value: string | null | undefined): string | null => {
   if (!value || typeof value !== 'string') return null;

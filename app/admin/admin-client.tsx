@@ -24,7 +24,8 @@ type Props = {
 };
 
 // Toggle automatic detail hydration; keep off to avoid unintended requeue loops.
-const AUTO_DETAIL_ENABLED = false;
+const AUTO_DETAIL_ENABLED = true;
+const DEBUG_DETAILS = process.env.NEXT_PUBLIC_DEBUG_ADMIN_DETAILS === "true";
 
 type StatTone = "emerald" | "amber" | "rose" | "slate";
 
@@ -120,6 +121,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   const [refundProcessing, setRefundProcessing] = useState<Record<string, boolean>>({});
   const [refundConfirmOpen, setRefundConfirmOpen] = useState(false);
   const [refundConfirmMember, setRefundConfirmMember] = useState<AdminMember | null>(null);
+  const [actionModalMember, setActionModalMember] = useState<AdminMember | null>(null);
   const [refundAmountInput, setRefundAmountInput] = useState("");
   const [requestRefundProcessing, setRequestRefundProcessing] = useState<Record<string, boolean>>({});
   const [refundRequests, setRefundRequests] = useState<
@@ -188,6 +190,17 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     if (resetFailures) {
       setDetailFailed({});
     }
+    if (!ids.length) return;
+    if (DEBUG_DETAILS) {
+      console.info("[ADMIN DETAILS] queueDetails", { ids, resetFailures });
+    }
+    setDetailFailed((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => {
+        delete next[id];
+      });
+      return next;
+    });
     setDetailQueue(ids);
     setDetailsInFlight(false);
     setDetailError(null);
@@ -664,8 +677,11 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     if (!visibleQueue.length) return;
 
     const batch = visibleQueue.slice(0, 8);
-    const controller = new AbortController();
     setDetailsInFlight(true);
+    const startedAt = Date.now();
+    if (DEBUG_DETAILS) {
+      console.info("[ADMIN DETAILS FETCH] start", { batch });
+    }
     setDetailLoading((prev) => ({
       ...prev,
       ...batch.reduce<Record<string, boolean>>((acc, id) => {
@@ -681,8 +697,10 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ userIds: batch, fields: ["balances", "allowances"] }),
           cache: "no-store",
-          signal: controller.signal,
         });
+        if (DEBUG_DETAILS) {
+          console.info("[ADMIN DETAILS FETCH] status", res.status, "batch", batch);
+        }
         const data = await res.json();
         if (!res.ok) {
           throw new Error(data?.error || "Failed to load member details");
@@ -721,8 +739,8 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
         }
         setDetailError(null);
       } catch (err: any) {
-        if (err?.name === "AbortError") return;
         const msg = typeof err?.message === "string" ? err.message : "Failed to load member details";
+        console.error("[ADMIN DETAILS FETCH] failed", msg, err);
         setDetailError(msg);
         setDetailFailed((prev) => ({
           ...prev,
@@ -739,10 +757,13 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           return next;
         });
         setDetailsInFlight(false);
+        if (DEBUG_DETAILS) {
+          console.info("[ADMIN DETAILS FETCH] finished", { batch, ms: Date.now() - startedAt });
+        }
       }
     })();
 
-    return () => controller.abort();
+    return () => undefined;
   }, [detailQueue, detailsInFlight, filteredMembers]);
 
   const updateRefundStatus = async (id: string, status: "completed" | "rejected") => {
@@ -822,6 +843,83 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       </div>
     );
   }
+
+  const renderActionModal = () => {
+    if (!actionModalMember) return null;
+    const member = actionModalMember;
+    return (
+      <AlertDialog open={!!actionModalMember} onOpenChange={(open) => setActionModalMember(open ? member : null)}>
+        <AlertDialogContent className="bg-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Manage {member.name || member.email || "member"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Wallet: {formatWallet(member.primaryWallet)} · Status: {member.membershipStatus}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-3">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full justify-start border-rose-300 text-rose-700 hover:bg-rose-50 disabled:border-rose-200 disabled:text-rose-300"
+              onClick={() => {
+                setActionModalMember(null);
+                setRefundConfirmMember(member);
+                setRefundConfirmOpen(true);
+              }}
+              isLoading={!!refundProcessing[member.id]}
+              disabled={!member.highestActiveTierLock}
+            >
+              Cancel & refund
+            </Button>
+            <Button
+              size="sm"
+              variant="outlined-primary"
+              className="w-full justify-start"
+              onClick={() => {
+                setActionModalMember(null);
+                openWelcomeModal(member);
+              }}
+              isLoading={!!sendingEmail[member.id]}
+              disabled={!member.email}
+            >
+              {member.welcomeEmailSentAt ? "Customize & resend welcome" : "Send welcome"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="w-full justify-start"
+              onClick={() => {
+                setActionModalMember(null);
+                openCustomModal(member);
+              }}
+              isLoading={!!sendingEmail[member.id]}
+              disabled={!member.email}
+            >
+              Send custom
+            </Button>
+            <label className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b0b43]">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border border-[rgba(11,11,67,0.3)] accent-[var(--brand-denim)]"
+                checked={member.isAdmin}
+                onChange={(e) => toggleAdmin(member, e.target.checked)}
+                disabled={!!adminUpdating[member.id]}
+              />
+              Admin access
+            </label>
+            {adminError && <div className="text-xs text-rose-700">{adminError}</div>}
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel asChild>
+              <Button variant="ghost" onClick={() => setActionModalMember(null)}>
+                Close
+              </Button>
+            </AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  };
 
   return (
     <>
@@ -960,18 +1058,11 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                 <RefreshCcw className="h-4 w-4" aria-hidden="true" />
                 Refresh
               </Button>
-              {(hasMissingDetails || hasFailedDetails) && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full sm:w-auto text-[var(--brand-denim)]"
-                  onClick={() => {
-                    void fetchFullDetails();
-                  }}
-                  disabled={detailsInFlight}
-                >
-                  Retry details
-                </Button>
+              {detailsInFlight && (
+                <div className="flex items-center gap-2 text-sm text-[var(--brand-denim)]">
+                  <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                  Retrieving details...
+                </div>
               )}
             </div>
           </div>
@@ -1000,7 +1091,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           )}
           {hasFailedDetails && !detailError && (
             <div className="bg-amber-50/80 px-5 py-3 text-sm text-amber-900">
-              Some member details failed to load. Use “Retry details” to try again.
+              Some member details failed to load. Use “Retrieve details” to try again.
             </div>
           )}
 
@@ -1148,44 +1239,10 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="border-rose-300 text-rose-700 hover:bg-rose-50 disabled:border-rose-200 disabled:text-rose-300"
-                            onClick={() => {
-                              setRefundConfirmMember(member);
-                              setRefundConfirmOpen(true);
-                            }}
-                            isLoading={!!refundProcessing[member.id]}
-                            disabled={!member.highestActiveTierLock}
+                            onClick={() => setActionModalMember(member)}
                           >
-                            Cancel & refund
+                            Actions
                           </Button>
-                          <Button
-                            size="sm"
-                            variant="outlined-primary"
-                            onClick={() => openWelcomeModal(member)}
-                            isLoading={!!sendingEmail[member.id]}
-                            disabled={!member.email}
-                          >
-                            {member.welcomeEmailSentAt ? "Customize & resend welcome" : "Send welcome"}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openCustomModal(member)}
-                            isLoading={!!sendingEmail[member.id]}
-                            disabled={!member.email}
-                          >
-                            Send custom
-                          </Button>
-                          <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#0b0b43]">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border border-[rgba(11,11,67,0.3)] accent-[var(--brand-denim)]"
-                              checked={member.isAdmin}
-                              onChange={(e) => toggleAdmin(member, e.target.checked)}
-                              disabled={!!adminUpdating[member.id]}
-                            />
-                            Admin
-                          </label>
                         </div>
                         {adminError && <div className="mt-1 text-xs text-rose-700">{adminError}</div>}
                       </td>
@@ -1301,6 +1358,8 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {renderActionModal()}
     </>
   );
 }

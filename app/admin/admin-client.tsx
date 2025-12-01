@@ -221,7 +221,6 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     setEmailNotice(null);
     setDetailError(null);
     setDetailFailed({});
-    setDetailRequestedAt(null);
     try {
       const res = await fetch("/api/admin/members?fields=core", { cache: "no-store" });
       if (!res.ok) {

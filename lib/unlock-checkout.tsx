@@ -48,10 +48,22 @@ const ERC20_ABI = [
 const SAFE_ALLOWANCE_CAP = 2n ** 200n;
 const sharedRpc = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
 
+type EventDetails = {
+  title?: string | null;
+  date?: string | null;
+  time?: string | null;
+  location?: string | null;
+  description?: string | null;
+};
+
 type CheckoutIntent =
   | { kind: 'membership'; tierId?: string | null }
   | { kind: 'renewal'; tierId: string }
-  | { kind: 'event'; lockAddress: string };
+  | {
+      kind: 'event';
+      lockAddress: string;
+      eventDetails?: EventDetails | null;
+    };
 
 type CheckoutStatus = 'idle' | 'loading' | 'ready' | 'processing' | 'success' | 'error';
 
@@ -89,6 +101,20 @@ const ensureBaseNetwork = async (provider: any) => {
       throw error;
     }
   }
+};
+
+const extractTxHash = (tx: any): string | null => {
+  const candidates = [
+    typeof tx === 'string' ? tx : null,
+    tx?.hash,
+    tx?.transactionHash,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.startsWith('0x') && candidate.length > 10) {
+      return candidate;
+    }
+  }
+  return null;
 };
 
 const fetchPricing = async (target: CheckoutTarget): Promise<PricingInfo> => {
@@ -345,14 +371,14 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
     setTxHash(null);
   }, []);
 
-  const openEventCheckout = useCallback((lockAddress: string) => {
+  const openEventCheckout = useCallback((lockAddress: string, eventDetails?: EventDetails | null) => {
     const eventTarget = getEventCheckoutTarget(lockAddress);
     if (!eventTarget) {
       setError('Event checkout is not available for this lock.');
       setStatus('error');
       return;
     }
-    setIntent({ kind: 'event', lockAddress: eventTarget.checksumAddress });
+    setIntent({ kind: 'event', lockAddress: eventTarget.checksumAddress, eventDetails: eventDetails ?? null });
     setTarget(eventTarget);
     setPricing(null);
     setStatus('loading');
@@ -559,7 +585,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
               ? approvalTarget.toString()
               : undefined,
         } as any);
-        hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
+        hash = extractTxHash(tx);
         if (handlers.onMembershipComplete) {
           await handlers.onMembershipComplete(target);
         }
@@ -607,10 +633,10 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
               decimals: pricing.decimals,
               referrer: overrideReferrer ?? owner,
               data: overrideData,
-              recurringPayments,
-              totalApproval: explicitApproval ? explicitApproval.toString() : undefined,
-            } as any);
-            hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
+            recurringPayments,
+            totalApproval: explicitApproval ? explicitApproval.toString() : undefined,
+          } as any);
+            hash = extractTxHash(tx);
             await handlers.onMembershipComplete?.(target);
             setTxHash(hash);
             setStatus('success');
@@ -635,7 +661,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
               ? approvalTarget.toString()
               : undefined,
         } as any);
-        hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
+        hash = extractTxHash(tx);
         if (isEventTarget(target)) {
           await handlers.onEventComplete?.(target);
         } else {
@@ -659,6 +685,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
       value: tier.id,
     }));
     const allowTierSwitch = intent.kind === 'membership' && MEMBERSHIP_CHECKOUT_TARGETS.length > 1 && status !== 'success';
+    const eventDetails = intent.kind === 'event' ? intent.eventDetails ?? null : null;
     return createPortal(
       <Drawer isOpen onOpenChange={(open: boolean) => (open ? undefined : close())} title="Unlock Checkout">
         <div className="flex flex-col gap-6 p-6">
@@ -666,13 +693,20 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
             <p className="text-sm font-semibold text-[var(--brand-navy)]">
               {isMembershipTarget(target)
                 ? target.label || 'PGP Membership'
-                : 'Event Registration'}
+                : eventDetails?.title || 'Event Registration'}
             </p>
             {status !== 'success' && (
               <p className="text-xs text-[var(--muted-ink)]">
                 Base · Lock {target.checksumAddress.slice(0, 6)}…{target.checksumAddress.slice(-4)}
               </p>
             )}
+            {eventDetails ? (
+              <div className="flex flex-wrap gap-2 text-xs text-[var(--muted-ink)]">
+                {eventDetails.date ? <span>{eventDetails.date}</span> : null}
+                {eventDetails.time ? <span>• {eventDetails.time}</span> : null}
+                {eventDetails.location ? <span>• {eventDetails.location}</span> : null}
+              </div>
+            ) : null}
           </div>
 
           {allowTierSwitch && (
@@ -684,6 +718,17 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
               onChange={(value) => selectMembershipTier(String(value))}
             />
           )}
+
+          {eventDetails && (eventDetails.description || eventDetails.location || eventDetails.date || eventDetails.time) ? (
+            <div className="rounded-lg border border-[rgba(67,119,243,0.15)] bg-white/70 p-4 text-xs text-[var(--muted-ink)] shadow-[0_10px_30px_-24px_rgba(67,119,243,0.45)]">
+              {eventDetails.description ? <p className="mb-2 text-[var(--brand-navy)]">{eventDetails.description}</p> : null}
+              <div className="space-y-1">
+                {eventDetails.date ? <div>Date: {eventDetails.date}</div> : null}
+                {eventDetails.time ? <div>Time: {eventDetails.time}</div> : null}
+                {eventDetails.location ? <div className="whitespace-pre-wrap">Location: {eventDetails.location}</div> : null}
+              </div>
+            </div>
+          ) : null}
 
           {pricing ? (
             <div className="rounded-lg bg-[rgba(67,119,243,0.08)] p-4 text-sm text-[var(--brand-navy)]">

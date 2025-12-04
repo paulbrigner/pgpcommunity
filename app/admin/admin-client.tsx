@@ -843,11 +843,11 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
               isLoading={!!sendingEmail[member.id]}
               disabled={!member.email}
             >
-              {member.welcomeEmailSentAt ? "Customize & resend welcome" : "Send welcome"}
+              {member.welcomeEmailSentAt ? "Customize & resend welcome" : "Send welcome email"}
             </Button>
             <Button
               size="sm"
-              variant="ghost"
+              variant="outlined-primary"
               className="w-full justify-start"
               onClick={() => {
                 setActionModalMember(null);
@@ -856,7 +856,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
               isLoading={!!sendingEmail[member.id]}
               disabled={!member.email}
             >
-              Send custom
+              Send custom email
             </Button>
             <label className="inline-flex items-center gap-2 text-sm font-semibold text-[#0b0b43]">
               <input

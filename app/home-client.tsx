@@ -23,7 +23,8 @@ import { useUnlockCheckout } from "@/lib/unlock-checkout";
 import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
 import { snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
-import { findTierInSummary, normalizeTierId, pickHighestActiveTier, pickNextActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
+import { findTierInSummary, normalizeTierId, pickHighestActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
+import { getEventCheckoutTarget } from "@/lib/checkout-config";
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
@@ -122,6 +123,12 @@ const formatEventDisplay = (
   }
 
   return { dateLabel, timeLabel };
+};
+
+const buildNftKey = (contractAddress?: string | null, tokenId?: string | null) => {
+  const addr = typeof contractAddress === 'string' ? contractAddress.toLowerCase() : '';
+  const id = tokenId ?? 'unknown';
+  return `${addr}::${id}`;
 };
 
 const buildCalendarLinks = (
@@ -232,7 +239,6 @@ const [isPurchasing, setIsPurchasing] = useState(false);
 const [membershipSummary, setMembershipSummary] = useState<MembershipSummary | null>(initialMembershipSummary ?? null);
 const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialMembershipExpiry ?? null);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
-  const [autoRenewChecking, setAutoRenewChecking] = useState(false);
   const [autoRenewStateReady, setAutoRenewStateReady] = useState(false);
   const [creatorNfts, setCreatorNfts] = useState<Array<{
     owner: string | null;
@@ -324,7 +330,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     if (explicit) return explicit;
     return pickHighestActiveTier(membershipSummary);
   }, [membershipSummary, effectiveCurrentTierId]);
-  const nextTier = useMemo<TierMembershipSummary | null>(() => pickNextActiveTier(membershipSummary), [membershipSummary]);
 
   const normalizedSelectedTierId = useMemo(() => normalizeTierId(selectedTierId ?? null), [selectedTierId]);
   const selectedTierConfig = useMemo(() => {
@@ -360,25 +365,11 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     setAllowances(initialAllowances ?? {});
     setTokenIds(initialTokenIds ?? {});
   }, [initialAllowances, initialTokenIds]);
-  const normalizedCurrentTierId = normalizeTierId(currentTier?.tier.id ?? currentTier?.tier.address ?? null) ?? null;
-  const nextTierLabel = useMemo(() => {
-    if (!nextTier) return null;
-    if (autoRenewEnabled) return null; // current tier set to auto-renew; no post-expiry downgrade expected
-    const currentExpiry = typeof currentTier?.expiry === 'number' ? currentTier.expiry : null;
-    const nextExpiry = typeof nextTier.expiry === 'number' ? nextTier.expiry : null;
-    // Show only if the next tier expires strictly after the current tier; equal expiry means nothing remains after expiry
-    if (currentExpiry && nextExpiry && nextExpiry <= currentExpiry) return null;
-    const nextId = normalizeTierId(nextTier.tier.id ?? nextTier.tier.address ?? null);
-    if (nextId && nextId === normalizedCurrentTierId) return null;
-    return resolveTierLabel(nextTier, nextTier?.tier.id);
-  }, [nextTier, normalizedCurrentTierId, autoRenewEnabled, currentTier?.expiry]);
   const currentTierLabel = useMemo(
     () => resolveTierLabel(currentTier, effectiveCurrentTierId),
     [currentTier, effectiveCurrentTierId]
   );
-  const tierSummaryText = nextTierLabel
-    ? `Tier: ${currentTierLabel ?? 'None selected'}. Next after expiry: ${nextTierLabel}.`
-    : `Tier: ${currentTierLabel ?? 'None selected'}.`;
+  const memberLevelLabel = currentTierLabel || 'PGP';
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
     if (currentTier?.status === 'active') return currentTier;
     return null;
@@ -514,7 +505,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     }
 
     const seq = ++refreshSeq.current;
-    setAutoRenewChecking(true);
     try {
       const addresses = wallets && wallets.length
         ? wallets.map((a) => String(a).toLowerCase())
@@ -593,7 +583,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     } catch (error) {
       console.error("Membership check failed:", error);
     } finally {
-      setAutoRenewChecking(false);
     }
   }, [ready, authenticated, walletAddress, wallets, membershipExpiry, membershipSummary]);
 
@@ -626,8 +615,23 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
   }, [checkoutStatus]);
 
   const handleQuickRegister = useCallback(
-    (lockAddress: string) => {
-      if (!lockAddress) return;
+    (
+      lockAddress: string | null | undefined,
+      fallbackUrl?: string | null,
+      eventDetails?: {
+        title?: string | null;
+        date?: string | null;
+        time?: string | null;
+        location?: string | null;
+        description?: string | null;
+      } | null,
+    ) => {
+      if (!lockAddress) {
+        if (fallbackUrl) {
+          window.open(fallbackUrl, '_blank', 'noreferrer');
+        }
+        return;
+      }
       const normalized = lockAddress.trim().toLowerCase();
       const tierMatch =
         MEMBERSHIP_TIERS.find((tier) => {
@@ -641,7 +645,14 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
         openMembershipCheckout(tierMatch.checksumAddress);
         return;
       }
-      openEventCheckout(lockAddress);
+      const eventTarget = getEventCheckoutTarget(normalized);
+      if (eventTarget) {
+        openEventCheckout(eventTarget.checksumAddress, eventDetails ?? null);
+        return;
+      }
+      if (fallbackUrl) {
+        window.open(fallbackUrl, '_blank', 'noreferrer');
+      }
     },
     [openEventCheckout, openMembershipCheckout],
   );
@@ -817,10 +828,18 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
         })
       : enriched;
   }, [creatorNfts, missedNfts, showAllNfts]);
+  const missedKeySet = useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(missedNfts)) {
+      for (const entry of missedNfts) {
+        set.add(buildNftKey(entry.contractAddress, entry.tokenId ?? 'upcoming'));
+      }
+    }
+    return set;
+  }, [missedNfts]);
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active' || !renewalTierAddress) {
       setAutoRenewMonths(null);
-      setAutoRenewChecking(false);
       setAutoRenewStateReady(false);
       return;
     }
@@ -1211,7 +1230,7 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
           <div className="space-y-8">
             <section className="glass-surface p-6 text-center text-[var(--muted-ink)] md:p-8 md:text-left">
               <p>
-                Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! You’re a member.
+                Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! Thank you for being a {memberLevelLabel} member.
               </p>
             </section>
             {autoRenewMessageNode}
@@ -1235,24 +1254,11 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
                 </section>
               ) : (
                 <section className="grid gap-5 md:grid-cols-[minmax(0,1fr)]">
-                  {/* Membership Card */}
-                  <div className="glass-item space-y-2 p-5">
-                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Membership</h2>
+                  {/* News / Updates */}
+                  <div className="glass-item space-y-3 p-5 md:col-span-2">
+                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">News & Updates</h2>
                     <p className="text-sm text-[var(--muted-ink)]">
-                      {typeof membershipExpiry === 'number' && membershipExpiry > 0
-                        ? `Active until ${new Date(membershipExpiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
-                        : 'Active'}
-                    </p>
-                    <p className="text-sm text-[var(--muted-ink)]">{tierSummaryText}</p>
-                    {autoRenewChecking ? (
-                      <p className="text-sm text-[var(--muted-ink)]">Checking auto-renew allowance…</p>
-                    ) : typeof autoRenewMonths === 'number' && autoRenewMonths > 0 ? (
-                      <p className="text-sm text-[var(--muted-ink)]">
-                        Auto-renew approved for {autoRenewMonths === 1 ? '1 month' : `${autoRenewMonths} months`}.
-                      </p>
-                    ) : null}
-                    <p className="text-xs text-[var(--muted-ink)]">
-                      Your membership can renew automatically at expiration when your wallet holds enough USDC for the fee and a small amount of ETH for gas. You can enable or stop auto‑renew anytime from the Edit Profile page.
+                      Member announcements and updates will appear here.
                     </p>
                   </div>
 
@@ -1354,23 +1360,34 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
                                       <div className="text-xs text-[var(--muted-ink)] whitespace-pre-wrap">Location: {nft.location}</div>
                                     ) : null}
                                     <div className="flex flex-wrap items-center gap-2 text-xs">
-                                      <a
-                                        href={nft.registrationUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="text-[var(--brand-denim)] hover:underline"
+                                      <Button
+                                        size="sm"
+                                        variant="secondary"
+                                        className="text-xs"
+                                        onClick={() => handleQuickRegister(
+                                          (nft.quickCheckoutLock as string) || nft.contractAddress,
+                                          nft.registrationUrl,
+                                          {
+                                            title: nft.title ?? 'Event Registration',
+                                            date: nft.subtitle || null,
+                                            time: nft.startTime || null,
+                                            location: nft.location || null,
+                                            description: nft.description || null,
+                                          }
+                                        )}
+                                        disabled={!nft.contractAddress && !nft.registrationUrl}
                                       >
-                                        View event details
-                                      </a>
-                                      {nft.quickCheckoutLock ? (
-                                        <Button
-                                          size="sm"
-                                          variant="secondary"
-                                          className="text-xs"
-                                          onClick={() => handleQuickRegister(nft.quickCheckoutLock as string)}
+                                        RSVP now
+                                      </Button>
+                                      {nft.registrationUrl ? (
+                                        <a
+                                          href={nft.registrationUrl}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="text-[var(--brand-denim)] hover:underline"
                                         >
-                                          Quick Register
-                                        </Button>
+                                          View event details
+                                        </a>
                                       ) : null}
                                     </div>
                                   </div>
@@ -1517,14 +1534,19 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
                           };
                           const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
                           const tokenIdKey = nft.tokenId ?? 'upcoming';
+                          const itemKey = buildNftKey(nft.contractAddress, tokenIdKey);
+                          const isMissed = showAllNfts && missedKeySet.has(itemKey);
+                          const ringClass = isUpcomingRegistration
+                            ? 'ring-2 ring-[rgba(67,119,243,0.45)]'
+                            : isMissed
+                            ? 'ring-2 ring-[rgba(239,68,68,0.45)]'
+                            : '';
                           const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
                           const isDescriptionOpen = openDescriptionKey === descriptionKey;
                           return (
                             <div
                               key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
-                              className={`muted-card flex gap-3 p-3 ${
-                                isUpcomingRegistration ? 'ring-2 ring-[rgba(67,119,243,0.45)]' : ''
-                              } ${isOwned ? '' : 'opacity-80'}`}
+                              className={`muted-card flex gap-3 p-3 ${ringClass} ${isOwned ? '' : 'opacity-80'}`}
                             >
                               {nft.image ? (
                                 <a
@@ -1645,11 +1667,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
                     )}
                   </div>
 
-                  {/* News / Updates (placeholder) */}
-                  <div className="glass-item space-y-2 p-5 md:col-span-2">
-                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">News & Updates</h2>
-                    <p className="text-sm text-[var(--muted-ink)]">Member announcements and updates will appear here.</p>
-                  </div>
                 </section>
               )
             ) : (

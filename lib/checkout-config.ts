@@ -1,3 +1,4 @@
+import { getAddress } from 'ethers';
 import {
   BASE_NETWORK_ID,
   CHECKOUT_CONFIGS,
@@ -126,7 +127,23 @@ export function getMembershipCheckoutTarget(tierId?: string | null): CheckoutTar
 export function getEventCheckoutTarget(lockAddress: string | null | undefined): CheckoutTarget | null {
   const normalized = normalizeAddress(lockAddress);
   if (!normalized) return null;
-  return eventTargetMap.get(normalized) ?? null;
+  const existing = eventTargetMap.get(normalized);
+  if (existing) return existing;
+  const checksum = (() => {
+    try {
+      return getAddress(lockAddress as string);
+    } catch {
+      return lockAddress ?? normalized;
+    }
+  })();
+  return {
+    id: normalized,
+    type: 'event',
+    lockAddress: normalized,
+    checksumAddress: checksum,
+    network: BASE_NETWORK_ID,
+    overrides: null,
+  };
 }
 
 export function isMembershipTarget(target: CheckoutTarget | null | undefined): target is CheckoutTarget & { type: 'membership' } {

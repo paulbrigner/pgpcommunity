@@ -7,10 +7,6 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { BrowserProvider, Contract } from "ethers";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { DateTime } from "luxon";
-import { createEvent } from "ics";
 import {
   MEMBERSHIP_TIERS,
   BASE_NETWORK_ID,
@@ -24,7 +20,9 @@ import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-
 import { snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
 import { findTierInSummary, normalizeTierId, pickHighestActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
-import { getEventCheckoutTarget } from "@/lib/checkout-config";
+import { useEventRegistration } from "@/lib/hooks/use-event-registration";
+import { useMemberNfts } from "@/lib/hooks/use-member-nfts";
+import { AutoRenewPendingPanel, AutoRenewPromptPanel, ActiveMemberPanel } from "@/components/home/MembershipPanels";
 import { Button } from "@/components/ui/button";
 import { signInWithSiwe } from "@/lib/siwe/client";
 import { BadgeCheck, BellRing, HeartHandshake, ShieldCheck, TicketCheck, Wallet, Key as KeyIcon } from "lucide-react";
@@ -48,20 +46,6 @@ type MembershipSnapshot = {
 
 let lastKnownMembership: MembershipSnapshot | null = null;
 
-const stripMarkdown = (value: string): string => {
-  return value
-    .replace(/```[\s\S]*?```/g, '')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
-    .replace(/[*_~]{1,3}([^*_~]+)[*_~]{1,3}/g, '$1')
-    .replace(/#{1,6}\s*(.*)/g, '$1')
-    .replace(/^>\s?/gm, '')
-    .replace(/^-\s+/gm, '')
-    .replace(/\r?\n\r?\n/g, '\n')
-    .trim();
-};
-
 const MAX_AUTO_RENEW_MONTHS = 12;
 const SAFE_ALLOWANCE_CAP = 2n ** 200n;
 
@@ -81,125 +65,6 @@ const formatAddressShort = (value: string | null | undefined): string => {
   const normalized = value.toLowerCase();
   if (normalized.length <= 10) return normalized;
   return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`;
-};
-
-const formatEventDisplay = (
-  date?: string | null,
-  startTime?: string | null,
-  endTime?: string | null,
-  timezone?: string | null
-) => {
-  if (!date) return { dateLabel: null, timeLabel: null };
-  const zone = timezone || 'UTC';
-  const dateObj = DateTime.fromISO(date, { zone });
-  const dateLabel = dateObj.isValid
-    ? dateObj.toLocaleString(DateTime.DATE_MED_WITH_WEEKDAY)
-    : date;
-
-  let timeLabel: string | null = null;
-  if (startTime) {
-    const startDateTime = DateTime.fromISO(`${date}T${startTime}`, { zone });
-    const startLabel = startDateTime.isValid
-      ? startDateTime.toLocaleString(DateTime.TIME_SIMPLE)
-      : startTime;
-    if (endTime) {
-      const endDateTime = DateTime.fromISO(`${date}T${endTime}`, { zone });
-      const endLabel = endDateTime.isValid
-        ? endDateTime.toLocaleString(DateTime.TIME_SIMPLE)
-        : endTime;
-      timeLabel = `${startLabel} - ${endLabel}`;
-    } else {
-      timeLabel = startLabel;
-    }
-    if (timeLabel && timezone) {
-      timeLabel = `${timeLabel} (${timezone})`;
-    }
-  } else if (endTime) {
-    const endDateTime = DateTime.fromISO(`${date}T${endTime}`, { zone });
-    const endLabel = endDateTime.isValid
-      ? endDateTime.toLocaleString(DateTime.TIME_SIMPLE)
-      : endTime;
-    timeLabel = `Ends at ${endLabel}${timezone ? ` (${timezone})` : ''}`;
-  }
-
-  return { dateLabel, timeLabel };
-};
-
-const buildNftKey = (contractAddress?: string | null, tokenId?: string | null) => {
-  const addr = typeof contractAddress === 'string' ? contractAddress.toLowerCase() : '';
-  const id = tokenId ?? 'unknown';
-  return `${addr}::${id}`;
-};
-
-const buildCalendarLinks = (
-  title: string,
-  date?: string | null,
-  startTime?: string | null,
-  endTime?: string | null,
-  timezone?: string | null,
-  location?: string | null,
-  description?: string | null
-) => {
-  if (!date) return { google: null as string | null, ics: null as string | null };
-
-  const zone = timezone || 'UTC';
-  const start = startTime
-    ? DateTime.fromISO(`${date}T${startTime}`, { zone })
-    : DateTime.fromISO(date, { zone }).startOf('day');
-  if (!start.isValid) {
-    return { google: null, ics: null };
-  }
-
-  const end = endTime
-    ? DateTime.fromISO(`${date}T${endTime}`, { zone })
-    : start.plus({ hours: startTime ? 1 : 24 });
-
-  const googleParams = new URLSearchParams({
-    action: 'TEMPLATE',
-    text: title,
-    details: description || '',
-    location: location || '',
-  });
-
-  const startGoogle = start.toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'");
-  const endGoogle = end.isValid ? end.toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'") : start.plus({ hours: 1 }).toUTC().toFormat("yyyyMMdd'T'HHmmss'Z'");
-  googleParams.set('dates', `${startGoogle}/${endGoogle}`);
-
-  let ics: string | null = null;
-  const eventConfig: any = {
-    title,
-    start: [start.year, start.month, start.day, start.hour, start.minute],
-    location: location || undefined,
-    description: description || undefined,
-    productId: 'pgpforcrypto.org',
-  };
-
-  if (end.isValid) {
-    eventConfig.end = [end.year, end.month, end.day, end.hour, end.minute];
-  }
-
-  const { error, value } = createEvent(eventConfig);
-  if (!error && value) {
-    ics = value;
-  }
-
-  return {
-    google: `https://calendar.google.com/calendar/render?${googleParams.toString()}`,
-    ics,
-  };
-};
-
-const downloadIcs = (ics: string, title: string) => {
-  const blob = new Blob([ics], { type: 'text/calendar' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  const safeTitle = title.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase();
-  link.href = url;
-  link.download = `${safeTitle || 'event'}.ics`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
 };
 
 export default function HomeClient({
@@ -240,60 +105,6 @@ const [membershipSummary, setMembershipSummary] = useState<MembershipSummary | n
 const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialMembershipExpiry ?? null);
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [autoRenewStateReady, setAutoRenewStateReady] = useState(false);
-  const [creatorNfts, setCreatorNfts] = useState<Array<{
-    owner: string | null;
-    contractAddress: string;
-    tokenId: string;
-    title: string;
-    description: string | null;
-    subtitle?: string | null;
-    eventDate?: string | null;
-    startTime?: string | null;
-    endTime?: string | null;
-    timezone?: string | null;
-    location?: string | null;
-    image: string | null;
-    collectionName: string | null;
-    tokenType: string | null;
-    videoUrl?: string | null;
-    sortKey?: number;
-  }> | null>(null);
-  const [creatorNftsLoading, setCreatorNftsLoading] = useState(false);
-  const [creatorNftsError, setCreatorNftsError] = useState<string | null>(null);
-  const [openDescriptionKey, setOpenDescriptionKey] = useState<string | null>(null);
-  const [missedNfts, setMissedNfts] = useState<Array<{
-    owner: string | null;
-    contractAddress: string;
-    tokenId: string;
-    title: string;
-    description: string | null;
-    subtitle?: string | null;
-    eventDate?: string | null;
-    startTime?: string | null;
-    endTime?: string | null;
-    timezone?: string | null;
-    location?: string | null;
-    image: string | null;
-    collectionName: string | null;
-    tokenType: string | null;
-    videoUrl?: string | null;
-    sortKey?: number;
-  }> | null>(null);
-  const [upcomingNfts, setUpcomingNfts] = useState<Array<{
-    contractAddress: string;
-    title: string;
-    description: string | null;
-    subtitle?: string | null;
-    eventDate?: string | null;
-    startTime?: string | null;
-    endTime?: string | null;
-    timezone?: string | null;
-    location?: string | null;
-    image: string | null;
-    registrationUrl: string;
-    quickCheckoutLock: string | null;
-    sortKey?: number;
-  }> | null>(null);
   const [showAllNfts, setShowAllNfts] = useState(false);
   const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
   const refreshSeq = useRef(0);
@@ -301,8 +112,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
   const membershipResolvedRef = useRef(false);
   const previousSummaryRef = useRef<MembershipSummary | null>(initialMembershipSummary ?? null);
   const initialMembershipAppliedRef = useRef(false);
-  const nftFetchSeq = useRef(0);
-  const lastFetchedAddresses = useRef<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [autoRenewPromptDismissed, setAutoRenewPromptDismissed] = useState(false);
   const [autoRenewProcessing, setAutoRenewProcessing] = useState(false);
@@ -424,53 +233,6 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     }
   }, [autoRenewEnabled]);
 
-  const loadCreatorNfts = useCallback(
-    async (key: string, force = false) => {
-      if (!key) return;
-      if (!force && lastFetchedAddresses.current === key) {
-        return;
-      }
-      const seq = ++nftFetchSeq.current;
-      setCreatorNftsLoading(true);
-      setCreatorNftsError(null);
-      try {
-        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(key)}`, { cache: 'no-store' });
-        const data = await res.json();
-        if (nftFetchSeq.current !== seq) return;
-        setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
-        setMissedNfts(Array.isArray(data?.missed) ? data.missed : []);
-        setUpcomingNfts(
-          Array.isArray(data?.upcoming)
-            ? data.upcoming.map((nft: any) => ({
-                contractAddress: String(nft.contractAddress),
-                title: String(nft.title ?? ''),
-                description: nft.description ?? null,
-                subtitle: nft.subtitle ?? null,
-                startTime: nft.startTime ?? null,
-                endTime: nft.endTime ?? null,
-                timezone: nft.timezone ?? null,
-                location: nft.location ?? null,
-                image: nft.image ?? null,
-                registrationUrl: String(nft.registrationUrl ?? ''),
-                quickCheckoutLock: typeof nft.quickCheckoutLock === 'string' ? nft.quickCheckoutLock : null,
-              }))
-            : []
-        );
-        setCreatorNftsError(typeof data?.error === 'string' && data.error.length ? data.error : null);
-        lastFetchedAddresses.current = key;
-      } catch (err: any) {
-        if (nftFetchSeq.current !== seq) return;
-        setCreatorNftsError(err?.message || 'Failed to load NFTs');
-        setCreatorNfts([]);
-        lastFetchedAddresses.current = key;
-      } finally {
-        if (nftFetchSeq.current === seq) {
-          setCreatorNftsLoading(false);
-        }
-      }
-    },
-    []
-  );
 
   // Ensure wallet is on Base before any post‑purchase approvals
   const ensureBaseNetwork = useCallback(async (eth: any) => {
@@ -602,7 +364,7 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     onEventComplete: async () => {
       if (!addressesKey) return;
       try {
-        await loadCreatorNfts(addressesKey, true);
+        await refresh(true);
       } catch (err) {
         console.error('Event refresh after checkout failed:', err);
       }
@@ -614,47 +376,10 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     setIsPurchasing(busy);
   }, [checkoutStatus]);
 
-  const handleQuickRegister = useCallback(
-    (
-      lockAddress: string | null | undefined,
-      fallbackUrl?: string | null,
-      eventDetails?: {
-        title?: string | null;
-        date?: string | null;
-        time?: string | null;
-        location?: string | null;
-        description?: string | null;
-      } | null,
-    ) => {
-      if (!lockAddress) {
-        if (fallbackUrl) {
-          window.open(fallbackUrl, '_blank', 'noreferrer');
-        }
-        return;
-      }
-      const normalized = lockAddress.trim().toLowerCase();
-      const tierMatch =
-        MEMBERSHIP_TIERS.find((tier) => {
-          const keys = [tier.id, tier.address, tier.checksumAddress]
-            .map((value) => (value ? String(value).toLowerCase() : ""))
-            .filter(Boolean);
-          return keys.includes(normalized);
-        }) ?? null;
-      if (tierMatch) {
-        setSelectedTierId(normalizeTierId(tierMatch.id) ?? tierMatch.checksumAddress ?? tierMatch.address);
-        openMembershipCheckout(tierMatch.checksumAddress);
-        return;
-      }
-      const eventTarget = getEventCheckoutTarget(normalized);
-      if (eventTarget) {
-        openEventCheckout(eventTarget.checksumAddress, eventDetails ?? null);
-        return;
-      }
-      if (fallbackUrl) {
-        window.open(fallbackUrl, '_blank', 'noreferrer');
-      }
-    },
-    [openEventCheckout, openMembershipCheckout],
+  const handleQuickRegister = useEventRegistration(
+    (value) => setSelectedTierId(value),
+    openMembershipCheckout,
+    openEventCheckout,
   );
 
   useEffect(() => {
@@ -782,61 +507,16 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
     membershipSummary,
   ]);
 
-  const displayNfts = useMemo(() => {
-    const owned = Array.isArray(creatorNfts) ? creatorNfts : [];
-    const missedList = Array.isArray(missedNfts) ? missedNfts : [];
-    const includeMissed = showAllNfts && missedList.length > 0;
-    const source = includeMissed ? [...owned, ...missedList] : [...owned];
-    if (!source.length) return [] as typeof owned;
-
-    const enriched = source.map((nft) => {
-      const sortValue = (() => {
-        if (typeof nft.sortKey === 'number' && Number.isFinite(nft.sortKey)) {
-          return nft.sortKey;
-        }
-        if (nft.startTime && nft.subtitle) {
-          const parsed = Date.parse(`${nft.subtitle} ${nft.startTime}`);
-          if (Number.isFinite(parsed)) return parsed;
-        }
-        if (nft.subtitle) {
-          const parsed = Date.parse(nft.subtitle);
-          if (Number.isFinite(parsed)) return parsed;
-        }
-        if (nft.tokenId) {
-          const parsed = Number(nft.tokenId);
-          if (Number.isFinite(parsed)) return parsed;
-        }
-        return 0;
-      })();
-      return { ...nft, sortKey: sortValue };
-    });
-
-    return includeMissed
-      ? enriched.sort((a, b) => {
-          if ((a.sortKey ?? 0) !== (b.sortKey ?? 0)) {
-            return (b.sortKey ?? 0) - (a.sortKey ?? 0);
-          }
-          const titleA = (a.title ?? '').toLowerCase();
-          const titleB = (b.title ?? '').toLowerCase();
-          if (titleA > titleB) return -1;
-          if (titleA < titleB) return 1;
-          const tokenA = (a.tokenId ?? '').toString().toLowerCase();
-          const tokenB = (b.tokenId ?? '').toString().toLowerCase();
-          if (tokenA > tokenB) return -1;
-          if (tokenA < tokenB) return 1;
-          return 0;
-        })
-      : enriched;
-  }, [creatorNfts, missedNfts, showAllNfts]);
-  const missedKeySet = useMemo(() => {
-    const set = new Set<string>();
-    if (Array.isArray(missedNfts)) {
-      for (const entry of missedNfts) {
-        set.add(buildNftKey(entry.contractAddress, entry.tokenId ?? 'upcoming'));
-      }
-    }
-    return set;
-  }, [missedNfts]);
+  const {
+    creatorNfts,
+    missedNfts,
+    upcomingNfts,
+    creatorNftsLoading,
+    creatorNftsError,
+    displayNfts,
+    missedKeySet,
+    refresh,
+  } = useMemberNfts(addressesKey, authenticated && walletLinked && membershipStatus === 'active', showAllNfts);
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active' || !renewalTierAddress) {
       setAutoRenewMonths(null);
@@ -878,16 +558,8 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active') return;
     if (!addressesKey) return;
-    loadCreatorNfts(addressesKey);
-  }, [authenticated, walletLinked, membershipStatus, addressesKey, loadCreatorNfts]);
-
-  useEffect(() => {
-    if (authenticated && walletLinked && membershipStatus === 'active') return;
-    setCreatorNfts(null);
-    setCreatorNftsLoading(false);
-    setCreatorNftsError(null);
-    lastFetchedAddresses.current = null;
-  }, [authenticated, walletLinked, membershipStatus]);
+    refresh();
+  }, [authenticated, walletLinked, membershipStatus, addressesKey, refresh]);
 
   useEffect(() => {
     if (!autoRenewReady) return;
@@ -1201,488 +873,43 @@ const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialM
         )
       ) : membershipStatus === "active" ? (
         autoRenewPending ? (
-          <div className="glass-surface space-y-3 p-6 text-center text-[var(--muted-ink)] md:p-8">
-            <h2 className="text-xl font-semibold text-[var(--brand-navy)]">Just a moment…</h2>
-            <p className="text-sm">
-              Confirming your membership and renewal options. This should only take a second.
-            </p>
-          </div>
+          <AutoRenewPendingPanel />
         ) : needsAutoRenewStep ? (
-          <div className="glass-surface space-y-6 p-6 md:p-8">
-            <div className="text-center text-[var(--muted-ink)]">
-              Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! Your membership is active—finish setup by enabling auto-renew or skip it for now.
-            </div>
-            <OnboardingChecklist
-              walletLinked={walletLinked}
-              profileComplete={!!(firstName && lastName)}
-              membershipStatus={membershipStatus as 'active' | 'expired' | 'none'}
-              autoRenewReady={autoRenewReady}
-              autoRenewEnabled={autoRenewEnabled}
-              autoRenewProcessing={autoRenewProcessing}
-              autoRenewDismissed={autoRenewPromptDismissed}
-              onEnableAutoRenew={enableAutoRenew}
-              onSkipAutoRenew={handleSkipAutoRenew}
-            />
-            {autoRenewMessageNode}
-          </div>
+          <AutoRenewPromptPanel
+            greetingName={firstName || (session?.user as any)?.email || walletAddress || "member"}
+            walletLinked={walletLinked}
+            profileComplete={!!(firstName && lastName)}
+            membershipStatus={membershipStatus as 'active' | 'expired' | 'none'}
+            autoRenewReady={autoRenewReady}
+            autoRenewEnabled={autoRenewEnabled}
+            autoRenewProcessing={autoRenewProcessing}
+            autoRenewDismissed={autoRenewPromptDismissed}
+            onEnableAutoRenew={enableAutoRenew}
+            onSkipAutoRenew={handleSkipAutoRenew}
+            autoRenewMessageNode={autoRenewMessageNode}
+          />
         ) : (
-          // Scenario 1: linked wallet has a valid membership -> authorized
-          <div className="space-y-8">
-            <section className="glass-surface p-6 text-center text-[var(--muted-ink)] md:p-8 md:text-left">
-              <p>
-                Hello {firstName || (session?.user as any)?.email || walletAddress || "member"}! Thank you for being a {memberLevelLabel} member.
-              </p>
-            </section>
-            {autoRenewMessageNode}
-            {walletLinked && profileComplete ? (
-              viewerUrl ? (
-                <section className="glass-surface p-0">
-                  <div className="muted-card overflow-hidden">
-                    <div className="flex items-center justify-between gap-2 border-b border-[rgba(193,197,226,0.35)] bg-white/80 px-5 py-3">
-                      <div className="truncate text-sm font-medium text-[var(--muted-ink)]">Member Content Viewer</div>
-                      <Button size="sm" variant="outline" onClick={() => setViewerUrl(null)}>
-                        Close
-                      </Button>
-                    </div>
-                    <iframe
-                      title="Member content"
-                      src={viewerUrl}
-                      className="h-[70vh] w-full"
-                      sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-                    />
-                  </div>
-                </section>
-              ) : (
-                <section className="grid gap-5 md:grid-cols-[minmax(0,1fr)]">
-                  {/* News / Updates */}
-                  <div className="glass-item space-y-3 p-5 md:col-span-2">
-                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">News & Updates</h2>
-                    <p className="text-sm text-[var(--muted-ink)]">
-                      Member announcements and updates will appear here.
-                    </p>
-                  </div>
-
-                  {/* Member Tools (temporarily hidden)
-                  <div className="glass-item space-y-3 p-5">
-                    <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Member Tools</h2>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        asChild
-                        className="shadow-[0_12px_24px_-18px_rgba(67,119,243,0.5)]"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          const url = await getContentUrl("index.html");
-                          setViewerUrl(url);
-                        }}
-                      >
-                        <a href="#">View Home</a>
-                      </Button>
-                      <Button
-                        asChild
-                        className="shadow-[0_12px_24px_-18px_rgba(67,119,243,0.5)]"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          const url = await getContentUrl("guide.html");
-                          setViewerUrl(url);
-                        }}
-                      >
-                        <a href="#">View Guide</a>
-                      </Button>
-                      <Button
-                        asChild
-                        className="shadow-[0_12px_24px_-18px_rgba(67,119,243,0.5)]"
-                        onClick={async (e) => {
-                          e.preventDefault();
-                          const url = await getContentUrl("faq.html");
-                          setViewerUrl(url);
-                        }}
-                      >
-                        <a href="#">View FAQ</a>
-                      </Button>
-                    </div>
-                    <p className="text-xs text-[var(--muted-ink)]">
-                      Experimental preview: these links stream HTML content that normally lives behind our member gate. We only fetch the page when you are logged in, the server-side API confirms your session and active membership, and it returns a short-lived, path-scoped CloudFront URL. That signed URL expires quickly, so the file stays private to authenticated members.
-                    </p>
-                  </div>
-                  */}
-
-                  {upcomingNfts && upcomingNfts.length > 0 ? (
-                    <div className="glass-item space-y-4 p-5 md:col-span-2">
-                      <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
-                        <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Upcoming PGP Meetings</h2>
-                        <label className="flex items-center gap-2 text-xs">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={showUpcomingNfts}
-                            onChange={(e) => setShowUpcomingNfts(e.target.checked)}
-                          />
-                          Show upcoming events
-                        </label>
-                      </div>
-                      {showUpcomingNfts ? (
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          {[...upcomingNfts]
-                            .sort((a, b) => {
-                              const titleA = a.title?.toLowerCase() ?? '';
-                              const titleB = b.title?.toLowerCase() ?? '';
-                              if (titleA > titleB) return -1;
-                              if (titleA < titleB) return 1;
-                              return 0;
-                            })
-                            .map((nft) => {
-                              return (
-                                <div
-                                  key={`upcoming-${nft.contractAddress}`}
-                                  className="muted-card flex gap-3 p-3"
-                                >
-                                  {nft.image ? (
-                                    <div className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-white/40">
-                                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                                      <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
-                                    </div>
-                                  ) : (
-                                    <div className="h-20 w-20 shrink-0 rounded-md bg-white/50" />
-                                  )}
-                                  <div className="min-w-0 space-y-1">
-                                    <div className="font-medium truncate text-[var(--brand-navy)]">{nft.title}</div>
-                                    {nft.subtitle ? (
-                                      <div className="text-xs text-[var(--muted-ink)]">Date: {nft.subtitle}</div>
-                                    ) : null}
-                                    {nft.startTime || nft.endTime ? (
-                                      <div className="text-xs text-[var(--muted-ink)]">
-                                        Time: {nft.startTime ?? 'TBD'}
-                                        {nft.endTime ? ` - ${nft.endTime}` : ''}
-                                        {nft.timezone ? ` (${nft.timezone})` : ''}
-                                      </div>
-                                    ) : null}
-                                    {nft.location ? (
-                                      <div className="text-xs text-[var(--muted-ink)] whitespace-pre-wrap">Location: {nft.location}</div>
-                                    ) : null}
-                                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                                      <Button
-                                        size="sm"
-                                        variant="secondary"
-                                        className="text-xs"
-                                        onClick={() => handleQuickRegister(
-                                          (nft.quickCheckoutLock as string) || nft.contractAddress,
-                                          nft.registrationUrl,
-                                          {
-                                            title: nft.title ?? 'Event Registration',
-                                            date: nft.subtitle || null,
-                                            time: nft.startTime || null,
-                                            location: nft.location || null,
-                                            description: nft.description || null,
-                                          }
-                                        )}
-                                        disabled={!nft.contractAddress && !nft.registrationUrl}
-                                      >
-                                        RSVP now
-                                      </Button>
-                                      {nft.registrationUrl ? (
-                                        <a
-                                          href={nft.registrationUrl}
-                                          target="_blank"
-                                          rel="noreferrer"
-                                          className="text-[var(--brand-denim)] hover:underline"
-                                        >
-                                          View event details
-                                        </a>
-                                      ) : null}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-[var(--muted-ink)]">Turn on to see upcoming meetings available for registration.</p>
-                      )}
-                    </div>
-                  ) : null}
-
-                  {/* NFT/POAPs (placeholder) */}
-                  <div className="glass-item space-y-4 p-5 md:col-span-2">
-                    <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
-                      <h2 className="text-lg font-semibold text-[var(--brand-navy)]">
-                        {showAllNfts ? 'All PGP NFTs' : 'Your PGP NFT Collection'}
-                      </h2>
-                      {missedNfts && missedNfts.length > 0 ? (
-                        <label className="flex items-center gap-1 text-xs">
-                          <input
-                            type="checkbox"
-                            className="h-4 w-4"
-                            checked={showAllNfts}
-                            onChange={(e) => setShowAllNfts(e.target.checked)}
-                          />
-                          Show meetings you missed
-                        </label>
-                      ) : null}
-                    </div>
-                    {creatorNftsLoading ? (
-                      <p className="text-sm text-[var(--muted-ink)]">Loading your collection…</p>
-                    ) : creatorNftsError ? (
-                      <p className="text-sm text-red-600 dark:text-red-400">{creatorNftsError}</p>
-                    ) : displayNfts.length > 0 ? (
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        {displayNfts.map((nft) => {
-                          const displayId = nft.tokenId?.startsWith('0x')
-                            ? (() => {
-                                try {
-                                  return BigInt(nft.tokenId).toString();
-                                } catch {
-                                  return nft.tokenId;
-                                }
-                              })()
-                            : nft.tokenId ?? '';
-                          const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
-                          const explorerUrl = nft.tokenId
-                            ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
-                            : `${explorerBase}/address/${nft.contractAddress}`;
-                          const isOwned = Array.isArray(creatorNfts)
-                            && creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
-                          const eventStart = (() => {
-                            if (!nft.eventDate) return null;
-                            const zone = nft.timezone || 'UTC';
-                            const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
-                            if (rawDate.isValid) {
-                              if (nft.startTime) {
-                                const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
-                                if (combined.isValid) return combined;
-                              }
-                              if (String(nft.eventDate).includes('T')) {
-                                return rawDate;
-                              }
-                              return rawDate.endOf('day');
-                            }
-                            if (nft.startTime) {
-                              const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
-                              if (fallback.isValid) return fallback;
-                            }
-                            return null;
-                          })();
-                          const futureTimeMs = (() => {
-                            if (eventStart) return eventStart.toUTC().toMillis();
-                            const dateParsed = nft.eventDate ? Date.parse(String(nft.eventDate)) : NaN;
-                            if (Number.isFinite(dateParsed)) return dateParsed;
-                            const subtitleParsed = nft.subtitle ? Date.parse(String(nft.subtitle)) : NaN;
-                            if (Number.isFinite(subtitleParsed)) return subtitleParsed;
-                            return null;
-                          })();
-                          const isFutureMeeting = typeof futureTimeMs === 'number' && futureTimeMs > Date.now();
-                          const isUpcomingRegistration = isFutureMeeting && isOwned;
-                          const eventLabels = formatEventDisplay(
-                            nft.eventDate,
-                            nft.startTime,
-                            nft.endTime,
-                            nft.timezone
-                          );
-                          const showEventDetails = isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
-                          const calendarLinks = showEventDetails
-                            ? buildCalendarLinks(
-                                nft.title ?? 'PGP Event',
-                                nft.eventDate,
-                                nft.startTime,
-                                nft.endTime,
-                                nft.timezone,
-                                nft.location,
-                                nft.description ?? null
-                              )
-                            : { google: null, ics: null };
-                          const subtitle = showEventDetails
-                            ? null
-                            : (() => {
-                                const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
-                                if (!text) return null;
-                                const normalizedTitle = nft.title?.trim().toLowerCase();
-                                const normalizedText = text.toLowerCase();
-                                if (normalizedTitle && normalizedTitle === normalizedText) return null;
-                                if (text.length > 80) return null;
-                                return text;
-                              })();
-                          const shortenedDescription = showEventDetails
-                            ? null
-                            : (() => {
-                                const source = (() => {
-                                  const desc = nft.description?.trim();
-                                  if (desc && desc.length) return desc;
-                                  const sub = nft.subtitle?.trim();
-                                  if (sub && sub.length) return sub;
-                                  const collection = nft.collectionName?.trim();
-                                  if (collection && collection.length) return collection;
-                                  return '';
-                                })();
-                                if (!source) return null;
-                                const plain = stripMarkdown(source);
-                                if (!plain) return null;
-                                const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
-                                const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
-                                  // Avoid wrapping existing markdown links
-                                  const before = str.slice(0, offset + prefix.length);
-                                  if (/\[[^\]]*$/.test(before)) return match;
-                                  return `${prefix}[${url}](${url})`;
-                                });
-                                return {
-                                  preview,
-                                  fullMarkdown: enrichedMarkdown,
-                                } as const;
-                              })();
-                          const handleDownloadIcs = () => {
-                            if (calendarLinks.ics) {
-                              downloadIcs(calendarLinks.ics, nft.title || 'PGP Event');
-                            }
-                          };
-                          const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
-                          const tokenIdKey = nft.tokenId ?? 'upcoming';
-                          const itemKey = buildNftKey(nft.contractAddress, tokenIdKey);
-                          const isMissed = showAllNfts && missedKeySet.has(itemKey);
-                          const ringClass = isUpcomingRegistration
-                            ? 'ring-2 ring-[rgba(67,119,243,0.45)]'
-                            : isMissed
-                            ? 'ring-2 ring-[rgba(239,68,68,0.45)]'
-                            : '';
-                          const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
-                          const isDescriptionOpen = openDescriptionKey === descriptionKey;
-                          return (
-                            <div
-                              key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
-                              className={`muted-card flex gap-3 p-3 ${ringClass} ${isOwned ? '' : 'opacity-80'}`}
-                            >
-                              {nft.image ? (
-                                <a
-                                  href={explorerUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="h-20 w-20 shrink-0 overflow-hidden rounded-md bg-muted"
-                                >
-                                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                                  <img src={nft.image} alt={nft.title} className="h-full w-full object-cover" />
-                                </a>
-                              ) : (
-                                <a
-                                  href={explorerUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="h-20 w-20 shrink-0 rounded-md bg-muted"
-                                />
-                              )}
-                              <div className="min-w-0 space-y-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="max-w-full truncate font-medium text-[var(--brand-navy)]">{nft.title}</div>
-                                  {isUpcomingRegistration ? (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-100">
-                                      <BadgeCheck className="h-3 w-3" /> You&apos;re Registered!
-                                    </span>
-                                  ) : null}
-                                </div>
-                                {subtitle ? (
-                                  <div className="truncate text-xs text-[var(--muted-ink)]">{subtitle}</div>
-                                ) : null}
-                                {displayId ? (
-                                  <div className="truncate text-xs text-[var(--muted-ink)]">Token #{displayId}</div>
-                                ) : null}
-                                {showEventDetails ? (
-                                  <div className="space-y-1 text-xs text-[var(--muted-ink)]">
-                                    {eventLabels.dateLabel ? <div>Date: {eventLabels.dateLabel}</div> : null}
-                                    {eventLabels.timeLabel ? <div>Time: {eventLabels.timeLabel}</div> : null}
-                                    {nft.location ? (
-                                      <div className="whitespace-pre-wrap">Location: {nft.location}</div>
-                                    ) : null}
-                                    {(calendarLinks.google || calendarLinks.ics) ? (
-                                      <div className="flex flex-wrap items-center gap-2">
-                                    {calendarLinks.google ? (
-                                          <Button asChild size="sm" variant="secondary">
-                                            <a
-                                              href={calendarLinks.google}
-                                              target="_blank"
-                                              rel="noreferrer"
-                                            >
-                                              Add to Google Calendar
-                                            </a>
-                                          </Button>
-                                        ) : null}
-                                        {calendarLinks.ics ? (
-                                          <Button
-                                            type="button"
-                                            size="sm"
-                                            variant="secondary"
-                                            onClick={handleDownloadIcs}
-                                          >
-                                            Download .ics
-                                          </Button>
-                                        ) : null}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                                {shortenedDescription ? (
-                                  <div className="text-xs text-[var(--muted-ink)]">
-                                    {isDescriptionOpen ? (
-                                      <div className="space-y-2">
-                                        <div className="prose prose-sm dark:prose-invert max-w-none">
-                                          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                                            {shortenedDescription.fullMarkdown}
-                                          </ReactMarkdown>
-                                        </div>
-                                        <button
-                                          type="button"
-                                          className="text-xs text-[var(--brand-denim)] hover:underline focus-visible:outline-none"
-                                          onClick={() => setOpenDescriptionKey(null)}
-                                        >
-                                          Hide description
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        className="text-left text-xs text-[var(--brand-denim)] hover:underline focus-visible:outline-none"
-                                        onClick={() => setOpenDescriptionKey(descriptionKey)}
-                                      >
-                                        {shortenedDescription.preview}
-                                      </button>
-                                    )}
-                                  </div>
-                                ) : null}
-                                {nft.videoUrl ? (
-                                  <div>
-                                    <a
-                                      href={nft.videoUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="text-xs text-[var(--brand-denim)] hover:underline"
-                                    >
-                                      Watch Video
-                                    </a>
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          );
-                        })}
-              </div>
-                    ) : (
-                      <p className="text-sm text-[var(--muted-ink)]">
-                        No creator NFTs or POAPs detected yet. Join community events to start collecting!
-                      </p>
-                    )}
-                  </div>
-
-                </section>
-              )
-            ) : (
-              <OnboardingChecklist
-                walletLinked={walletLinked}
-                profileComplete={profileComplete}
-                membershipStatus="active"
-                autoRenewReady={autoRenewReady}
-                autoRenewEnabled={autoRenewEnabled}
-                autoRenewProcessing={autoRenewProcessing}
-                autoRenewDismissed={autoRenewPromptDismissed}
-                onEnableAutoRenew={enableAutoRenew}
-                onSkipAutoRenew={handleSkipAutoRenew}
-              />
-            )}
-          </div>
+          <ActiveMemberPanel
+            greetingName={firstName || (session?.user as any)?.email || walletAddress || "member"}
+            memberLevelLabel={memberLevelLabel}
+            autoRenewMessageNode={autoRenewMessageNode}
+            walletLinked={walletLinked}
+            profileComplete={profileComplete}
+            viewerUrl={viewerUrl}
+            onCloseViewer={() => setViewerUrl(null)}
+            upcomingNfts={upcomingNfts}
+            showUpcomingNfts={showUpcomingNfts}
+            onToggleUpcoming={setShowUpcomingNfts}
+            onRsvp={handleQuickRegister}
+            displayNfts={displayNfts}
+            showAllNfts={showAllNfts}
+            onToggleShowAll={setShowAllNfts}
+            missedNfts={missedNfts}
+            missedKeySet={missedKeySet}
+            creatorNftsLoading={creatorNftsLoading}
+            creatorNftsError={creatorNftsError}
+            creatorNfts={creatorNfts}
+          />
         )
       ) : !walletLinked ? (
         // Authenticated but wallet not linked (after hydration)

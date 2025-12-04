@@ -2,7 +2,7 @@
 
 This document outlines the remaining refactors to make the home page easier to understand, test, and evolve.
 
-## 1) Extract membership state into a hook (`useMembership`)
+## 1) Extract membership state into a hook (`useMembership`) — completed
 - Scope: status/expiry, summary/tiers, allowances, tokenIds, auto-renew readiness, selected tier, refresh sequencing, last-known safeguards.
 - Inputs: `session` (wallets/addresses), initial server props (summary/status/expiry/allowances/tokenIds), `ready/authenticated`.
 - Outputs:
@@ -14,21 +14,15 @@ This document outlines the remaining refactors to make the home page easier to u
 - Behavior: preserve last-known active protection, keep 5-min client cache (optional via SWR cache), refresh after checkout.
 - Placement: `lib/hooks/use-membership.ts`.
 - Wiring: Replace membership-specific state/refs in `home-client.tsx` with the hook; pass hook outputs into existing panels.
+  - Status: Implemented in `lib/hooks/use-membership.ts`; `home-client.tsx` now consumes it and legacy refs/cache were removed.
 
-## 2) Introduce query caching for membership/NFTs
-Use React Query with keys `["membership", addressesKey]` and `["nfts", addressesKey, includeMissed]`. Set up a QueryClient and wrap the app with the provider. Enable retries/backoff and set reasonable `staleTime`/`cacheTime`. Trigger refetches after checkout (`onMembershipComplete/onEventComplete`), on address changes, and when toggling includeMissed. Expose mutations for membership/NFT refresh as needed.
+## 2) Introduce query caching for membership/NFTs (completed via React Query)
+Implemented with React Query keys `["membership", addressesKey]` and `["nfts", addressesKey]`. The app is wrapped in a `QueryClientProvider` with sensible `staleTime`/`gcTime`, retries, and no refetch-on-focus. Refetches are triggered after checkout (`onMembershipComplete/onEventComplete`) and on address changes. Manual fetch sequencing/localStorage caching was removed in favor of React Query’s cache.
 
-Preserve current refresh flows:
-- After checkout (`onMembershipComplete/onEventComplete`) → refetch membership/NFTs.
-- On address changes → refetch.
-- Keep short TTL, retry/backoff defaults.
-
-Remove manual `lastKnownMembership`, `refreshSeq`, `localStorage` cache if React Query covers stale-while-revalidate; otherwise, keep minimal client cache for initial hydration only.
-
-## 3) Cleanup and dead code removal
-- Remove unused helpers/imports left in `home-client.tsx` now that `home-utils`, `NftCollection`, `UpcomingMeetings`, and `MembershipPanels` exist.
-- Decide on the member tools/viewer block: either wire it (with a hook for signed URLs) or delete the commented block to reduce noise.
-- Ensure there are no duplicate constants (e.g., `MAX_AUTO_RENEW_MONTHS` defined once).
+## 3) Cleanup and dead code removal — completed
+- Unused helpers/imports removed in `home-client.tsx` after component splits.
+- Unused viewer block/state removed from `home-client.tsx`; `MembershipPanels` simplified.
+- Duplicate constants avoided; auto-renew helpers retained in one place.
 
 ## 4) Tests and stories
 - Component tests (React Testing Library):
@@ -47,6 +41,7 @@ Remove manual `lastKnownMembership`, `refreshSeq`, `localStorage` cache if React
   - Hook contracts: `useMembership`, `useMemberNfts`, `useEventRegistration`.
   - UI composition: which panels/components render under which membership state.
   - Env/config touchpoints: `CHECKOUT_CONFIGS`, `NEXT_PUBLIC_*` lock addresses, Base RPC, etc.
+  - Status: `docs/home-architecture.md` created; expand if more detail is needed.
 
 ## 6) Rollout steps
 - Implement `useMembership` first; wire `home-client.tsx` to it; remove legacy membership refs/caches.

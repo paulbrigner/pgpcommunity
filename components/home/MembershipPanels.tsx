@@ -1,5 +1,4 @@
 import React from "react";
-import { Button } from "@/components/ui/button";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
 import { UpcomingMeetings } from "@/components/home/UpcomingMeetings";
 import { NftCollection } from "@/components/home/NftCollection";
@@ -103,8 +102,6 @@ type ActiveMemberProps = {
   autoRenewMessageNode: React.ReactNode;
   walletLinked: boolean;
   profileComplete: boolean;
-  viewerUrl: string | null;
-  onCloseViewer: () => void;
   upcomingNfts: UpcomingItem[] | null;
   showUpcomingNfts: boolean;
   onToggleUpcoming: (value: boolean) => void;
@@ -125,8 +122,6 @@ export function ActiveMemberPanel({
   autoRenewMessageNode,
   walletLinked,
   profileComplete,
-  viewerUrl,
-  onCloseViewer,
   upcomingNfts,
   showUpcomingNfts,
   onToggleUpcoming,
@@ -149,53 +144,34 @@ export function ActiveMemberPanel({
       </section>
       {autoRenewMessageNode}
       {walletLinked && profileComplete ? (
-        viewerUrl ? (
-          <section className="glass-surface p-0">
-            <div className="muted-card overflow-hidden">
-              <div className="flex items-center justify-between gap-2 border-b border-[rgba(193,197,226,0.35)] bg-white/80 px-5 py-3">
-                <div className="truncate text-sm font-medium text-[var(--muted-ink)]">Member Content Viewer</div>
-                <Button size="sm" variant="outline" onClick={onCloseViewer}>
-                  Close
-                </Button>
-              </div>
-              <iframe
-                title="Member content"
-                src={viewerUrl}
-                className="h-[70vh] w-full"
-                sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
-              />
-            </div>
-          </section>
-        ) : (
-          <section className="grid gap-5 md:grid-cols-[minmax(0,1fr)]">
-            <div className="glass-item space-y-3 p-5 md:col-span-2">
-              <h2 className="text-lg font-semibold text-[var(--brand-navy)]">News & Updates</h2>
-              <p className="text-sm text-[var(--muted-ink)]">
-                Member announcements and updates will appear here.
-              </p>
-            </div>
+        <section className="grid gap-5 md:grid-cols-[minmax(0,1fr)]">
+          <div className="glass-item space-y-3 p-5 md:col-span-2">
+            <h2 className="text-lg font-semibold text-[var(--brand-navy)]">News & Updates</h2>
+            <p className="text-sm text-[var(--muted-ink)]">
+              Member announcements and updates will appear here.
+            </p>
+          </div>
 
-            {upcomingNfts && upcomingNfts.length > 0 ? (
-              <UpcomingMeetings
-                items={upcomingNfts}
-                show={showUpcomingNfts}
-                onToggleShow={onToggleUpcoming}
-                onRsvp={onRsvp}
-              />
-            ) : null}
-
-            <NftCollection
-              displayNfts={displayNfts}
-              showAllNfts={showAllNfts}
-              onToggleShowAll={onToggleShowAll}
-              missedNfts={missedNfts}
-              missedKeySet={missedKeySet}
-              loading={creatorNftsLoading}
-              error={creatorNftsError}
-              creatorNfts={creatorNfts}
+          {upcomingNfts && upcomingNfts.length > 0 ? (
+            <UpcomingMeetings
+              items={upcomingNfts}
+              show={showUpcomingNfts}
+              onToggleShow={onToggleUpcoming}
+              onRsvp={onRsvp}
             />
-          </section>
-        )
+          ) : null}
+
+          <NftCollection
+            displayNfts={displayNfts}
+            showAllNfts={showAllNfts}
+            onToggleShowAll={onToggleShowAll}
+            missedNfts={missedNfts}
+            missedKeySet={missedKeySet}
+            loading={creatorNftsLoading}
+            error={creatorNftsError}
+            creatorNfts={creatorNfts}
+          />
+        </section>
       ) : null}
     </div>
   );

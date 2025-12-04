@@ -1,3 +1,4 @@
+import React from "react";
 import { Button } from "@/components/ui/button";
 import type { EventDetails } from "@/lib/hooks/use-event-registration";
 

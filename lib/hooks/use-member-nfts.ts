@@ -1,96 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { DateTime } from "luxon";
-import { stripMarkdown, buildNftKey } from "@/lib/home-utils";
-
-type DisplayNft = {
-  owner: string | null;
-  contractAddress: string;
-  tokenId: string;
-  title: string;
-  description: string | null;
-  subtitle?: string | null;
-  eventDate?: string | null;
-  startTime?: string | null;
-  endTime?: string | null;
-  timezone?: string | null;
-  location?: string | null;
-  image: string | null;
-  collectionName: string | null;
-  tokenType: string | null;
-  videoUrl?: string | null;
-  sortKey?: number;
-};
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { buildNftKey } from "@/lib/home-utils";
 
 export function useMemberNfts(addressesKey: string, enabled: boolean, includeMissed: boolean) {
-  const [creatorNfts, setCreatorNfts] = useState<DisplayNft[] | null>(null);
-  const [missedNfts, setMissedNfts] = useState<DisplayNft[] | null>(null);
-  const [upcomingNfts, setUpcomingNfts] = useState<any[] | null>(null);
-  const [creatorNftsLoading, setCreatorNftsLoading] = useState(false);
-  const [creatorNftsError, setCreatorNftsError] = useState<string | null>(null);
-  const nftFetchSeq = useRef(0);
-  const lastFetchedAddresses = useRef<string | null>(null);
-
-  const loadCreatorNfts = useCallback(
-    async (key: string, force = false) => {
-      if (!key) return;
-      if (!force && lastFetchedAddresses.current === key) {
-        return;
+  const queryEnabled = enabled && !!addressesKey;
+  const {
+    data,
+    isPending,
+    isFetching,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["nfts", addressesKey],
+    enabled: queryEnabled,
+    staleTime: 1000 * 60 * 3,
+    gcTime: 1000 * 60 * 10,
+    retry: 2,
+    queryFn: async () => {
+      const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(addressesKey)}`, { cache: "no-store" });
+      if (!res.ok) {
+        throw new Error(`Failed to load NFTs (${res.status})`);
       }
-      const seq = ++nftFetchSeq.current;
-      setCreatorNftsLoading(true);
-      setCreatorNftsError(null);
-      try {
-        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(key)}`, { cache: "no-store" });
-        const data = await res.json();
-        if (nftFetchSeq.current !== seq) return;
-        setCreatorNfts(Array.isArray(data?.nfts) ? data.nfts : []);
-        setMissedNfts(Array.isArray(data?.missed) ? data.missed : []);
-        setUpcomingNfts(
-          Array.isArray(data?.upcoming)
-            ? data.upcoming.map((nft: any) => ({
-                contractAddress: String(nft.contractAddress),
-                title: String(nft.title ?? ""),
-                description: nft.description ?? null,
-                subtitle: nft.subtitle ?? null,
-                startTime: nft.startTime ?? null,
-                endTime: nft.endTime ?? null,
-                timezone: nft.timezone ?? null,
-                location: nft.location ?? null,
-                image: nft.image ?? null,
-                registrationUrl: String(nft.registrationUrl ?? ""),
-                quickCheckoutLock: typeof nft.quickCheckoutLock === "string" ? nft.quickCheckoutLock : null,
-              }))
-            : []
-        );
-        setCreatorNftsError(typeof data?.error === "string" && data.error.length ? data.error : null);
-        lastFetchedAddresses.current = key;
-      } catch (err: any) {
-        if (nftFetchSeq.current !== seq) return;
-        setCreatorNftsError(err?.message || "Failed to load NFTs");
-        setCreatorNfts([]);
-        lastFetchedAddresses.current = key;
-      } finally {
-        if (nftFetchSeq.current === seq) {
-          setCreatorNftsLoading(false);
-        }
-      }
+      const payload = await res.json();
+      return {
+        creatorNfts: Array.isArray(payload?.nfts) ? payload.nfts : [],
+        missedNfts: Array.isArray(payload?.missed) ? payload.missed : [],
+        upcomingNfts: Array.isArray(payload?.upcoming)
+          ? payload.upcoming.map((nft: any) => ({
+              contractAddress: String(nft.contractAddress),
+              title: String(nft.title ?? ""),
+              description: nft.description ?? null,
+              subtitle: nft.subtitle ?? null,
+              startTime: nft.startTime ?? null,
+              endTime: nft.endTime ?? null,
+              timezone: nft.timezone ?? null,
+              location: nft.location ?? null,
+              image: nft.image ?? null,
+              registrationUrl: String(nft.registrationUrl ?? ""),
+              quickCheckoutLock: typeof nft.quickCheckoutLock === "string" ? nft.quickCheckoutLock : null,
+            }))
+          : [],
+        error: typeof payload?.error === "string" && payload.error.length ? payload.error : null,
+      };
     },
-    []
-  );
+  });
 
-  useEffect(() => {
-    if (!enabled) {
-      setCreatorNfts(null);
-      setMissedNfts(null);
-      setUpcomingNfts(null);
-      setCreatorNftsLoading(false);
-      setCreatorNftsError(null);
-      lastFetchedAddresses.current = null;
-      return;
-    }
-    if (!addressesKey) return;
-    void loadCreatorNfts(addressesKey);
-  }, [addressesKey, enabled, loadCreatorNfts]);
+  const creatorNfts = data?.creatorNfts ?? null;
+  const missedNfts = data?.missedNfts ?? null;
+  const upcomingNfts = data?.upcomingNfts ?? null;
+  const creatorNftsError = data?.error ?? (error ? error.message : null);
+  const creatorNftsLoading = isPending || isFetching;
 
   const displayNfts = useMemo(() => {
     const owned = Array.isArray(creatorNfts) ? creatorNfts : [];
@@ -136,7 +95,7 @@ export function useMemberNfts(addressesKey: string, enabled: boolean, includeMis
           return 0;
         })
       : enriched;
-  }, [creatorNfts, missedNfts]);
+  }, [creatorNfts, missedNfts, includeMissed]);
 
   const missedKeySet = useMemo(() => {
     const set = new Set<string>();
@@ -148,6 +107,11 @@ export function useMemberNfts(addressesKey: string, enabled: boolean, includeMis
     return set;
   }, [missedNfts]);
 
+  const refresh = useMemo(
+    () => () => refetch({ cancelRefetch: false, throwOnError: false }),
+    [refetch]
+  );
+
   return {
     creatorNfts,
     missedNfts,
@@ -156,6 +120,6 @@ export function useMemberNfts(addressesKey: string, enabled: boolean, includeMis
     creatorNftsError,
     displayNfts,
     missedKeySet,
-    refresh: (force = false) => loadCreatorNfts(addressesKey, force),
+    refresh,
   } as const;
 }

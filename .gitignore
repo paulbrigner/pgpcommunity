@@ -44,3 +44,5 @@ next-env.d.ts
 /lambda-build/
 generateSignedUrl.zip
 src/output.css
+
+*storybook.log

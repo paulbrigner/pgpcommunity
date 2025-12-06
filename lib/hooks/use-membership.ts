@@ -16,6 +16,7 @@ type UseMembershipOptions = {
   initialMembershipExpiry?: number | null;
   initialAllowances?: Record<string, AllowanceState>;
   initialTokenIds?: Record<string, string[]>;
+  initialAllowancesLoaded?: boolean;
 };
 
 export function useMembership({
@@ -29,6 +30,7 @@ export function useMembership({
   initialMembershipExpiry = null,
   initialAllowances = {},
   initialTokenIds = {},
+  initialAllowancesLoaded = true,
 }: UseMembershipOptions) {
   const [membershipStatus, setMembershipStatus] = useState<"active" | "expired" | "none" | "unknown">(
     initialMembershipStatus ?? "unknown"
@@ -37,6 +39,7 @@ export function useMembership({
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialMembershipExpiry ?? null);
   const [allowances, setAllowances] = useState<Record<string, AllowanceState>>(initialAllowances ?? {});
   const [tokenIds, setTokenIds] = useState<Record<string, string[]>>(initialTokenIds ?? {});
+  const [allowancesLoaded, setAllowancesLoaded] = useState<boolean>(!!initialAllowancesLoaded);
 
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const previousSummaryRef = useRef<MembershipSummary | null>(initialMembershipSummary ?? null);
@@ -48,15 +51,30 @@ export function useMembership({
   }, [walletAddress, wallets]);
 
   const membershipQueryEnabled = ready && authenticated && addresses.length > 0;
+  const needsAllowancesFetch = !initialAllowancesLoaded;
+  const hasInitialData = !!initialMembershipSummary;
 
   const membershipQuery = useQuery({
     queryKey: ["membership", addressesKey],
     enabled: membershipQueryEnabled,
-    staleTime: 1000 * 60 * 3,
+    staleTime: needsAllowancesFetch ? 0 : 1000 * 60 * 3,
     gcTime: 1000 * 60 * 10,
     retry: 2,
+    refetchOnMount: needsAllowancesFetch ? "always" : false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: needsAllowancesFetch,
+    initialData: hasInitialData
+      ? {
+          summary: initialMembershipSummary,
+          allowances: initialAllowances ?? {},
+          tokenIds: initialTokenIds ?? {},
+          includesAllowances: initialAllowancesLoaded,
+          includesTokenIds: true,
+        }
+      : undefined,
+    initialDataUpdatedAt: hasInitialData ? Date.now() : undefined,
     queryFn: async () => {
-      const snapshot = await fetchMembershipStateSnapshot({ addresses, forceRefresh: true });
+      const snapshot = await fetchMembershipStateSnapshot({ addresses, forceRefresh: false });
       return snapshotToMembershipSummary(snapshot);
     },
   });
@@ -115,6 +133,9 @@ export function useMembership({
     const { summary, allowances: snapshotAllowances, tokenIds: snapshotTokenIds } = membershipQuery.data;
     setAllowances(snapshotAllowances);
     setTokenIds(snapshotTokenIds || {});
+    if (membershipQuery.data.includesAllowances !== undefined) {
+      setAllowancesLoaded(!!membershipQuery.data.includesAllowances);
+    }
 
     // Preserve previous active tier if the new response downgrades unexpectedly while still within expiry.
     const previousSummary = previousSummaryRef.current ?? membershipSummary ?? null;
@@ -153,6 +174,7 @@ export function useMembership({
     allowances,
     tokenIds,
     refreshMembership: () => membershipQuery.refetch({ cancelRefetch: false, throwOnError: false }),
+    allowancesLoaded,
     setAllowances,
     setTokenIds,
   } as const;

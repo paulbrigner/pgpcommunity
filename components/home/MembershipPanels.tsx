@@ -1,7 +1,7 @@
 import React from "react";
+import dynamic from "next/dynamic";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
-import { UpcomingMeetings } from "@/components/home/UpcomingMeetings";
-import { NftCollection } from "@/components/home/NftCollection";
+import { NftCollectionSkeleton, UpcomingMeetingsSkeleton } from "@/components/home/Skeletons";
 import type { EventDetails } from "@/lib/hooks/use-event-registration";
 
 type UpcomingItem = {
@@ -36,6 +36,16 @@ type DisplayNft = {
   videoUrl?: string | null;
   sortKey?: number;
 };
+
+const UpcomingMeetingsLazy = dynamic(
+  () => import("@/components/home/UpcomingMeetings").then((mod) => mod.UpcomingMeetings),
+  { loading: () => <UpcomingMeetingsSkeleton /> }
+);
+
+const NftCollectionLazy = dynamic(
+  () => import("@/components/home/NftCollection").then((mod) => mod.NftCollection),
+  { loading: () => <NftCollectionSkeleton /> }
+);
 
 type AutoRenewPromptProps = {
   greetingName: string;
@@ -153,7 +163,7 @@ export function ActiveMemberPanel({
           </div>
 
           {upcomingNfts && upcomingNfts.length > 0 ? (
-            <UpcomingMeetings
+            <UpcomingMeetingsLazy
               items={upcomingNfts}
               show={showUpcomingNfts}
               onToggleShow={onToggleUpcoming}
@@ -161,7 +171,7 @@ export function ActiveMemberPanel({
             />
           ) : null}
 
-          <NftCollection
+          <NftCollectionLazy
             displayNfts={displayNfts}
             showAllNfts={showAllNfts}
             onToggleShowAll={onToggleShowAll}

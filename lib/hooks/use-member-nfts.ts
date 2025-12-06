@@ -2,8 +2,16 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { buildNftKey } from "@/lib/home-utils";
 
-export function useMemberNfts(addressesKey: string, enabled: boolean, includeMissed: boolean) {
+type PrefetchedData = {
+  creatorNfts: any[] | null;
+  missedNfts: any[] | null;
+  upcomingNfts: any[] | null;
+  error: string | null;
+};
+
+export function useMemberNfts(addressesKey: string, enabled: boolean, includeMissed: boolean, initialData?: PrefetchedData | null) {
   const queryEnabled = enabled && !!addressesKey;
+  const hasInitialData = !!initialData;
   const {
     data,
     isPending,
@@ -16,6 +24,11 @@ export function useMemberNfts(addressesKey: string, enabled: boolean, includeMis
     staleTime: 1000 * 60 * 3,
     gcTime: 1000 * 60 * 10,
     retry: 2,
+    refetchOnMount: hasInitialData ? false : "always",
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
+    initialData: hasInitialData ? initialData ?? undefined : undefined,
+    initialDataUpdatedAt: hasInitialData ? Date.now() : undefined,
     queryFn: async () => {
       const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(addressesKey)}`, { cache: "no-store" });
       if (!res.ok) {

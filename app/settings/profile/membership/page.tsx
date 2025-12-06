@@ -670,13 +670,19 @@ export default function MembershipSettingsPage() {
           </p>
         </div>
         <div className="space-y-2 text-sm text-muted-foreground">
-          <p>{tierSummaryText}</p>
-          <p>
-            Current price: {autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"} USDC per month
+          <p className={membershipChecking || membershipStatus === "unknown" ? "animate-pulse" : ""}>
+            {membershipChecking || membershipStatus === "unknown" ? "Loading membership details…" : tierSummaryText}
+          </p>
+          <p className={membershipChecking || autoRenewChecking ? "animate-pulse" : ""}>
+            {membershipChecking || autoRenewChecking
+              ? "Loading price…"
+              : `Current price: ${
+                  autoRenewPrice !== null ? (Number(autoRenewPrice) / 1_000_000).toFixed(2) : "Unknown"
+                } USDC per month`}
           </p>
           <p>
             {membershipChecking ? (
-              "Checking membership status…"
+              <span className="animate-pulse">Checking membership status…</span>
             ) : membershipStatus === "active" ? (
               formattedMembershipExpiry ? `Membership active until ${formattedMembershipExpiry}.` : "Membership is currently active."
             ) : membershipStatus === "expired" ? (
@@ -752,7 +758,7 @@ export default function MembershipSettingsPage() {
         </div>
         <div className="text-sm">
           {autoRenewChecking ? (
-            <span className="text-muted-foreground">Checking auto‑renew status…</span>
+            <span className="text-muted-foreground animate-pulse">Checking auto‑renew status…</span>
           ) : autoRenewMonths === null ? (
             <span className="text-muted-foreground">Auto‑renew status unavailable.</span>
           ) : autoRenewMonths > 0 ? (

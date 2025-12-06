@@ -7,6 +7,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
 import { BrowserProvider, Contract } from "ethers";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   MEMBERSHIP_TIERS,
   BASE_NETWORK_ID,
@@ -36,6 +37,13 @@ type HomeClientProps = {
   initialMembershipExpiry?: number | null;
   initialAllowances?: Record<string, AllowanceState>;
   initialTokenIds?: Record<string, string[]>;
+  initialAllowancesLoaded?: boolean;
+  initialNfts?: {
+    creatorNfts: any[] | null;
+    missedNfts: any[] | null;
+    upcomingNfts: any[] | null;
+    error?: string | null;
+  } | null;
 };
 
 const MAX_AUTO_RENEW_MONTHS = 12;
@@ -65,9 +73,12 @@ export default function HomeClient({
   initialMembershipExpiry = null,
   initialAllowances = {},
   initialTokenIds = {},
+  initialAllowancesLoaded = true,
+  initialNfts = null,
 }: HomeClientProps) {
   // NextAuth session
   const { data: session, status, update } = useSession();
+  const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -95,6 +106,7 @@ export default function HomeClient({
     allowances,
     tokenIds,
     refreshMembership,
+    allowancesLoaded,
   } = useMembership({
     ready,
     authenticated,
@@ -106,6 +118,7 @@ export default function HomeClient({
     initialMembershipExpiry,
     initialAllowances,
     initialTokenIds,
+    initialAllowancesLoaded,
   });
   // Flags to show when purchase/renewal or funding actions are running
   const [isPurchasing, setIsPurchasing] = useState(false);
@@ -122,6 +135,25 @@ export default function HomeClient({
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
   const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!authenticated || !walletLinked || !addressesKey) return;
+    queryClient.prefetchQuery({
+      queryKey: ["nfts", addressesKey],
+      queryFn: async () => {
+        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(addressesKey)}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(`Failed to prefetch NFTs (${res.status})`);
+        const payload = await res.json();
+        return {
+          creatorNfts: Array.isArray(payload?.nfts) ? payload.nfts : [],
+          missedNfts: Array.isArray(payload?.missed) ? payload.missed : [],
+          upcomingNfts: Array.isArray(payload?.upcoming) ? payload.upcoming : [],
+          error: typeof payload?.error === "string" && payload.error.length ? payload.error : null,
+        };
+      },
+      staleTime: 1000 * 60 * 5,
+      gcTime: 1000 * 60 * 15,
+    });
+  }, [authenticated, walletLinked, addressesKey, queryClient]);
 
   const autoRenewEnabled = typeof autoRenewMonths === 'number' && autoRenewMonths > 0;
   const currentTier = useMemo<TierMembershipSummary | null>(() => pickHighestActiveTier(membershipSummary), [membershipSummary]);
@@ -226,6 +258,13 @@ export default function HomeClient({
   } = useUnlockCheckout({
     onMembershipComplete: async () => {
       try {
+        if (addressesKey) {
+          await fetch("/api/membership/invalidate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ addresses: addressList, chainId: BASE_NETWORK_ID }),
+          }).catch(() => {});
+        }
         await refreshMembership();
       } catch (err) {
         console.error('Membership refresh after checkout failed:', err);
@@ -263,9 +302,19 @@ export default function HomeClient({
     displayNfts,
     missedKeySet,
     refresh,
-  } = useMemberNfts(addressesKey, authenticated && walletLinked && membershipStatus === 'active', showAllNfts);
+  } = useMemberNfts(
+    addressesKey,
+    authenticated && walletLinked && membershipStatus === 'active',
+    showAllNfts,
+    initialNfts as any
+  );
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active' || !renewalTierAddress) {
+      setAutoRenewMonths(null);
+      setAutoRenewStateReady(false);
+      return;
+    }
+    if (!allowancesLoaded) {
       setAutoRenewMonths(null);
       setAutoRenewStateReady(false);
       return;
@@ -300,7 +349,7 @@ export default function HomeClient({
       }
     }
     setAutoRenewStateReady(true);
-  }, [authenticated, walletLinked, membershipStatus, renewalTierAddress, allowances]);
+  }, [authenticated, walletLinked, membershipStatus, renewalTierAddress, allowancesLoaded, allowances]);
 
   useEffect(() => {
     if (!autoRenewReady) return;

@@ -1,11 +1,16 @@
 import React, { useState } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import dynamic from "next/dynamic";
 import { DateTime } from "luxon";
 import { Button } from "@/components/ui/button";
 import { buildNftKey, buildCalendarLinks, downloadIcs, formatEventDisplay, stripMarkdown } from "@/lib/home-utils";
 import { BASE_BLOCK_EXPLORER_URL } from "@/lib/config";
 import { BadgeCheck } from "lucide-react";
+import type { MarkdownContent as MarkdownContentType } from "@/components/home/MarkdownContent";
+
+const MarkdownContent = dynamic(() => import("@/components/home/MarkdownContent").then(mod => mod.MarkdownContent), {
+  loading: () => <div className="text-xs text-[var(--muted-ink)]">Loading description…</div>,
+  ssr: false,
+}) as typeof MarkdownContentType;
 
 type DisplayNft = {
   owner: string | null;
@@ -267,9 +272,7 @@ export function NftCollection({
                       {isDescriptionOpen ? (
                         <div className="space-y-2">
                           <div className="prose prose-sm dark:prose-invert max-w-none">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {shortenedDescription.fullMarkdown}
-                            </ReactMarkdown>
+                            <MarkdownContent>{shortenedDescription.fullMarkdown}</MarkdownContent>
                           </div>
                           <button
                             type="button"

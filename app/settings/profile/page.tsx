@@ -66,6 +66,15 @@ export default function ProfileSettingsPage() {
   }, [authenticated, sessionUser, currentEmail]);
 
   useEffect(() => {
+    // Prefetch home route assets to reduce navigation lag back to Home.
+    try {
+      router.prefetch("/");
+    } catch {
+      // ignore prefetch errors
+    }
+  }, [router]);
+
+  useEffect(() => {
     if (!authenticated) return;
     if (!membershipAddresses.length) return;
     if (sessionMembershipSummary) return;

@@ -68,7 +68,7 @@ export type AllowanceState = {
   keyPrice?: string | null;
 };
 
-const DEFAULT_CACHE_TTL_MS = 60_000;
+const DEFAULT_CACHE_TTL_MS = 180_000; // 3 minutes
 const UNLIMITED_ALLOWANCE_THRESHOLD = 2n ** 255n;
 const ERC20_ABI = [
   'function allowance(address owner, address spender) view returns (uint256)',
@@ -464,7 +464,7 @@ class InMemoryMembershipStateService implements MembershipStateService {
 
 export const membershipStateService: MembershipStateService = new InMemoryMembershipStateService();
 
-export function snapshotToMembershipSummary(snapshot: MembershipStateSnapshot): { summary: MembershipSummary; allowances: Record<string, AllowanceState>; tokenIds: Record<string, string[]> } {
+export function snapshotToMembershipSummary(snapshot: MembershipStateSnapshot): { summary: MembershipSummary; allowances: Record<string, AllowanceState>; tokenIds: Record<string, string[]>; includesAllowances: boolean; includesTokenIds: boolean } {
   const tiers: TierMembershipSummary[] = snapshot.tiers.map((tier) => ({
     tier: tier.tier,
     status: tier.status,
@@ -498,13 +498,15 @@ export function snapshotToMembershipSummary(snapshot: MembershipStateSnapshot): 
     summary: {
       status,
       expiry,
-      tiers,
-      highestActiveTier,
-    },
+    tiers,
+    highestActiveTier,
+  },
     allowances: snapshot.allowances,
     tokenIds: snapshot.tiers.reduce<Record<string, string[]>>((acc, tier) => {
       acc[tier.tier.checksumAddress.toLowerCase()] = tier.tokenIds;
       return acc;
     }, {}),
+    includesAllowances: snapshot.includesAllowances === false ? false : true,
+    includesTokenIds: snapshot.includesTokenIds === false ? false : true,
   };
 }

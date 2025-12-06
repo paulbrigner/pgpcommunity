@@ -1,9 +1,14 @@
-import AdminClient from "./admin-client";
+import dynamicImport from "next/dynamic";
 import { buildAdminRoster } from "@/lib/admin/roster";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
+import { AdminShellSkeleton } from "@/components/admin/AdminSkeleton";
 
 export const dynamic = "force-dynamic";
+
+const AdminClient = dynamicImport(() => import("./admin-client"), {
+  loading: () => <AdminShellSkeleton />,
+});
 
 export default async function AdminPage() {
   let roster = null;

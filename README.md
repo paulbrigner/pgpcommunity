@@ -1,7 +1,7 @@
 # PGP Community Platform
 
 ## Overview
-Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with SIWE wallet linking, and Unlock Protocol for membership gating. Gated content is served from CloudFront using server‑generated signed URLs (see `lib/cloudFrontSigner.ts`) with the signing key loaded from server environment variables.
+Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with SIWE wallet linking, and Unlock Protocol for membership. Direct Unlock checkout flows power memberships and on‑site event RSVPs.
 
 ## Security Warning
 This software is under active development and has not undergone a full independent security review. Deploy at your own risk. Do not store production‑critical secrets or funds in connected wallets unless you understand the risks and have performed your own assessment. If you discover a potential vulnerability, please report it privately to the maintainers rather than opening a public issue.
@@ -11,25 +11,24 @@ This software is under active development and has not undergone a full independe
 - **Authentication/Authorization**:
   - NextAuth for email sign-in and SIWE wallet linking
   - Wallet-first sign-up flow that guides new users through wallet connection, email verification, and automatic wallet linking after verification
-  - Unlock Protocol for membership gating
-  - API route at `/app/api/content/[file]/route.ts` issues CloudFront signed URLs
-- **Secure Content Delivery**:
-  - Private files in S3 accessed via CloudFront signed URLs
-  - **Origin Access Control (OAC)** restricts S3 bucket access to CloudFront only
-  - Signed URL generation handled in‑app via `lib/cloudFrontSigner.ts`
-  - Private key provided via server env var `PRIVATE_KEY_SECRET`
+- **Membership & RSVPs**:
+  - Unlock Protocol membership with on-site checkout; RSVP uses the same direct checkout flow
 - **Creator NFT collection**:
-  - `/api/nfts` fetches member-held ERC-721s on Base created by the membership lock or its owner, consolidating metadata from Alchemy
+  - `/api/nfts` fetches member-held ERC-721s on Base created by the membership lock or its owner. Metadata is consolidated via Alchemy to avoid repeated on-chain tokenURI fetches and to normalize image/trait fields; the API falls back to raw chain data when metadata is sparse.
   - Home page shows “Your PGP NFT Collection” with manual refresh option
   - Future meetings that the member has registered for automatically move into the collection, where they render formatted event date, time, timezone, and location instead of the long-form description
   - Registered future meetings display a “You’re Registered!” indicator plus quick actions to add the event to Google Calendar or download a `.ics` file
-- **Secrets Management**:
-  - Server environment variables store sensitive credentials including:
-    - CloudFront private key for signed URL generation (`PRIVATE_KEY_SECRET`)
-    - CloudFront distribution config values (`CLOUDFRONT_DOMAIN`, `KEY_PAIR_ID`)
 - **Membership logic**:
   - Membership state is derived on-chain (Unlock locks + USDC approvals) and cached briefly server-side; UI consumes snapshots.
-  - Checkout/renewal paths run client-side via Unlock JS; server helpers only refresh/invalidate cache (no server-side signing).
+  - Checkout/renewal and event registration run client-side via Unlock JS; server helpers only refresh/invalidate cache.
+
+## Unlock Protocol Integration
+- **Checkout & RSVPs**: Client-only Unlock checkout via `useUnlockCheckout` for memberships and event RSVPs. Lock/tier configs come from `NEXT_PUBLIC_LOCK_TIERS` and optional overrides in `CHECKOUT_CONFIGS`. After a checkout completes, the app invalidates membership caches and refetches status/allowances.
+- **Membership state**: Membership is derived from Unlock locks on Base. The server snapshots status/expiry, tokenIds (when available), and USDC allowances for auto-renew, caches briefly, and hydrates the client. React Query keeps this data fresh with short TTLs.
+- **Event NFTs**: `/api/nfts` pulls owned/earned event NFTs (and missed/upcoming data) on Base. Metadata is consolidated via Alchemy to avoid repeated on-chain tokenURI fetches and to normalize image/trait fields; fall back to raw chain data when metadata is sparse.
+- **Subgraph/token IDs**: When locks are not enumerable, the app can use Unlock’s subgraph (`UNLOCK_SUBGRAPH_ID`/`UNLOCK_SUBGRAPH_API_KEY` or `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL`) to resolve token IDs for renewals and ownership checks.
+- **Allowances for auto-renew**: The app checks and displays USDC allowances per lock to guide auto-renew setup. Requests avoid unlimited approvals (`SAFE_ALLOWANCE_CAP`) and default to 12-month coverage.
+- **Error handling & fallbacks**: RPC/provider calls are retried modestly; membership state preserves a previously-active tier during transient fetch issues to avoid accidental downgrades in UI.
 
 ## Setup
 ### Environment Variables
@@ -45,13 +44,10 @@ NEXT_PUBLIC_LOCKSMITH_BASE=https://locksmith.unlock-protocol.com
 NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL=
 
 ## Server-only (do not prefix with NEXT_PUBLIC_)
-CLOUDFRONT_DOMAIN=assets.pgpforcrypto.org
-KEY_PAIR_ID=KERO2MLM81YXV
 UNLOCK_SUBGRAPH_ID=
 UNLOCK_SUBGRAPH_API_KEY=
 HIDDEN_UNLOCK_CONTRACTS=
 CHECKOUT_CONFIGS=
-PRIVATE_KEY_SECRET='-----BEGIN RSA PRIVATE KEY-----...'
 REGION_AWS=us-east-1
 
 # NextAuth
@@ -84,7 +80,7 @@ CHECKOUT_CONFIGS=0x1111111111111111111111111111111111111111:{"locks":{"0x1111111
 Each pair maps a lock address to a JSON config snippet (as a single-line JSON string). Separate pairs with semicolons. The new Unlock checkout helpers merge these overrides with sensible defaults when embedding the React-based checkout component. If an address is omitted, the UI falls back to the tier metadata in `lib/checkout-config.ts` and still renders a purchase drawer, but without the extra customizations from this map.
 
 Notes:
-- Ensure these server-only env vars are set in Amplify build/deploy environment (not exposed to the client).
+- Ensure server-only env vars are set in Amplify build/deploy environment (not exposed to the client).
 - DynamoDB table for NextAuth is created/used by the adapter (name via `NEXTAUTH_TABLE`). Ensure the Amplify role has read/write access to it.
 - For deterministic membership tokenId lookups on non-enumerable locks, set either `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL` *or* both `UNLOCK_SUBGRAPH_API_KEY` and `UNLOCK_SUBGRAPH_ID`. Without these, checkout may refuse renewals when a key exists but the tokenId cannot be discovered.
 
@@ -134,25 +130,13 @@ Protecting API routes
 
 ## Deployment
 ### CI/CD (GitHub + AWS Amplify)
-- Connected build: the Amplify app is linked to this GitHub repository. Pushes to the tracked branch (e.g., `main`) trigger an automatic build and deploy to the Production environment.
+- Connected build: Amplify is linked to this GitHub repository. Pushes to the tracked branch (e.g., `main`) trigger an automatic build and deploy.
 - Preview builds: pull requests create ephemeral preview deployments with unique URLs for review. Merge or close the PR to clean them up.
 - Build config: the pipeline is defined in `amplify.yml` at the repo root. It sets the Node runtime and runs the Next.js build (including API routes/SSR) and any post‑build steps.
 - Environment variables: set per Amplify environment in the Amplify Console (never commit secrets). Server‑only variables (no `NEXT_PUBLIC_` prefix) are injected at build/runtime for API routes and SSR.
 - Branch environments: you can connect additional branches (e.g., `staging`) to create isolated Amplify environments with their own env vars and URLs.
 - Rollbacks & retries: from the Amplify Console, redeploy a previous successful build or retry a failed one without a new commit.
-- IAM & permissions: ensure the Amplify service role has access to required AWS resources (S3/CloudFront for assets, DynamoDB for NextAuth, SES for email).
-
-### Configure Origin Access Control (OAC)
-1. **Create OAC Policy** in CloudFront console:
-   ```bash
-   aws cloudfront create-cloud-front-origin-access-control \
-     --name pgpcommunity-oac \
-     --type s3 --description "Restrict S3 access to CloudFront"
-   ```
-2. **Attach OAC to Distribution**:
-   - In CloudFront console, update distribution settings to use the OAC policy
-
-<!-- Secrets are provided via environment variables. -->
+- IAM & permissions: ensure the Amplify service role has access to required AWS resources (DynamoDB for NextAuth, SES for email, RPC provider access as needed).
 
 ## Security Architecture
 ### Authentication & Authorization
@@ -167,8 +151,8 @@ Protecting API routes
   - SIWE signature is verified in `POST /api/auth/link-wallet`. On success the address is added to the user record and shown in `session.user.wallets`.
   - Unlinking is available via `POST /api/auth/unlink-wallet` and in Settings → Profile.
 - **Authorization**:
-  - Member‑only content: gated via Unlock membership. The server checks membership (by linked wallets) and issues time‑boxed CloudFront signed URLs for assets.
-  - API protection: routes verify an authenticated session (e.g., `getToken` in `/api/content/[file]`) and/or membership before returning data.
+  - Member‑only content: gated via Unlock membership (by linked wallets).
+  - API protection: routes verify an authenticated session (e.g., `getToken`) and/or membership before returning data.
   - Admin routes (roadmap): add a role flag on the user record; protect `/admin/*` routes by role in the session callback.
 - **CSRF & replay protection**:
   - NextAuth’s built‑in CSRF protection for email sign‑in flow; SIWE uses NextAuth’s CSRF token as the nonce.
@@ -177,28 +161,14 @@ Protecting API routes
   - Client uses `NEXT_PUBLIC_BASE_RPC_URL` (browser‑safe, domain‑allow‑listed keys if using a managed provider).
   - Server uses a private `BASE_RPC_URL` (no `NEXT_PUBLIC_`) and can be extended to try multiple providers for redundancy.
 
-### CloudFront Signed URLs Workflow
-1. **User Authentication**:
-   - NextAuth verifies email sessions; SIWE verifies wallet ownership; Unlock enforces membership
-2. **Server-Side Signing**:
-   - API runs on Node.js runtime (`export const runtime = "nodejs"`)
-   - Reads the private key from environment variable `PRIVATE_KEY_SECRET`
-   - Generates a 5‑minute signed URL via `lib/cloudFrontSigner.ts`
-   - Returns `{ url }` from `/api/content/[file]`
-3. **CloudFront Validation**:
-   - Validates signature using public key
-   - Serves content only if OAC policy and signature are valid
-
 ### Key Security Components
 | Component | Description |
 |---|---|
 | Authentication | NextAuth Email (magic links) and SIWE for wallets. SIWE is accepted only for wallets already linked to the signed-in user. |
-| Authorization & Gating | Unlock Protocol membership gates access; server issues short‑lived CloudFront signed URLs for protected assets. |
+| Authorization & Gating | Unlock Protocol membership gates access. |
 | Session (JWT) | Server enriches JWT with profile, linked wallets, and membership (status/expiry) with a 5‑minute TTL to reduce chain calls. |
 | Wallet Linking | `POST /api/auth/link-wallet` verifies SIWE and writes the address to the user; `POST /api/auth/unlink-wallet` removes it. UI to manage under Settings → Profile. |
 | API Protection | Auth‑required routes check NextAuth tokens (e.g., via `getToken`). Member‑only routes also verify Unlock membership before responding. |
-| CloudFront Signed URLs | `app/api/content/[file]` returns time‑boxed, signed URLs generated by `lib/cloudFrontSigner.ts`. Only valid for a few minutes. |
-| Origin Access Control (OAC) | S3 buckets are not public; CloudFront accesses S3 with OAC so files are only retrievable via valid CloudFront requests. |
 | Secrets Management | Secrets live in Amplify environment variables (or local `.env`). Never expose secrets with `NEXT_PUBLIC_`. |
 | RPC Strategy | Client uses a browser‑safe `NEXT_PUBLIC_BASE_RPC_URL`. Server uses a private `BASE_RPC_URL` (and can add redundancy) for reliable membership checks. |
 | Data Storage (DynamoDB) | NextAuth adapter persists Users/Accounts/VerificationTokens. The app reads linked wallets and profile fields from DynamoDB in session callbacks. |
@@ -208,36 +178,20 @@ Protecting API routes
 | Observability | Planned: add structured logs/metrics around auth, wallet linking, and membership checks; alert on RPC failures. |
 
 ## Architecture Notes
-- **Unlock Integration**:
-  - Wallet auth via NextAuth + SIWE (only for previously linked wallets)
-  - Unlock component checkout is opened client-side via `useUnlockCheckout`; tiers come from `NEXT_PUBLIC_LOCK_TIERS` and event configs from `CHECKOUT_CONFIGS`. After checkout, the app refreshes membership and allowances. No paywall dependency remains.
-- **CloudFront Distribution**:
-  - Configured with Trusted Key Groups for signature validation
-  - OAC ensures S3 only serves content via authenticated CloudFront requests
+- Wallet auth via NextAuth + SIWE (only for previously linked wallets).
+- Client-side Unlock checkout opens on demand; tiers come from `NEXT_PUBLIC_LOCK_TIERS` and event configs from `CHECKOUT_CONFIGS`. After checkout, membership and allowances are refreshed.
 
 ## Dependencies
 - **Core**: Next.js 15+, TypeScript, AWS Amplify, Tailwind CSS v4 (CLI)
 - **UI**:
   - shadcn/ui (see `components.json`, `@/components/ui/*`)
-  - Radix UI (primitives):
-    - `@radix-ui/react-navigation-menu`
-    - `@radix-ui/react-alert-dialog`
-    - `@radix-ui/react-slot`
-    - Note: adding more shadcn components may add additional `@radix-ui/*` packages.
-- **Auth**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`
-- **Security**: CloudFront OAC
-- **Scheduling**:
-  - `luxon` for timezone-aware event formatting on the client
-  - `ics` to generate downloadable calendar files on the fly
-  - `@types/luxon` (dev) to satisfy TypeScript builds in Amplify and locally
-
-## Node 22 Migration Checklist (Later)
-- Update runtime: change `amplify.yml` to `runtime.nodejs: 22` and use `nvm install 22 && nvm use 22` in preBuild.
-- Update local defaults: set `.nvmrc` to `22` and in `package.json` set `engines.node` to `"^22"` (or `">=22 <23"`).
-- Verify deps on Node 22: run `npm i && npm run build` locally; watch for OpenSSL/crypto warnings.
-- CloudFront signer: if Node 22/ OpenSSL rejects `RSA-SHA1` in `lib/cloudFrontSigner.ts`, switch to `@aws-sdk/cloudfront-signer` (SHA256) or update the signing logic accordingly.
-- Amplify deploy: redeploy with Node 22 and confirm SSR/API routes, SIWE sign-in, Unlock checkout, and `/api/content/[file]` return signed URLs.
-- Rollback plan: keep a branch with Node 20 configs to revert quickly if needed.
+  - Radix UI primitives (`@radix-ui/react-navigation-menu`, `@radix-ui/react-alert-dialog`, `@radix-ui/react-slot`)
+  - lucide-react icons
+- **Auth/Wallet**: `next-auth@^4`, `siwe`, `@next-auth/dynamodb-adapter`, `ethers`, `@unlock-protocol/unlock-js`, `@unlock-protocol/networks`
+- **Data/Fetch**: `@tanstack/react-query`, `axios`
+- **Scheduling/Calendar**: `luxon`, `ics`
+- **Content**: `react-markdown`, `remark-gfm`
+- **Testing/Tooling**: Vitest + @testing-library/*, Storybook 8, eslint 9, TypeScript 5.9
 
 ## License
 All code in this workspace is licensed under either of

@@ -20,7 +20,8 @@ This software is under active development and has not undergone a full independe
   - Registered future meetings display a “You’re Registered!” indicator plus quick actions to add the event to Google Calendar or download a `.ics` file
 - **Membership logic**:
   - Membership state is derived on-chain (Unlock locks + USDC approvals) and cached briefly server-side; UI consumes snapshots.
-  - Checkout/renewal and event registration run client-side via Unlock JS; server helpers only refresh/invalidate cache.
+  - Checkout/renewal, upgrades/downgrades, event registration, and auto-renew setup run client-side via Unlock JS; server helpers refresh/invalidate cache and rehydrate status.
+  - Members can change tiers (upgrade/downgrade), cancel/disable auto-renew, request refunds (with reason/status tracking), and view expiry and allowances.
 
 ## Unlock Protocol Integration
 - **Checkout & RSVPs**: Client-only Unlock checkout via `useUnlockCheckout` for memberships and event RSVPs. Lock/tier configs come from `NEXT_PUBLIC_LOCK_TIERS` and optional overrides in `CHECKOUT_CONFIGS`. After a checkout completes, the app invalidates membership caches and refetches status/allowances.
@@ -29,6 +30,20 @@ This software is under active development and has not undergone a full independe
 - **Subgraph/token IDs**: When locks are not enumerable, the app can use Unlock’s subgraph (`UNLOCK_SUBGRAPH_ID`/`UNLOCK_SUBGRAPH_API_KEY` or `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL`) to resolve token IDs for renewals and ownership checks.
 - **Allowances for auto-renew**: The app checks and displays USDC allowances per lock to guide auto-renew setup. Requests avoid unlimited approvals (`SAFE_ALLOWANCE_CAP`) and default to 12-month coverage.
 - **Error handling & fallbacks**: RPC/provider calls are retried modestly; membership state preserves a previously-active tier during transient fetch issues to avoid accidental downgrades in UI.
+
+## Admin Functionality
+- Roster management: view member roster, linked wallets, balances, allowances, and membership state snapshots.
+- Refund workflow: review pending refund requests, update statuses, and issue refunds.
+- Communications: send welcome or custom emails to selected users.
+- Token visibility: inspect member token IDs and allowances per lock to troubleshoot renewals or auto-renew setup.
+- Quick actions: adminize users, clear or refresh cached membership state as needed.
+
+## Persistence & Data Flow
+- **Sessions/Auth**: NextAuth with DynamoDB adapter stores Users, Accounts, and VerificationTokens. JWT-based sessions are enriched with profile and membership fields for short TTLs to reduce on-chain checks.
+- **Profile data**: User profile fields (name, handles, email) are stored via NextAuth in DynamoDB and exposed on the session.
+- **Membership state**: Derived from on-chain Unlock locks; cached briefly in-memory on the server (see `membershipStateService`). Server actions can invalidate/prime caches; client hydrates via React Query.
+- **NFT/event data**: Fetched on demand from `/api/nfts`, which aggregates on-chain data with Alchemy metadata; not persisted server-side.
+- **Refund requests/admin actions**: Tracked via API routes backed by DynamoDB (through the NextAuth adapter tables and custom entries where applicable).
 
 ## Setup
 ### Environment Variables

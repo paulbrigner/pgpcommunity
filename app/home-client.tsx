@@ -67,6 +67,17 @@ const formatAddressShort = (value: string | null | undefined): string => {
   return `${normalized.slice(0, 6)}…${normalized.slice(-4)}`;
 };
 
+const isUserRejected = (error: any): boolean => {
+  const code = error?.code ?? error?.error?.code;
+  if (code === 4001 || code === 'ACTION_REJECTED') return true;
+  const msg =
+    (typeof error?.message === 'string' && error.message) ||
+    (typeof error?.error?.message === 'string' && error.error.message) ||
+    '';
+  const lower = msg.toLowerCase();
+  return lower.includes('user rejected') || lower.includes('user denied') || lower.includes('rejected by user');
+};
+
 export default function HomeClient({
   initialMembershipSummary,
   initialMembershipStatus = "unknown",
@@ -458,9 +469,14 @@ export default function HomeClient({
       setAutoRenewPromptDismissed(true);
       await refreshMembership();
     } catch (err: any) {
-      console.error('Auto-renew enable failed:', err);
-      const message = err?.message || 'Failed to enable auto-renew. Please try again from Edit Profile later.';
-      setAutoRenewMessage(message);
+      if (isUserRejected(err)) {
+        // Treat wallet rejection as a user cancel; no error banner.
+        setAutoRenewMessage('Auto-renew was canceled.');
+      } else {
+        console.error('Auto-renew enable failed:', err);
+        const message = err?.message || 'Failed to enable auto-renew. Please try again from Edit Profile later.';
+        setAutoRenewMessage(message);
+      }
     } finally {
       setAutoRenewProcessing(false);
     }
@@ -793,28 +809,16 @@ export default function HomeClient({
                     summaryTier?.metadata?.name ||
                     formatAddressShort(tier.checksumAddress) ||
                     `Tier ${index + 1}`;
-                  const priceDisplay =
-                    (summaryTier?.metadata?.price && summaryTier.metadata.price.length
-                      ? summaryTier.metadata.price
-                      : null) || "Price shown at checkout";
-                  const expiryLabel =
-                    summaryTier?.expiry && summaryTier.expiry > 0
-                      ? new Date(summaryTier.expiry * 1000).toLocaleDateString(undefined, {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })
-                      : null;
-                  const statusLabel = summaryTier?.status ?? "none";
-                  const statusText =
-                    statusLabel === "active"
-                      ? `Active${expiryLabel ? ` · expires ${expiryLabel}` : ""}`
-                      : statusLabel === "expired"
-                      ? `Expired${expiryLabel ? ` · ${expiryLabel}` : ""}`
-                      : "Not owned yet";
-                  const benefit =
-                    summaryTier?.metadata?.description ||
-                    "Renews monthly; you can manage auto-renew after purchase.";
+                  const priceDisplay = (() => {
+                    const metaDisplay = formatUsdcPrice(summaryTier?.metadata?.price);
+                    if (metaDisplay) return metaDisplay;
+                    const key = tier.checksumAddress?.toLowerCase();
+                    if (key && allowances[key]?.keyPrice) {
+                      const allowanceDisplay = formatUsdcPrice(allowances[key].keyPrice);
+                      if (allowanceDisplay) return allowanceDisplay;
+                    }
+                    return "USDC price shown at checkout";
+                  })();
                   const isSelected = normalizedSelectedTierId
                     ? normalizedSelectedTierId === optionId
                     : index === 0;
@@ -836,13 +840,11 @@ export default function HomeClient({
                         checked={isSelected}
                         onChange={() => setSelectedTierId(optionId ?? tier.checksumAddress ?? tier.id)}
                       />
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="font-medium">{label}</span>
+                      <div className="flex w-full flex-col gap-1">
+                        <div className="flex items-center justify-between gap-3 text-sm">
+                          <span className="font-medium text-[var(--brand-navy)]">{label}</span>
                           <span className="text-xs text-[var(--brand-navy)]">{priceDisplay}</span>
                         </div>
-                        <div className="text-xs text-[var(--muted-ink)]">{statusText}</div>
-                        {benefit ? <div className="text-xs text-[var(--muted-ink)]">{benefit}</div> : null}
                       </div>
                     </label>
                   );
@@ -850,23 +852,12 @@ export default function HomeClient({
               </div>
             </div>
           ) : null}
-          <div className="space-y-2 text-left text-[var(--muted-ink)]">
-            <div>What to have in your wallet:</div>
-            <ul className="list-disc pl-5 space-y-1">
-              <li>USDC (Base): 0.10 USDC for the membership itself.</li>
-              <li>ETH (Base): a tiny amount for gas; keep ~0.00001–0.00005 ETH to cover the approval + purchase and future renewals.</li>
-            </ul>
-            <div>
-              <strong>Price reference:</strong> The lock is priced in USDC and the last price‑update sets it to 0.10 USDC. Each renewal adds ~30 days.
-            </div>
-            <div>
-              <strong>First time only:</strong> you may see two on‑chain steps—Approve USDC (gas only) then Purchase (0.10 USDC + gas).
-            </div>
-            <div>That’s it—0.10 USDC for the membership, plus pennies of ETH for gas.</div>
-            <div className="text-xs text-[var(--muted-ink)]">
-              Note: After purchase you can enable auto-renew so renewals happen automatically, or skip it and set it up later from Edit Profile.
-            </div>
-          </div>
+          <WalletReadyNote
+            membershipSummary={membershipSummary}
+            selectedTierId={normalizedSelectedTierId}
+            tiers={MEMBERSHIP_TIERS}
+            allowances={allowances}
+          />
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
@@ -884,5 +875,90 @@ export default function HomeClient({
       
       </div>
     </>
+  );
+}
+
+type WalletReadyNoteProps = {
+  membershipSummary: MembershipSummary | null;
+  selectedTierId: string | null | undefined;
+  tiers: typeof MEMBERSHIP_TIERS;
+  allowances: Record<string, AllowanceState>;
+};
+
+const formatUsdcPrice = (raw: string | number | null | undefined): string | null => {
+  if (raw === null || raw === undefined) return null;
+
+  const formatValue = (value: number) => {
+    return `${value.toFixed(2)} USDC`;
+  };
+
+  // If it's a finite number already
+  const maybeNum = typeof raw === 'number' ? raw : Number(raw);
+  if (Number.isFinite(maybeNum)) {
+    // Heuristic: values greater than 1,000 are probably base units (6 decimals for USDC)
+    if (maybeNum > 1000) {
+      const converted = maybeNum / 1_000_000;
+      if (Number.isFinite(converted)) return formatValue(converted);
+    }
+    return formatValue(maybeNum);
+  }
+
+  // Try BigInt conversion (covers large base-unit strings)
+  try {
+    const asBig = BigInt(String(raw));
+    const whole = Number(asBig) / 1_000_000;
+    if (Number.isFinite(whole)) {
+      return formatValue(whole);
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return null;
+};
+
+function WalletReadyNote({ membershipSummary, selectedTierId, tiers, allowances }: WalletReadyNoteProps) {
+  const selectedTierSummary = useMemo(() => {
+    if (!selectedTierId) return null;
+    const normalized = selectedTierId.toLowerCase();
+    return (
+      membershipSummary?.tiers?.find((entry) => {
+        const keys = [entry.tier.id, entry.tier.address, entry.tier.checksumAddress]
+          .map((value) => (value ? String(value).toLowerCase() : ""));
+        return keys.includes(normalized);
+      }) ?? null
+    );
+  }, [membershipSummary, selectedTierId]);
+
+  const fallbackTier = tiers[0] || null;
+  const selectedLabel =
+    selectedTierSummary?.tier?.label ||
+    selectedTierSummary?.metadata?.name ||
+    (fallbackTier ? fallbackTier.label || fallbackTier.id : "membership");
+
+  const priceDisplay = useMemo(() => {
+    const rawMeta = selectedTierSummary?.metadata?.price;
+    const metaDisplay = formatUsdcPrice(rawMeta);
+    if (metaDisplay) return metaDisplay;
+    const key = selectedTierSummary?.tier.checksumAddress?.toLowerCase();
+    if (key && allowances[key]?.keyPrice) {
+      const allowancePrice = formatUsdcPrice(allowances[key].keyPrice);
+      if (allowancePrice) return allowancePrice;
+    }
+    return "USDC price shown at checkout";
+  }, [selectedTierSummary, allowances]);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-[rgba(193,197,226,0.45)] bg-white/70 p-4 text-left text-[var(--muted-ink)]">
+      <div className="text-sm font-semibold text-[var(--brand-navy)]">What to have in your wallet</div>
+      <ul className="list-disc space-y-1 pl-4 text-sm">
+        <li>
+          USDC (Base): <span className="font-medium text-[var(--brand-navy)]">{priceDisplay}</span> for the selected tier{selectedLabel ? ` (${selectedLabel})` : ""}.
+        </li>
+        <li>ETH (Base): a small amount for gas. Keep ~0.00002–0.0001 ETH to cover approval + purchase.</li>
+      </ul>
+      <div className="text-xs text-[var(--muted-ink)]">
+        First purchase may prompt an approval then a purchase. You can enable auto-renew later from Edit Profile.
+      </div>
+    </div>
   );
 }

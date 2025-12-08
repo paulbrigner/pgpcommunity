@@ -80,6 +80,17 @@ const toDisplayPrice = (raw: bigint, decimals: number, symbol: string) => {
   return `${formatted} ${symbol}`.trim();
 };
 
+const isUserRejected = (error: any): boolean => {
+  const code = error?.code ?? error?.error?.code;
+  if (code === 4001 || code === 'ACTION_REJECTED') return true;
+  const msg =
+    (typeof error?.message === 'string' && error.message) ||
+    (typeof error?.error?.message === 'string' && error.error.message) ||
+    '';
+  const lower = msg.toLowerCase();
+  return lower.includes('user rejected') || lower.includes('user denied') || lower.includes('rejected by user');
+};
+
 const ensureBaseNetwork = async (provider: any) => {
   try {
     await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BASE_CHAIN_ID_HEX }] });
@@ -323,6 +334,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
   const [pricing, setPricing] = useState<PricingInfo | null>(null);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [isClient, setIsClient] = useState(false);
+  const [preapproveYear, setPreapproveYear] = useState(true);
 
   useEffect(() => {
     setIsClient(true);
@@ -477,7 +489,8 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
             : intent.kind === 'membership' || intent.kind === 'renewal'
               ? MEMBERSHIP_RECURRING_PAYMENTS
               : undefined;
-      const membershipApprovalPeriods = Math.max(1, MEMBERSHIP_RECURRING_PAYMENTS || 0);
+      // Request approval for either 12 months or a single month, based on the checkbox.
+      const membershipApprovalPeriods = preapproveYear ? 12 : 1;
       const recurringPayments =
         typeof recurringPaymentsPreference === 'number'
           ? intent.kind === 'membership' || intent.kind === 'renewal'
@@ -486,19 +499,19 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           : intent.kind === 'membership' || intent.kind === 'renewal'
             ? membershipApprovalPeriods
             : undefined;
-      const rawTotalApproval = overrides?.totalApproval;
-      let explicitApproval: bigint | null = null;
-      if (typeof rawTotalApproval === 'bigint') {
-        explicitApproval = rawTotalApproval > 0n ? rawTotalApproval : null;
-      } else if (typeof rawTotalApproval === 'number' && Number.isFinite(rawTotalApproval) && rawTotalApproval > 0) {
-        explicitApproval = BigInt(Math.floor(rawTotalApproval));
-      } else if (typeof rawTotalApproval === 'string' && rawTotalApproval.trim().length) {
-        try {
-          const parsed = BigInt(rawTotalApproval.trim());
-          explicitApproval = parsed > 0n ? parsed : null;
-        } catch {}
-      }
-      let approvalTarget: bigint | null = explicitApproval;
+      // Always request a bounded approval: keyPrice * selected periods (1 or up to 12).
+      const approvalPeriods =
+        pricing?.erc20Address && (intent.kind === 'membership' || intent.kind === 'renewal')
+          ? membershipApprovalPeriods
+          : 1;
+      const approvalTarget: bigint | null =
+        pricing?.erc20Address && pricing.rawValue > 0n
+          ? pricing.rawValue * BigInt(approvalPeriods)
+          : null;
+      const safeApprovalString =
+        approvalTarget && approvalTarget > 0n
+          ? approvalTarget.toString()
+          : null;
 
       const prefetchedTokenIdList = prefetchedTokenIds?.[target.checksumAddress.toLowerCase()] || prefetchedTokenIds?.[target.lockAddress?.toLowerCase?.() ?? ''];
       const prefetchedTokenId = Array.isArray(prefetchedTokenIdList) && prefetchedTokenIdList.length ? prefetchedTokenIdList[0] : null;
@@ -535,23 +548,6 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           return;
         }
 
-        const approvalPeriods =
-          intent.kind === 'membership' || intent.kind === 'renewal'
-            ? membershipApprovalPeriods
-            : typeof recurringPayments === 'number' && recurringPayments > 0
-              ? recurringPayments
-              : 1;
-
-        if (!approvalTarget && pricing.rawValue > 0n && approvalPeriods > 0) {
-          approvalTarget = pricing.rawValue * BigInt(approvalPeriods);
-        }
-
-        if (approvalTarget && approvalTarget >= SAFE_ALLOWANCE_CAP) {
-          setError('Calculated approval amount is unexpectedly large; refusing to request unlimited token approval.');
-          setStatus('error');
-          return;
-        }
-
         if (approvalTarget && approvalTarget > 0n) {
           await ensureErc20Approval(
             browserProvider,
@@ -581,9 +577,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           data: overrideData,
           recurringPayments,
           totalApproval:
-            pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
-              ? approvalTarget.toString()
-              : undefined,
+            pricing.erc20Address && safeApprovalString ? safeApprovalString : undefined,
         } as any);
         hash = extractTxHash(tx);
         if (handlers.onMembershipComplete) {
@@ -606,9 +600,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
             data: overrideData,
             recurringPayments,
             totalApproval:
-              pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
-                ? approvalTarget.toString()
-                : undefined,
+              pricing.erc20Address && safeApprovalString ? safeApprovalString : undefined,
           } as any);
           hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
           await handlers.onMembershipComplete?.(target);
@@ -633,9 +625,12 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
               decimals: pricing.decimals,
               referrer: overrideReferrer ?? owner,
               data: overrideData,
-            recurringPayments,
-            totalApproval: explicitApproval ? explicitApproval.toString() : undefined,
-          } as any);
+              recurringPayments,
+              totalApproval:
+                pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
+                  ? approvalTarget.toString()
+                  : undefined,
+            } as any);
             hash = extractTxHash(tx);
             await handlers.onMembershipComplete?.(target);
             setTxHash(hash);
@@ -657,9 +652,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           additionalPeriods: overrideAdditionalPeriods,
           recurringPayments: recurringPayments,
           totalApproval:
-            pricing.erc20Address && approvalTarget && approvalTarget > 0n && approvalTarget < SAFE_ALLOWANCE_CAP
-              ? approvalTarget.toString()
-              : undefined,
+            pricing.erc20Address && safeApprovalString ? safeApprovalString : undefined,
         } as any);
         hash = extractTxHash(tx);
         if (isEventTarget(target)) {
@@ -672,11 +665,16 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
       setTxHash(hash);
       setStatus('success');
     } catch (err) {
-      console.error('Checkout failed:', err);
-      setError(formatErrorMessage(err));
-      setStatus('error');
+      if (isUserRejected(err)) {
+        setStatus('ready');
+        setError(null);
+      } else {
+        console.error('Checkout failed:', err);
+        setError(formatErrorMessage(err));
+        setStatus('error');
+      }
     }
-  }, [handlers, intent, prefetchedTokenIds, pricing, target]);
+  }, [handlers, intent, prefetchedTokenIds, preapproveYear, pricing, target]);
 
   const drawer = useMemo(() => {
     if (!isClient || !target || !intent) return null;
@@ -684,10 +682,10 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
       label: tier.label || tier.checksumAddress.slice(0, 6).concat('…').concat(tier.checksumAddress.slice(-4)),
       value: tier.id,
     }));
-    const allowTierSwitch = intent.kind === 'membership' && MEMBERSHIP_CHECKOUT_TARGETS.length > 1 && status !== 'success';
+    const allowTierSwitch = false; // keep a single tier selection for this flow
     const eventDetails = intent.kind === 'event' ? intent.eventDetails ?? null : null;
     return createPortal(
-      <Drawer isOpen onOpenChange={(open: boolean) => (open ? undefined : close())} title="Unlock Checkout">
+      <Drawer isOpen onOpenChange={(open: boolean) => (open ? undefined : close())} title="Confirm Checkout">
         <div className="flex flex-col gap-6 p-6">
           <div className="space-y-1">
             <p className="text-sm font-semibold text-[var(--brand-navy)]">
@@ -695,9 +693,9 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
                 ? target.label || 'PGP Membership'
                 : eventDetails?.title || 'Event Registration'}
             </p>
-            {status !== 'success' && (
+            {status !== 'success' && pricing && (
               <p className="text-xs text-[var(--muted-ink)]">
-                Base · Lock {target.checksumAddress.slice(0, 6)}…{target.checksumAddress.slice(-4)}
+                {pricing.displayPrice} per month
               </p>
             )}
             {eventDetails ? (
@@ -734,6 +732,20 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
             <div className="rounded-lg bg-[rgba(67,119,243,0.08)] p-4 text-sm text-[var(--brand-navy)]">
               <p className="font-medium">Price</p>
               <p>{pricing.displayPrice}</p>
+              <p className="text-xs text-[var(--muted-ink)]">You’ll also need a small amount of ETH on Base for gas (~0.00002–0.0001 ETH covers approval + purchase).</p>
+              {isMembershipTarget(target) && pricing.erc20Address ? (
+                <label className="mt-3 flex items-start gap-2 text-xs text-[var(--muted-ink)]">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={preapproveYear}
+                    onChange={(e) => setPreapproveYear(e.target.checked)}
+                  />
+                  <span>
+                    Pre-approve 12 months of USDC to reduce future prompts. Uncheck to approve just this purchase.
+                  </span>
+                </label>
+              ) : null}
               {intent.kind === 'renewal' && (
                 <p className="mt-2 text-xs text-[var(--muted-ink)]">
                   We will renew the selected membership tier using your connected wallet.
@@ -788,6 +800,14 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
           ) : (
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button
+                variant="ghost"
+                onClick={close}
+                className="flex-1"
+                disabled={status === 'processing'}
+              >
+                Back
+              </Button>
+              <Button
                 variant="outlined-primary"
                 onClick={close}
                 className="flex-1"
@@ -801,7 +821,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
                 isLoading={status === 'processing'}
                 disabled={!pricing || status === 'processing'}
               >
-                {intent.kind === 'renewal' ? 'Renew Membership' : 'Confirm Checkout'}
+                {intent.kind === 'renewal' ? 'Renew Membership' : 'Continue'}
               </Button>
             </div>
           )}
@@ -809,7 +829,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
       </Drawer>,
       document.body,
     );
-  }, [close, confirm, error, intent, isClient, pricing, selectMembershipTier, status, target, txHash]);
+  }, [close, confirm, error, intent, isClient, preapproveYear, pricing, selectMembershipTier, status, target, txHash]);
 
   return {
     openMembershipCheckout,

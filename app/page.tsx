@@ -1,5 +1,6 @@
 import { getServerSession } from "next-auth";
 import dynamic from "next/dynamic";
+import { Suspense } from "react";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import { membershipStateService, snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import type { MembershipSummary } from "@/lib/membership-server";
@@ -69,14 +70,16 @@ export default async function HomePage() {
   }
 
   return (
-    <HomeClient
-      initialMembershipSummary={initialSummary}
-      initialMembershipStatus={initialStatus}
-      initialMembershipExpiry={initialExpiry}
-      initialAllowances={initialAllowances}
-      initialTokenIds={initialTokenIds}
-      initialAllowancesLoaded={initialAllowancesLoaded}
-      initialNfts={initialNfts}
-    />
+    <Suspense fallback={<HomeShellSkeleton />}>
+      <HomeClient
+        initialMembershipSummary={initialSummary}
+        initialMembershipStatus={initialStatus}
+        initialMembershipExpiry={initialExpiry}
+        initialAllowances={initialAllowances}
+        initialTokenIds={initialTokenIds}
+        initialAllowancesLoaded={initialAllowancesLoaded}
+        initialNfts={initialNfts}
+      />
+    </Suspense>
   );
 }

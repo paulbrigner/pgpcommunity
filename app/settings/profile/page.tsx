@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -12,6 +13,7 @@ import { fetchMembershipStateSnapshot } from "@/app/actions/membership-state";
 export default function ProfileSettingsPage() {
   const { data: session, status, update } = useSession();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const ready = status !== "loading";
   const authenticated = status === "authenticated";
 
@@ -48,6 +50,7 @@ export default function ProfileSettingsPage() {
       ),
     );
   }, [walletAddress, wallets]);
+  const membershipAddressesKey = useMemo(() => membershipAddresses.join(","), [membershipAddresses]);
 
   useEffect(() => {
     if (!authenticated || !sessionUser) return;
@@ -74,11 +77,11 @@ export default function ProfileSettingsPage() {
     }
   }, [router]);
 
-  useEffect(() => {
-    if (!authenticated) return;
-    if (!membershipAddresses.length) return;
-    if (sessionMembershipSummary) return;
-    const fetchMembership = async () => {
+useEffect(() => {
+  if (!authenticated) return;
+  if (!membershipAddresses.length) return;
+  if (sessionMembershipSummary) return;
+  const fetchMembership = async () => {
       try {
         await fetchMembershipStateSnapshot({ addresses: membershipAddresses, forceRefresh: true });
       } catch (err) {
@@ -86,7 +89,52 @@ export default function ProfileSettingsPage() {
       }
     };
     void fetchMembership();
-  }, [authenticated, membershipAddresses, sessionMembershipSummary]);
+}, [authenticated, membershipAddresses, sessionMembershipSummary]);
+
+// Prefetch home data to speed up navigation back to Home.
+useEffect(() => {
+  if (!authenticated) return;
+    if (!membershipAddressesKey) return;
+    const controller = new AbortController();
+    const prefetch = async () => {
+      try {
+        const res = await fetch(`/api/nfts?addresses=${encodeURIComponent(membershipAddressesKey)}`, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!res.ok) return;
+        const payload = await res.json();
+        queryClient.setQueryData(["nfts", membershipAddressesKey], {
+          creatorNfts: Array.isArray(payload?.nfts) ? payload.nfts : [],
+          missedNfts: Array.isArray(payload?.missed) ? payload.missed : [],
+          upcomingNfts: Array.isArray(payload?.upcoming) ? payload.upcoming : [],
+          error: typeof payload?.error === "string" && payload.error.length ? payload.error : null,
+        });
+      } catch {
+        // ignore prefetch errors
+      }
+    };
+    void prefetch();
+  return () => controller.abort();
+}, [authenticated, membershipAddressesKey, queryClient]);
+
+// Prefetch membership snapshot into React Query so Home can hydrate instantly.
+useEffect(() => {
+  if (!authenticated) return;
+  if (!membershipAddressesKey) return;
+  if (!sessionMembershipSummary) return;
+  queryClient.setQueryData(
+    ["membership", membershipAddressesKey],
+    {
+      summary: sessionMembershipSummary,
+      allowances: {},
+      tokenIds: {},
+      includesAllowances: false,
+      includesTokenIds: false,
+    },
+    { updatedAt: Date.now() },
+  );
+}, [authenticated, membershipAddressesKey, queryClient, sessionMembershipSummary]);
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

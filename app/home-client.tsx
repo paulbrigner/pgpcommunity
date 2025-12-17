@@ -2,7 +2,7 @@
 // so it needs to run on the client side rather than on the server.
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react"; // React helpers for state and lifecycle
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"; // React helpers for state and lifecycle
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { useSession } from "next-auth/react";
@@ -142,6 +142,11 @@ export default function HomeClient({
   const [autoRenewPromptDismissed, setAutoRenewPromptDismissed] = useState(false);
   const [autoRenewProcessing, setAutoRenewProcessing] = useState(false);
   const [autoRenewMessage, setAutoRenewMessage] = useState<string | null>(null);
+  const [memberClaimProcessing, setMemberClaimProcessing] = useState(false);
+  const [memberClaimMessage, setMemberClaimMessage] = useState<string | null>(null);
+  const [memberClaimError, setMemberClaimError] = useState<string | null>(null);
+  const [memberClaimTxHash, setMemberClaimTxHash] = useState<string | null>(null);
+  const memberClaimPollIdRef = useRef(0);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
@@ -181,6 +186,7 @@ export default function HomeClient({
       }) ?? null
     );
   }, [normalizedSelectedTierId]);
+  const selectedTierGasSponsored = selectedTierConfig?.gasSponsored === true;
   useEffect(() => {
     if (!MEMBERSHIP_TIERS.length) return;
     if (selectedTierConfig && normalizedSelectedTierId) return;
@@ -203,7 +209,12 @@ export default function HomeClient({
     () => resolveTierLabel(currentTier, null),
     [currentTier]
   );
-  const memberLevelLabel = currentTierLabel || 'PGP';
+  const memberLevelLabel = useMemo(() => {
+    const label = (currentTierLabel || '').trim();
+    if (!label) return 'PGP';
+    if (label.toLowerCase() === 'member') return 'community';
+    return label;
+  }, [currentTierLabel]);
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {
     if (currentTier?.status === 'active') return currentTier;
     return null;
@@ -214,9 +225,16 @@ export default function HomeClient({
     setAutoRenewMessage(null);
     setAutoRenewPromptDismissed(true);
   }, []);
-  const autoRenewReady = autoRenewStateReady && membershipStatus === 'active' && !!renewalTierAddress;
-  const needsAutoRenewStep = autoRenewReady && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed;
-  const autoRenewPending = membershipStatus === 'active' && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed && !autoRenewReady;
+  const autoRenewEligible = renewalTier?.tier?.renewable !== false && renewalTier?.tier?.neverExpires !== true;
+  const autoRenewReady = autoRenewEligible && autoRenewStateReady && membershipStatus === 'active' && !!renewalTierAddress;
+  const needsAutoRenewStep = autoRenewEligible && autoRenewReady && walletLinked && !autoRenewEnabled && !autoRenewPromptDismissed;
+  const autoRenewPending =
+    autoRenewEligible &&
+    membershipStatus === 'active' &&
+    walletLinked &&
+    !autoRenewEnabled &&
+    !autoRenewPromptDismissed &&
+    !autoRenewReady;
   const showAutoRenewAlert = Boolean(autoRenewMessage);
   const autoRenewMessageNode = showAutoRenewAlert ? (
     <Alert className="glass-item border-[rgba(67,119,243,0.35)] bg-[rgba(67,119,243,0.15)] text-[var(--brand-navy)]">
@@ -226,6 +244,29 @@ export default function HomeClient({
           {"Let's go!"}
         </Button>
       </div>
+    </Alert>
+  ) : null;
+  const memberClaimAlertNode = memberClaimMessage || memberClaimError ? (
+    <Alert
+      variant={memberClaimError ? "destructive" : undefined}
+      className="glass-item border-[rgba(193,197,226,0.45)] bg-white/80 text-[var(--brand-navy)]"
+    >
+      <AlertDescription className="text-sm">
+        {memberClaimError || memberClaimMessage}
+        {memberClaimTxHash ? (
+          <>
+            {" "}
+            <a
+              href={`${BASE_BLOCK_EXPLORER_URL}/tx/${memberClaimTxHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4"
+            >
+              View transaction
+            </a>
+          </>
+        ) : null}
+      </AlertDescription>
     </Alert>
   ) : null;
 
@@ -267,7 +308,7 @@ export default function HomeClient({
     checkoutPortal,
     status: checkoutStatus,
   } = useUnlockCheckout({
-    onMembershipComplete: async () => {
+    onMembershipComplete: async (target, completion) => {
       try {
         if (addressesKey) {
           await fetch("/api/membership/invalidate", {
@@ -276,9 +317,40 @@ export default function HomeClient({
             body: JSON.stringify({ addresses: addressList, chainId: BASE_NETWORK_ID }),
           }).catch(() => {});
         }
-        await refreshMembership();
+        await refreshMembership({ forceRefresh: true });
       } catch (err) {
         console.error('Membership refresh after checkout failed:', err);
+      }
+      try {
+        const targetKeys = [target?.id, target?.lockAddress, target?.checksumAddress]
+          .map((value) => (value ? String(value).toLowerCase() : ""))
+          .filter(Boolean);
+        const completedTier =
+          MEMBERSHIP_TIERS.find((tier) => {
+            const keys = [tier.id, tier.address, tier.checksumAddress]
+              .map((value) => (value ? String(value).toLowerCase() : ""))
+              .filter(Boolean);
+            return targetKeys.some((key) => keys.includes(key));
+          }) ?? null;
+        const paidTierCompleted = !!completedTier && completedTier.renewable !== false && completedTier.neverExpires !== true;
+        if (!paidTierCompleted) return;
+        if (!addressList.length) return;
+
+        const ownerLower = completion?.owner ? String(completion.owner).toLowerCase() : null;
+        const recipient =
+          ownerLower && addressList.includes(ownerLower)
+            ? ownerLower
+            : addressList[0] || null;
+        if (!recipient) return;
+
+        await fetch("/api/membership/claim-member", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ recipient }),
+        }).catch(() => {});
+        await refreshMembership({ forceRefresh: true });
+      } catch (err) {
+        console.error("Member claim after paid checkout failed:", err);
       }
     },
     onEventComplete: async () => {
@@ -412,6 +484,10 @@ export default function HomeClient({
   const enableAutoRenew = useCallback(async () => {
     if (autoRenewProcessing) return;
     setAutoRenewMessage(null);
+    if (!autoRenewEligible) {
+      setAutoRenewMessage('Auto-renew is unavailable for this membership tier.');
+      return;
+    }
     if (!USDC_ADDRESS || !renewalTierAddress) {
       setAutoRenewMessage('Auto-renew is unavailable. No eligible membership tier detected.');
       return;
@@ -467,7 +543,7 @@ export default function HomeClient({
         setAutoRenewMessage(`Auto-renew enabled for ${tierLabelForMessage}. We'll attempt renewals automatically (up to 12 months).`);
       }
       setAutoRenewPromptDismissed(true);
-      await refreshMembership();
+      await refreshMembership({ forceRefresh: true });
     } catch (err: any) {
       if (isUserRejected(err)) {
         // Treat wallet rejection as a user cancel; no error banner.
@@ -480,7 +556,7 @@ export default function HomeClient({
     } finally {
       setAutoRenewProcessing(false);
     }
-  }, [autoRenewProcessing, ensureBaseNetwork, refreshMembership, renewalTierAddress, renewalTierLabel]);
+  }, [autoRenewProcessing, autoRenewEligible, ensureBaseNetwork, refreshMembership, renewalTierAddress, renewalTierLabel]);
 
   const handleSkipAutoRenew = useCallback(() => {
     setAutoRenewPromptDismissed(true);
@@ -517,6 +593,75 @@ export default function HomeClient({
     openMembershipCheckout(targetId);
   }, [walletAddress, wallets, normalizedSelectedTierId, membershipSummary, selectedTierConfig, openMembershipCheckout]);
 
+  const claimMemberTier = useCallback(async () => {
+    if (memberClaimProcessing) return;
+    const pollId = memberClaimPollIdRef.current + 1;
+    memberClaimPollIdRef.current = pollId;
+    setMemberClaimError(null);
+    setMemberClaimMessage(null);
+    setMemberClaimTxHash(null);
+
+    if (!authenticated) {
+      setMemberClaimError("Sign in before claiming the free membership.");
+      return;
+    }
+    if (!walletLinked || addressList.length === 0) {
+      setMemberClaimError("Link your wallet before claiming the free membership.");
+      return;
+    }
+
+    setMemberClaimProcessing(true);
+    try {
+      const res = await fetch("/api/membership/claim-member", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipient: addressList[0] }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to claim free membership.");
+      }
+
+      const txHash = typeof payload?.txHash === "string" && payload.txHash.length ? payload.txHash : null;
+      setMemberClaimTxHash(txHash);
+      setMemberClaimMessage(
+        payload?.status === "already-member"
+          ? "Free membership is already active."
+          : "Transaction submitted. Your membership will activate once confirmed on Base.",
+      );
+      setConfirmOpen(false);
+
+      await refreshMembership({ forceRefresh: true });
+
+      if (payload?.status !== "already-member") {
+        void (async () => {
+          const delaysMs = [1500, 2500, 4000, 6500, 10000, 15000];
+          for (const delay of delaysMs) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            if (memberClaimPollIdRef.current !== pollId) return;
+            try {
+              const result = await refreshMembership({ forceRefresh: true });
+              const status = result?.data?.summary?.status;
+              const expiry = result?.data?.summary?.expiry;
+              const nowSec = Math.floor(Date.now() / 1000);
+              const isActive =
+                status === "active" ||
+                (typeof expiry === "number" && Number.isFinite(expiry) && expiry > nowSec);
+              if (isActive) {
+                setMemberClaimMessage("Free membership is active.");
+                return;
+              }
+            } catch {}
+          }
+        })();
+      }
+    } catch (err: any) {
+      setMemberClaimError(err?.message || "Failed to claim free membership.");
+    } finally {
+      setMemberClaimProcessing(false);
+    }
+  }, [memberClaimProcessing, authenticated, walletLinked, addressList, refreshMembership]);
+
   return (
     <>
       {checkoutPortal}
@@ -547,7 +692,8 @@ export default function HomeClient({
             </div>
           </div>
         </div>
-      </section>
+	      </section>
+        {memberClaimAlertNode}
       {/* Scenario-driven UI based on auth, wallet linking, and membership */}
       {!ready ? (
         <div className="glass-surface p-8 text-center text-lg text-[var(--brand-navy)]/85">Loading…</div>
@@ -760,9 +906,14 @@ export default function HomeClient({
                       : statusLabel === 'expired'
                       ? 'Expired'
                       : 'Not owned';
-                  const expiryDisplay = summaryTier?.expiry && summaryTier.expiry > 0
-                    ? ` • expires ${new Date(summaryTier.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
-                    : '';
+                  const expiryDisplay =
+                    statusLabel !== 'none'
+                      ? statusLabel === 'active' && tier.neverExpires
+                        ? ' • never expires'
+                        : summaryTier?.expiry && summaryTier.expiry > 0
+                          ? ` • expires ${new Date(summaryTier.expiry * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}`
+                          : ''
+                      : '';
                   return (
                     <li key={tier.id} className="flex flex-col gap-2 rounded-xl border border-[rgba(193,197,226,0.45)] bg-white/80 px-4 py-3 md:flex-row md:items-center md:justify-between">
                       <span className="font-medium text-[var(--brand-navy)]">{label}</span>
@@ -817,6 +968,7 @@ export default function HomeClient({
                       const allowanceDisplay = formatUsdcPrice(allowances[key].keyPrice);
                       if (allowanceDisplay) return allowanceDisplay;
                     }
+                    if (tier.neverExpires && tier.renewable === false) return 'Free';
                     return "USDC price shown at checkout";
                   })();
                   const isSelected = normalizedSelectedTierId
@@ -852,26 +1004,58 @@ export default function HomeClient({
               </div>
             </div>
           ) : null}
-          <WalletReadyNote
-            membershipSummary={membershipSummary}
-            selectedTierId={normalizedSelectedTierId}
-            tiers={MEMBERSHIP_TIERS}
-            allowances={allowances}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={MEMBERSHIP_TIERS.length > 0 && !selectedTierConfig && !normalizedSelectedTierId}
-              onClick={() => {
-                setConfirmOpen(false);
-                purchaseMembership();
-              }}
-            >
-              Continue
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+	          <WalletReadyNote
+	            membershipSummary={membershipSummary}
+	            selectedTierId={normalizedSelectedTierId}
+	            tiers={MEMBERSHIP_TIERS}
+	            allowances={allowances}
+	          />
+	            {memberClaimError ? (
+	              <Alert variant="destructive">
+	                <AlertDescription className="space-y-3">
+                    <div>{memberClaimError}</div>
+                    {selectedTierGasSponsored ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={memberClaimProcessing}
+                        onClick={() => {
+                          setConfirmOpen(false);
+                          purchaseMembership();
+                        }}
+                      >
+                        Claim manually (requires Base ETH gas)
+                      </Button>
+                    ) : null}
+                  </AlertDescription>
+	              </Alert>
+	            ) : null}
+		          <AlertDialogFooter>
+		            <AlertDialogCancel disabled={memberClaimProcessing}>Cancel</AlertDialogCancel>
+		            <AlertDialogAction
+		              disabled={
+                  memberClaimProcessing ||
+                  (MEMBERSHIP_TIERS.length > 0 && !selectedTierConfig && !normalizedSelectedTierId)
+                }
+	              onClick={(event) => {
+                  event.preventDefault();
+                  if (selectedTierGasSponsored) {
+                    void claimMemberTier();
+                    return;
+                  }
+	                setConfirmOpen(false);
+	                purchaseMembership();
+	              }}
+	            >
+	              {selectedTierGasSponsored
+                  ? memberClaimProcessing
+                    ? "Claiming…"
+                    : "Claim Free Membership (Sponsored)"
+                  : "Continue"}
+	            </AlertDialogAction>
+		          </AlertDialogFooter>
+	        </AlertDialogContent>
+	      </AlertDialog>
       
       </div>
     </>
@@ -889,6 +1073,7 @@ const formatUsdcPrice = (raw: string | number | null | undefined): string | null
   if (raw === null || raw === undefined) return null;
 
   const formatValue = (value: number) => {
+    if (value <= 0) return 'Free';
     return `${value.toFixed(2)} USDC`;
   };
 
@@ -917,6 +1102,16 @@ const formatUsdcPrice = (raw: string | number | null | undefined): string | null
 };
 
 function WalletReadyNote({ membershipSummary, selectedTierId, tiers, allowances }: WalletReadyNoteProps) {
+  const selectedTierConfig = useMemo(() => {
+    if (!selectedTierId) return null;
+    const normalized = selectedTierId.toLowerCase();
+    return (
+      tiers.find((tier) => {
+        const keys = [tier.id, tier.address, tier.checksumAddress].map((value) => (value ? String(value).toLowerCase() : ""));
+        return keys.includes(normalized);
+      }) ?? null
+    );
+  }, [tiers, selectedTierId]);
   const selectedTierSummary = useMemo(() => {
     if (!selectedTierId) return null;
     const normalized = selectedTierId.toLowerCase();
@@ -935,30 +1130,45 @@ function WalletReadyNote({ membershipSummary, selectedTierId, tiers, allowances 
     selectedTierSummary?.metadata?.name ||
     (fallbackTier ? fallbackTier.label || fallbackTier.id : "membership");
 
-  const priceDisplay = useMemo(() => {
-    const rawMeta = selectedTierSummary?.metadata?.price;
-    const metaDisplay = formatUsdcPrice(rawMeta);
-    if (metaDisplay) return metaDisplay;
+	  const priceDisplay = useMemo(() => {
+	    const rawMeta = selectedTierSummary?.metadata?.price;
+	    const metaDisplay = formatUsdcPrice(rawMeta);
+	    if (metaDisplay) return metaDisplay;
     const key = selectedTierSummary?.tier.checksumAddress?.toLowerCase();
     if (key && allowances[key]?.keyPrice) {
       const allowancePrice = formatUsdcPrice(allowances[key].keyPrice);
       if (allowancePrice) return allowancePrice;
     }
-    return "USDC price shown at checkout";
-  }, [selectedTierSummary, allowances]);
+	    if (selectedTierConfig?.neverExpires && selectedTierConfig?.renewable === false) return 'Free';
+	    return "USDC price shown at checkout";
+	  }, [selectedTierSummary, allowances, selectedTierConfig]);
+	  const isFreeTier = priceDisplay === 'Free';
+	  const gasSponsored = selectedTierConfig?.gasSponsored === true;
 
-  return (
-    <div className="space-y-2 rounded-lg border border-[rgba(193,197,226,0.45)] bg-white/70 p-4 text-left text-[var(--muted-ink)]">
-      <div className="text-sm font-semibold text-[var(--brand-navy)]">What to have in your wallet</div>
-      <ul className="list-disc space-y-1 pl-4 text-sm">
-        <li>
-          USDC (Base): <span className="font-medium text-[var(--brand-navy)]">{priceDisplay}</span> for the selected tier{selectedLabel ? ` (${selectedLabel})` : ""}.
-        </li>
-        <li>ETH (Base): a small amount for gas. Keep ~0.00002–0.0001 ETH to cover approval + purchase.</li>
-      </ul>
-      <div className="text-xs text-[var(--muted-ink)]">
-        First purchase may prompt an approval then a purchase. You can enable auto-renew later from Edit Profile.
-      </div>
-    </div>
-  );
-}
+	  return (
+	    <div className="space-y-2 rounded-lg border border-[rgba(193,197,226,0.45)] bg-white/70 p-4 text-left text-[var(--muted-ink)]">
+	      <div className="text-sm font-semibold text-[var(--brand-navy)]">What to have in your wallet</div>
+	      <ul className="list-disc space-y-1 pl-4 text-sm">
+        {isFreeTier ? (
+          <li>
+            Cost: <span className="font-medium text-[var(--brand-navy)]">Free</span> for the selected tier{selectedLabel ? ` (${selectedLabel})` : ""}.
+          </li>
+	        ) : (
+	          <li>
+	            USDC (Base): <span className="font-medium text-[var(--brand-navy)]">{priceDisplay}</span> for the selected tier{selectedLabel ? ` (${selectedLabel})` : ""}.
+	          </li>
+	        )}
+	        {isFreeTier && gasSponsored ? (
+	          <li>ETH (Base): not required (gas is sponsored).</li>
+	        ) : (
+	          <li>ETH (Base): a small amount for gas. Keep ~0.00002–0.0001 ETH to cover approval + purchase.</li>
+	        )}
+	      </ul>
+	      <div className="text-xs text-[var(--muted-ink)]">
+	        {isFreeTier && gasSponsored
+	          ? "Free membership claims use a sponsored on-chain transaction (requires verified email)."
+	          : "First purchase may prompt an approval then a purchase. You can enable auto-renew later from Edit Profile."}
+	      </div>
+	    </div>
+	  );
+	}

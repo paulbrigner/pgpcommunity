@@ -155,8 +155,9 @@ export async function getMembershipSummary(addresses: string[], rpcUrl: string, 
 
   const tiers: TierMembershipSummary[] = [];
   let highestActiveTier: TierMembershipSummary | null = null;
-  let overallStatus: TierStatus = 'none';
-  let overallExpiry: number | null = null;
+  let hasAnyActive = false;
+  let maxExpiredExpiry: number | null = null;
+  const farFutureCutoffSec = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365 * 50; // 50 years
 
   for (const tier of MEMBERSHIP_TIERS) {
     const { status, expiry } = await evaluateLockMembership(normalizedAddresses, rpcUrl, networkId, tier.checksumAddress);
@@ -169,33 +170,36 @@ export async function getMembershipSummary(addresses: string[], rpcUrl: string, 
           price: metadataRaw?.price ?? metadataRaw?.metadata?.price ?? null,
         }
       : undefined;
+
+    const isFarFuture = typeof expiry === 'number' && Number.isFinite(expiry) && expiry > farFutureCutoffSec;
+    const normalizedExpiry = status === 'active' && (tier.neverExpires || isFarFuture) ? null : expiry ?? null;
     const entry: TierMembershipSummary = {
       tier,
       status,
-      expiry: expiry ?? null,
+      expiry: normalizedExpiry,
       metadata,
     };
     tiers.push(entry);
 
     if (status === 'active') {
+      hasAnyActive = true;
       if (!highestActiveTier || tier.order < highestActiveTier.tier.order) {
         highestActiveTier = entry;
       }
-      overallStatus = 'active';
-      if (typeof entry.expiry === 'number') {
-        if (!overallExpiry || entry.expiry > overallExpiry) {
-          overallExpiry = entry.expiry;
-        }
-      }
-    } else if (overallStatus !== 'active' && status === 'expired') {
-      overallStatus = 'expired';
-      if (typeof entry.expiry === 'number') {
-        if (!overallExpiry || entry.expiry > overallExpiry) {
-          overallExpiry = entry.expiry;
-        }
+    } else if (status === 'expired') {
+      if (typeof entry.expiry === 'number' && Number.isFinite(entry.expiry) && entry.expiry > 0) {
+        maxExpiredExpiry = Math.max(maxExpiredExpiry ?? 0, entry.expiry);
       }
     }
   }
+
+  const overallStatus: TierStatus = hasAnyActive ? 'active' : maxExpiredExpiry ? 'expired' : 'none';
+  const overallExpiry: number | null =
+    overallStatus === 'active'
+      ? (typeof highestActiveTier?.expiry === 'number' ? highestActiveTier.expiry : null)
+      : overallStatus === 'expired'
+        ? maxExpiredExpiry
+        : null;
 
   return {
     status: overallStatus,

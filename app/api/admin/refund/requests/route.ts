@@ -14,6 +14,7 @@ type RefundRequest = {
   tierLabel: string | null;
   lockAddress: string | null;
   activeLocks?: Array<{ lockAddress: string; tierId: string | null; tierLabel: string | null }>;
+  postCancelPreference?: string | null;
   status: string;
   reason: string | null;
   createdAt: string;
@@ -52,6 +53,7 @@ async function listRequests(): Promise<RefundRequest[]> {
                 }))
                 .filter((entry) => !!entry.lockAddress)
             : [],
+          postCancelPreference: (item as any).postCancelPreference || null,
           status: (item as any).status || "pending",
           reason: (item as any).reason || null,
           createdAt: (item as any).createdAt || "",

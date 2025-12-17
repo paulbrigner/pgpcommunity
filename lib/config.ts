@@ -12,6 +12,9 @@ export type MembershipTierConfig = {
   checksumAddress: string;
   label?: string;
   order: number;
+  renewable?: boolean;
+  gasSponsored?: boolean;
+  neverExpires?: boolean;
 };
 
 const DEFAULT_MEMBERSHIP_REFERRER = '0x76ff49cc68710a0df27724d46698835d7c7af2f2';
@@ -32,12 +35,18 @@ const parseMembershipTiers = (): MembershipTierConfig[] => {
             const label = typeof entry?.label === 'string' ? entry.label.trim() : undefined;
             const orderRaw = Number(entry?.order);
             const order = Number.isFinite(orderRaw) ? orderRaw : index;
+            const renewable = typeof entry?.renewable === 'boolean' ? entry.renewable : true;
+            const gasSponsored = typeof entry?.gasSponsored === 'boolean' ? entry.gasSponsored : false;
+            const neverExpires = typeof entry?.neverExpires === 'boolean' ? entry.neverExpires : false;
             return {
               id,
               address: address.toLowerCase(),
               checksumAddress: address,
               label,
               order,
+              renewable,
+              gasSponsored,
+              neverExpires,
             } as MembershipTierConfig;
           })
           .filter(Boolean) as MembershipTierConfig[];
@@ -58,6 +67,9 @@ const parseMembershipTiers = (): MembershipTierConfig[] => {
       checksumAddress: fallbackAddress,
       label: undefined,
       order: 0,
+      renewable: true,
+      gasSponsored: false,
+      neverExpires: false,
     },
   ];
 };

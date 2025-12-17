@@ -36,6 +36,17 @@ const resolveConfig = (id: string | null | undefined) => {
   );
 };
 
+const asExpirySeconds = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return null;
+  return value;
+};
+
+const expirySortValue = (expiry: number | null | undefined): number => {
+  const normalized = asExpirySeconds(expiry);
+  // Treat null/invalid expiry as "never expires" for comparisons.
+  return normalized ?? Number.MAX_SAFE_INTEGER;
+};
+
 export const normalizeTierId = (value: string | null | undefined): string | null | undefined => {
   if (value === undefined) return undefined;
   return normalize(value);
@@ -56,45 +67,66 @@ export const findTierInSummary = (
   return null;
 };
 
-const compareActiveTiers = (a: TierMembershipSummary, b: TierMembershipSummary): number => {
-  const expiryA = typeof a.expiry === 'number' && Number.isFinite(a.expiry) ? a.expiry : Number.MAX_SAFE_INTEGER;
-  const expiryB = typeof b.expiry === 'number' && Number.isFinite(b.expiry) ? b.expiry : Number.MAX_SAFE_INTEGER;
-  if (expiryA !== expiryB) {
-    return expiryB - expiryA;
-  }
-  const orderA = typeof a.tier.order === 'number' ? a.tier.order : Number.MAX_SAFE_INTEGER;
-  const orderB = typeof b.tier.order === 'number' ? b.tier.order : Number.MAX_SAFE_INTEGER;
-  if (orderA !== orderB) {
-    return orderA - orderB;
-  }
-  return a.tier.checksumAddress.localeCompare(b.tier.checksumAddress);
-};
-
 export const pickHighestActiveTier = (summary: MembershipSummary | null | undefined): TierMembershipSummary | null => {
   if (!summary?.tiers?.length) return null;
   const active = summary.tiers.filter((tier) => tier.status === 'active');
   if (!active.length) {
     return summary.highestActiveTier ?? null;
   }
-  const sorted = [...active].sort(compareActiveTiers);
-  return sorted[0] ?? null;
+  // "Highest" is defined by tier order (lower order = higher priority). Expiry is not used for rank.
+  return active.reduce<TierMembershipSummary>((best, current) => {
+    const bestOrder = typeof best.tier.order === 'number' ? best.tier.order : Number.MAX_SAFE_INTEGER;
+    const currentOrder = typeof current.tier.order === 'number' ? current.tier.order : Number.MAX_SAFE_INTEGER;
+    if (currentOrder !== bestOrder) {
+      return currentOrder < bestOrder ? current : best;
+    }
+    const bestExpiry = expirySortValue(best.expiry);
+    const currentExpiry = expirySortValue(current.expiry);
+    if (currentExpiry !== bestExpiry) {
+      return currentExpiry > bestExpiry ? current : best;
+    }
+    return current.tier.checksumAddress.localeCompare(best.tier.checksumAddress) < 0 ? current : best;
+  }, active[0]);
 };
 
 export const pickNextActiveTier = (summary: MembershipSummary | null | undefined): TierMembershipSummary | null => {
   if (!summary?.tiers?.length) return null;
-  const active = summary.tiers.filter((tier) => tier.status === 'active');
-  if (active.length < 2) return null;
-  const sorted = [...active].sort(compareActiveTiers);
-  const first = sorted[0];
-  const second = sorted[1] ?? null;
-  if (!second) return null;
-  // If expiries are identical, there is no later tier to fall back to
-  const firstExpiry = typeof first.expiry === 'number' ? first.expiry : null;
-  const secondExpiry = typeof second.expiry === 'number' ? second.expiry : null;
-  if (firstExpiry && secondExpiry && secondExpiry <= firstExpiry) {
+  const current = pickHighestActiveTier(summary);
+  if (!current || current.status !== 'active') return null;
+  const currentExpiryValue = expirySortValue(current.expiry);
+  if (currentExpiryValue === Number.MAX_SAFE_INTEGER) {
+    // Current tier never expires; there is no "next after expiry".
     return null;
   }
-  return second;
+
+  const currentKeys = collectKeys(current);
+  const candidates = summary.tiers.filter((tier) => {
+    if (tier.status !== 'active') return false;
+    const keys = collectKeys(tier);
+    for (const key of keys) {
+      if (currentKeys.has(key)) return false;
+    }
+    return true;
+  });
+  if (!candidates.length) return null;
+
+  const eligible = candidates.filter((tier) => expirySortValue(tier.expiry) > currentExpiryValue);
+  if (!eligible.length) return null;
+
+  // Prefer the highest-priority remaining tier (lowest order) among those that outlast the current tier.
+  return eligible.reduce<TierMembershipSummary>((best, currentCandidate) => {
+    const bestOrder = typeof best.tier.order === 'number' ? best.tier.order : Number.MAX_SAFE_INTEGER;
+    const currentOrder = typeof currentCandidate.tier.order === 'number' ? currentCandidate.tier.order : Number.MAX_SAFE_INTEGER;
+    if (currentOrder !== bestOrder) {
+      return currentOrder < bestOrder ? currentCandidate : best;
+    }
+    const bestExpiry = expirySortValue(best.expiry);
+    const currentExpiry = expirySortValue(currentCandidate.expiry);
+    if (currentExpiry !== bestExpiry) {
+      return currentExpiry > bestExpiry ? currentCandidate : best;
+    }
+    return currentCandidate.tier.checksumAddress.localeCompare(best.tier.checksumAddress) < 0 ? currentCandidate : best;
+  }, eligible[0]);
 };
 
 export const resolveTierLabel = (

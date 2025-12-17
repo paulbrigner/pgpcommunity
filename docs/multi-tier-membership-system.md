@@ -1,10 +1,10 @@
 # Multi-Tier Membership System
 
 ## Overview
-The membership system supports three Unlock-based tiers (Holder, Staker, Builder). Unlock is the source of truth; no membership state is persisted in Dynamo or sessions beyond short-lived caching. Server and client code derive status, expiry, allowances, and token IDs directly from the locks and the Unlock subgraph.
+The membership system supports four Unlock-based tiers (Member, Holder, Staker, Builder). Unlock is the source of truth; no membership state is persisted in Dynamo or sessions beyond short-lived caching. Server and client code derive status, expiry, allowances, and token IDs directly from the locks and the Unlock subgraph.
 
 ## Configuration
-- `NEXT_PUBLIC_LOCK_TIERS`: JSON array of tier objects `{ id?, address, label?, order? }`. First entry becomes the primary lock for backward-compatibility.
+- `NEXT_PUBLIC_LOCK_TIERS`: JSON array of tier objects `{ id?, address, label?, order?, renewable?, gasSponsored?, neverExpires? }`. First entry becomes the primary lock for backward-compatibility.
 - `NEXT_PUBLIC_UNLOCK_ADDRESS`: Unlock proxy on Base.
 - `NEXT_PUBLIC_BASE_*`: network, RPC, explorer.
 - Optional: `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL` (or ID/API key) for tokenId resolution; `CHECKOUT_CONFIGS` for event locks; `HIDDEN_UNLOCK_CONTRACTS` to hide specific locks.
@@ -25,7 +25,7 @@ The membership system supports three Unlock-based tiers (Holder, Staker, Builder
 - Tier picker: Home CTA and onboarding dialog present a radio list of tiers (name, status, optional price/benefit). Quick-register CTAs route membership locks through the same tier-aware checkout; no paywall usage remains.
 - Wiring: All entry points pass an explicit `tierId` into the shared checkout helper (`useUnlockCheckout`), built from `NEXT_PUBLIC_LOCK_TIERS`.
 - Extend vs purchase: checkout prefers `extendKey` when a key exists (guards max-keys reverts); blocks purchase when an existing key is detected but no tokenId can be resolved.
-- Auto-renew/allowance: per-lock allowance is read and displayed; enabling auto-renew approves USDC for up to 12 months by default.
+- Auto-renew/allowance: per-lock allowance is read and displayed; enabling auto-renew approves USDC for up to 12 months by default (renewable tiers only).
 - Status display: UI shows current tier; if multiple active tiers exist, “Next after expiry” appears only when a later-expiring tier would remain and the current tier is not set to auto-renew.
 
 ## APIs & Data

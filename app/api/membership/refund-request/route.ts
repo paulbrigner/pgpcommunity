@@ -44,8 +44,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { reason } = await request.json();
+    const body = await request.json().catch(() => ({} as any));
+    const reason = body?.reason;
+    const postCancelPreferenceRaw = body?.postCancelPreference;
     const normalizedReason = typeof reason === "string" ? reason.trim() : "";
+    const postCancelPreference =
+      postCancelPreferenceRaw === "cancel-all" || postCancelPreferenceRaw === "keep-free"
+        ? postCancelPreferenceRaw
+        : "keep-free";
 
     const userRes = await documentClient.get({
       TableName: TABLE_NAME,
@@ -66,14 +72,21 @@ export async function POST(request: NextRequest) {
     if (!activeTiers.length) {
       return NextResponse.json({ error: "No active membership to refund" }, { status: 400 });
     }
+    const refundableTiers = activeTiers.filter((tier: any) => tier?.tier?.renewable !== false && tier?.tier?.neverExpires !== true);
+    if (!refundableTiers.length) {
+      return NextResponse.json({ error: "No refundable membership" }, { status: 400 });
+    }
+    const refundable = refundableTiers
+      .slice()
+      .sort((a: any, b: any) => (a?.tier?.order ?? 0) - (b?.tier?.order ?? 0))[0];
     const activeLocks = activeTiers.map((tier: any) => ({
       lockAddress: tier.tier?.checksumAddress || tier.tier?.address || null,
       tierId: tier.tier?.id || null,
       tierLabel: tier.tier?.label || tier.metadata?.name || tier.tier?.id || null,
     })).filter((entry: any) => entry.lockAddress);
-    const tierLabel = activeLocks.map((t: any) => t.tierLabel || t.tierId).filter(Boolean).join(", ") || null;
-    const lockAddress = activeLocks[0]?.lockAddress || null;
-    const tierId = activeLocks[0]?.tierId || null;
+    const tierLabel = refundable?.tier?.label || refundable?.metadata?.name || refundable?.tier?.id || null;
+    const lockAddress = refundable?.tier?.checksumAddress || refundable?.tier?.address || null;
+    const tierId = refundable?.tier?.id || null;
 
     const id = randomUUID();
     const createdAt = new Date().toISOString();
@@ -91,6 +104,7 @@ export async function POST(request: NextRequest) {
       lockAddress,
       activeLocks,
       reason: normalizedReason || null,
+      postCancelPreference,
       createdAt,
       updatedAt: createdAt,
       GSI1PK: "REFUND_REQUEST",
@@ -112,6 +126,7 @@ export async function POST(request: NextRequest) {
 User: ${user.email || token.sub}
 Wallet: ${walletAddress || "N/A"}
 Tier: ${tierLabel} (${lockAddress})
+After cancellation: ${postCancelPreference}
 Reason: ${normalizedReason || "N/A"}
 Created: ${createdAt}
 `;
@@ -126,7 +141,7 @@ Created: ${createdAt}
       }
     }
 
-    return NextResponse.json({ ok: true, id, status: "pending", tierLabel });
+    return NextResponse.json({ ok: true, id, status: "pending", tierLabel, postCancelPreference });
   } catch (err) {
     console.error("refund-request error", err);
     return NextResponse.json({ error: "Failed to create refund request" }, { status: 500 });

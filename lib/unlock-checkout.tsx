@@ -303,10 +303,16 @@ const fetchTokenIdFromSubgraph = async (lockAddress: string, owner: string): Pro
 };
 
 export interface UnlockCheckoutHandlers {
-  onMembershipComplete?: (target: CheckoutTarget) => void | Promise<void>;
-  onEventComplete?: (target: CheckoutTarget) => void | Promise<void>;
+  onMembershipComplete?: (target: CheckoutTarget, context?: UnlockCheckoutCompletionContext) => void | Promise<void>;
+  onEventComplete?: (target: CheckoutTarget, context?: UnlockCheckoutCompletionContext) => void | Promise<void>;
   onClose?: () => void;
 }
+
+export type UnlockCheckoutCompletionContext = {
+  owner: string | null;
+  txHash: string | null;
+  intentKind: 'membership' | 'renewal' | 'event';
+};
 
 export const decideExtend = (params: {
   intentKind: CheckoutIntent['kind'];
@@ -581,7 +587,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
         } as any);
         hash = extractTxHash(tx);
         if (handlers.onMembershipComplete) {
-          await handlers.onMembershipComplete(target);
+          await handlers.onMembershipComplete(target, { owner, txHash: hash, intentKind: intent.kind });
         }
       } else {
         if (isMembershipTarget(target)) {
@@ -603,7 +609,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
               pricing.erc20Address && safeApprovalString ? safeApprovalString : undefined,
           } as any);
           hash = typeof tx === 'string' ? tx : tx?.hash ?? null;
-          await handlers.onMembershipComplete?.(target);
+          await handlers.onMembershipComplete?.(target, { owner, txHash: hash, intentKind: intent.kind });
           setTxHash(hash);
           setStatus('success');
             return;
@@ -632,7 +638,7 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
                   : undefined,
             } as any);
             hash = extractTxHash(tx);
-            await handlers.onMembershipComplete?.(target);
+            await handlers.onMembershipComplete?.(target, { owner, txHash: hash, intentKind: intent.kind });
             setTxHash(hash);
             setStatus('success');
             return;
@@ -656,9 +662,9 @@ export const useUnlockCheckout = (handlers: UnlockCheckoutHandlers = {}, prefetc
         } as any);
         hash = extractTxHash(tx);
         if (isEventTarget(target)) {
-          await handlers.onEventComplete?.(target);
+          await handlers.onEventComplete?.(target, { owner, txHash: hash, intentKind: intent.kind });
         } else {
-          await handlers.onMembershipComplete?.(target);
+          await handlers.onMembershipComplete?.(target, { owner, txHash: hash, intentKind: intent.kind });
         }
       }
 

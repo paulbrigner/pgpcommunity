@@ -473,34 +473,37 @@ export function snapshotToMembershipSummary(snapshot: MembershipStateSnapshot): 
     metadata: tier.metadata,
   }));
 
-  let status: 'active' | 'expired' | 'none' = 'none';
-  let expiry: number | null = null;
-  for (const tier of tiers) {
-    if (tier.status === 'active') {
-      status = 'active';
-      if (typeof tier.expiry === 'number' && (!expiry || tier.expiry > expiry)) {
-        expiry = tier.expiry;
-      }
-    } else if (status !== 'active' && tier.status === 'expired') {
-      status = 'expired';
-      if (typeof tier.expiry === 'number' && (!expiry || tier.expiry > expiry)) {
-        expiry = tier.expiry;
-      }
-    }
-  }
-
   const activeTiers = tiers.filter((tier) => tier.status === 'active');
   const highestActiveTier = activeTiers.length
     ? activeTiers.reduce((prev, current) => (current.tier.order < prev.tier.order ? current : prev))
     : null;
 
+  let maxExpiredExpiry: number | null = null;
+  for (const tier of tiers) {
+    if (tier.status !== 'expired') continue;
+    if (typeof tier.expiry !== 'number' || !Number.isFinite(tier.expiry) || tier.expiry <= 0) continue;
+    maxExpiredExpiry = Math.max(maxExpiredExpiry ?? 0, tier.expiry);
+  }
+
+  const status: 'active' | 'expired' | 'none' = highestActiveTier
+    ? 'active'
+    : maxExpiredExpiry
+      ? 'expired'
+      : 'none';
+  const expiry: number | null =
+    status === 'active'
+      ? (typeof highestActiveTier?.expiry === 'number' ? highestActiveTier.expiry : null)
+      : status === 'expired'
+        ? maxExpiredExpiry
+        : null;
+
   return {
     summary: {
       status,
       expiry,
-    tiers,
-    highestActiveTier,
-  },
+      tiers,
+      highestActiveTier,
+    },
     allowances: snapshot.allowances,
     tokenIds: snapshot.tiers.reduce<Record<string, string[]>>((acc, tier) => {
       acc[tier.tier.checksumAddress.toLowerCase()] = tier.tokenIds;

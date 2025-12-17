@@ -37,7 +37,9 @@ frontend:
         - env | grep -e UNLOCK_SUBGRAPH_API_KEY >> .env.production
         - env | grep -e PRIVATE_KEY_SECRET >> .env.production
         - env | grep -e HIDDEN_UNLOCK_CONTRACTS >> .env.production
-        - env | grep -e CHECKOUT_CONFIGS >> .env.production        
+        - env | grep -e CHECKOUT_CONFIGS >> .env.production
+        - env | grep -e MEMBER_SPONSORSHIP_ENABLED >> .env.production
+          - env | grep -e MEMBER_SPONSOR_PRIVATE_KEY >> .env.production   
         - npm run build
   artifacts:
     baseDirectory: .next

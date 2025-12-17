@@ -19,6 +19,10 @@ type UseMembershipOptions = {
   initialAllowancesLoaded?: boolean;
 };
 
+type RefreshMembershipOptions = {
+  forceRefresh?: boolean;
+};
+
 export function useMembership({
   ready,
   authenticated,
@@ -44,6 +48,7 @@ export function useMembership({
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
   const previousSummaryRef = useRef<MembershipSummary | null>(initialMembershipSummary ?? null);
   const initialMembershipAppliedRef = useRef(false);
+  const forceRefreshRef = useRef(false);
 
   const addresses = useMemo(() => {
     const list = wallets && wallets.length ? wallets : walletAddress ? [walletAddress] : [];
@@ -74,7 +79,9 @@ export function useMembership({
       : undefined,
     initialDataUpdatedAt: hasInitialData ? Date.now() : undefined,
     queryFn: async () => {
-      const snapshot = await fetchMembershipStateSnapshot({ addresses, forceRefresh: false });
+      const forceRefresh = forceRefreshRef.current;
+      forceRefreshRef.current = false;
+      const snapshot = await fetchMembershipStateSnapshot({ addresses, forceRefresh });
       return snapshotToMembershipSummary(snapshot);
     },
   });
@@ -142,7 +149,7 @@ export function useMembership({
     const previousTier = pickHighestActiveTier(previousSummary);
     const previousExpiry = typeof previousTier?.expiry === "number" ? previousTier.expiry : null;
     const previousStillActive =
-      !!previousTier && previousTier.status === "active" && (previousExpiry === null || previousExpiry > nowSec);
+      !!previousTier && previousTier.status === "active" && previousExpiry !== null && previousExpiry > nowSec;
     const currentTier = pickHighestActiveTier(summary);
 
     if (previousStillActive && (!currentTier || currentTier.status !== "active")) {
@@ -173,7 +180,12 @@ export function useMembership({
     membershipExpiry,
     allowances,
     tokenIds,
-    refreshMembership: () => membershipQuery.refetch({ cancelRefetch: false, throwOnError: false }),
+    refreshMembership: (options?: RefreshMembershipOptions) => {
+      if (options?.forceRefresh) {
+        forceRefreshRef.current = true;
+      }
+      return membershipQuery.refetch({ cancelRefetch: false, throwOnError: false });
+    },
     allowancesLoaded,
     setAllowances,
     setTokenIds,

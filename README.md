@@ -49,7 +49,7 @@ This software is under active development and has not undergone a full independe
 ### Environment Variables
 ```bash
 ## Public (client + server)
-NEXT_PUBLIC_LOCK_TIERS=[{"id":"holder","address":"0xed16cd934780a48697c2fd89f1b13ad15f0b64e1","label":"Holder","order":0},{"id":"staker","address":"0xb5d2e305c589b1d7a1873c73637adf9a52724105","label":"Staker","order":1},{"id":"builder","address":"0xdd7fff4931409e2d1da47be9798fd404cc44e9a9","label":"Builder","order":2}]
+NEXT_PUBLIC_LOCK_TIERS=[{"id":"holder","address":"0xed16cd934780a48697c2fd89f1b13ad15f0b64e1","label":"Holder","order":0},{"id":"staker","address":"0xb5d2e305c589b1d7a1873c73637adf9a52724105","label":"Staker","order":1},{"id":"builder","address":"0xdd7fff4931409e2d1da47be9798fd404cc44e9a9","label":"Builder","order":2},{"id":"member","address":"0xCb9c9a907ca52d73Dacec83892696F47430f6dbb","label":"Member","order":3,"renewable":false,"gasSponsored":true,"neverExpires":true}]
 NEXT_PUBLIC_LOCK_ADDRESS=...
 NEXT_PUBLIC_UNLOCK_ADDRESS=...
 NEXT_PUBLIC_BASE_NETWORK_ID=8453
@@ -64,6 +64,11 @@ UNLOCK_SUBGRAPH_API_KEY=
 HIDDEN_UNLOCK_CONTRACTS=
 CHECKOUT_CONFIGS=
 REGION_AWS=us-east-1
+MEMBER_SPONSORSHIP_ENABLED=false
+MEMBER_SPONSOR_PRIVATE_KEY=
+MEMBER_SPONSOR_RPC_URL=
+MEMBER_SPONSOR_MIN_BALANCE_WEI=
+MEMBER_SPONSOR_MAX_TX_PER_DAY=
 
 # NextAuth
 # Server-only secrets

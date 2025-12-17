@@ -2,7 +2,7 @@
 
 ## Overview
 - Unlock smart contracts are the single source of truth for memberships. No membership state is stored in Dynamo; sessions only cache short-lived summaries.
-- Three tiers are supported (Holder, Staker, Builder) via `NEXT_PUBLIC_LOCK_TIERS`. The first entry remains the primary lock for backward compatibility.
+- Four tiers are supported (Member, Holder, Staker, Builder) via `NEXT_PUBLIC_LOCK_TIERS`. Member is a free, non-expiring tier; the first entry remains the primary lock for backward compatibility.
 - All membership state (status, expiry, token IDs, allowances, metadata) is derived on-chain or from the Unlock subgraph and exposed through shared services used by server and client.
 
 ## Data Flow & Services

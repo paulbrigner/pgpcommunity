@@ -134,6 +134,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       tierId: string | null;
       lockAddress: string | null;
       activeLocks?: Array<{ lockAddress: string; tierId: string | null; tierLabel: string | null }>;
+      postCancelPreference?: string | null;
       status: string;
       createdAt: string;
       canExecute: boolean;
@@ -951,6 +952,11 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                     </td>
                     <td className="px-4 py-3">
                       <div>{req.tierLabel || "Unknown tier"}</div>
+                      {req.postCancelPreference ? (
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          After refund: {req.postCancelPreference === "cancel-all" ? "cancel all (including free)" : "keep free Member access"}
+                        </div>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {req.createdAt ? DateTime.fromISO(req.createdAt).toLocaleString(DateTime.DATETIME_MED) : "—"}

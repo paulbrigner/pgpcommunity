@@ -18,6 +18,7 @@ This document is a step‑by‑step plan to implement the change safely and incr
 ## Goals
 - Add a 4th tier, **Member**, to `NEXT_PUBLIC_LOCK_TIERS` and all tier-aware UI/logic.
 - Provide a **gas‑sponsored** “Claim Member” flow that mints the free membership key to the user without requiring ETH.
+- Ensure **event RSVPs** are also gas-sponsored so free members can RSVP with `0` ETH in their wallet.
 - Ensure membership evaluation and UX correctly handle **lifetime/non‑expiring** keys (no bogus “expires in year 5e69” dates).
 - Ensure “paid implies Member”: anyone with an active paid tier also has the free Member key (with guardrails for explicit “cancel all” choices).
 - Adjust cancellation/refund behavior: paid tiers keep “request cancellation & refund”; Member tier supports “cancel membership” (terminate key) with **no refund**.
@@ -32,21 +33,22 @@ This document is a step‑by‑step plan to implement the change safely and incr
 
 ---
 
-## Implementation Status (as of 2025-12-16)
+## Implementation Status (as of 2025-12-17)
 - Phase 0 (Lock validation): completed — lock is PublicLock v15; `expirationDuration` is `MAX_UINT256` (treated as “never expires”); cancel uses `expireAndRefundFor(..., 0)`; re-claim after cancel reactivates via `setKeyExpiration` (because `maxKeysPerAddress == 1` makes `purchase` revert with `MAX_KEYS_REACHED`).
 - Phase 1 (Tier model + config): completed — tier flags (`renewable/gasSponsored/neverExpires`) supported; tier ranking updated so Member never eclipses paid tiers; docs/templates updated.
 - Phase 2 (Backend sponsored claim/cancel): mostly completed — claim/cancel endpoints, DynamoDB nonce lease lock, kill switch, verified-email gate, rate limits, and Dynamo audit trail implemented; refund `postCancelPreference` is stored on refund requests (admin execution still pending).
 - Phase 3 (Frontend claim/cancel UX): mostly completed — “Claim free membership” and “Cancel free membership” flows added; confusing “Claim with my wallet” fallback is only shown after claim errors; “Paid ⇒ Member” automation is wired after paid checkout + a one-time Settings auto-ensure for existing paid members; refund requests now capture “keep free vs cancel all” preference; remaining polish: occasional stale tier UI immediately after cancel/claim (see below).
 - Phase 4 (Expiry + auto‑renew correctness): completed — lifetime keys render as “Never”; auto‑renew/allowance UI suppressed for Member; allowance fetching skipped for non-renewable tiers.
 - Phase 5 (Abuse prevention + ops readiness): partially completed — baseline controls exist (verified email gate, per-day cap, min balance, kill switch, audit); monitoring/runbook documentation is still pending.
-- Phase 6 (Tests, staging, rollout): partially completed — tests added for sponsor utilities and build/lint passes; backfill issuance tooling added as `scripts/backfill-member.mjs` (execution still pending) + staging/rollout checklist execution is still pending.
+- Phase 6 (Tests, staging, rollout): partially completed — tests added for sponsor utilities and build/lint passes; backfill issuance tooling added as `scripts/backfill-member.mjs` and has been executed; staging/rollout checklist execution is still pending.
 - Phase 7 (Admin tier email broadcasts): not started.
+- Phase 8 (Event RSVP gas sponsorship): implemented in code — new `/api/events/rsvp`, `/api/events/cancel-rsvp`, and `/api/events/checkin-qr` endpoints; home page RSVPs and “Cancel RSVP” on registered future meetings are gas-sponsored; “Check-In w/QR” is available for registered future meetings (requires sponsor wallet to be a lock manager); requires `EVENT_SPONSOR_*` env vars + funded sponsor wallet in the deployed environment.
 
 **Known issue / polish**
 - Membership UI can briefly show stale tier state immediately after Member cancel/claim (status messages are correct, but the “current tier” label may lag until a full reload). Next step is to tighten cache invalidation + client refresh coordination around those mutations.
 
 **Next step**
-- Run the Phase 6 backfill (`scripts/backfill-member.mjs`), then implement refund `postCancelPreference` admin execution. Also tighten cache invalidation + client refresh coordination around Member cancel/claim.
+- Enable and validate the event RSVP sponsor wallet in the deployed environment (`EVENT_SPONSOR_*`), then implement refund `postCancelPreference` admin execution and start Phase 7 (tier-targeted email broadcasts). Also tighten cache invalidation + client refresh coordination around Member cancel/claim.
 
 ## Key Decisions / Open Questions (answer before coding)
 1. **Entitlements / gating**
@@ -451,7 +453,7 @@ Store these in the secret manager / hosting environment (Amplify env vars, etc).
     - [x] **M3 (Frontend claim)**: add “Claim free membership” UX + fallback to wallet-paid claim; enable in staging
     - [x] **M4 (Paid ⇒ Member)**: after paid checkout success, auto-ensure Member when missing; add copy for paid expiry → still Member
     - [ ] **M5 (Cancel/refund scenarios)**: add cancel-member, refund preference prompt (“keep free vs cancel all”), and API guardrails (no cancel Member while paid unless `cancelAll=true`) — *partially complete* (cancel-member + backend refund guard + preference capture stored/displayed done; admin execution pending)
-    - [ ] **M6 (Backfill)**: run one-time issuance for existing paid members (ops step after deploy)
+    - [x] **M6 (Backfill)**: run one-time issuance for existing paid members (ops step after deploy)
     - [ ] **M7 (Admin email broadcast)**: add tier-targeted broadcast emails with “send test to me” first
   - one-time backfill issuance for existing paid members:
     - Decide scope: recommended “all currently-active paid key owners” (optionally include recently-expired paid keys if you want to grant baseline access to lapsed members).

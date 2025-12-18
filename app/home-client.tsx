@@ -20,7 +20,7 @@ import { useUnlockCheckout } from "@/lib/unlock-checkout";
 import type { MembershipSummary, TierMembershipSummary } from "@/lib/membership-server";
 import { type AllowanceState } from "@/lib/membership-state-service";
 import { normalizeTierId, pickHighestActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
-import { useEventRegistration } from "@/lib/hooks/use-event-registration";
+import { useEventRegistration, type EventDetails } from "@/lib/hooks/use-event-registration";
 import { useMemberNfts } from "@/lib/hooks/use-member-nfts";
 import { useMembership } from "@/lib/hooks/use-membership";
 import { AutoRenewPendingPanel, AutoRenewPromptPanel, ActiveMemberPanel } from "@/components/home/MembershipPanels";
@@ -147,6 +147,16 @@ export default function HomeClient({
   const [memberClaimError, setMemberClaimError] = useState<string | null>(null);
   const [memberClaimTxHash, setMemberClaimTxHash] = useState<string | null>(null);
   const memberClaimPollIdRef = useRef(0);
+  const [eventRsvpProcessing, setEventRsvpProcessing] = useState(false);
+  const [eventRsvpMessage, setEventRsvpMessage] = useState<string | null>(null);
+  const [eventRsvpError, setEventRsvpError] = useState<string | null>(null);
+  const [eventRsvpTxHash, setEventRsvpTxHash] = useState<string | null>(null);
+  const eventRsvpPollIdRef = useRef(0);
+  const [eventCancelProcessing, setEventCancelProcessing] = useState(false);
+  const [eventCancelMessage, setEventCancelMessage] = useState<string | null>(null);
+  const [eventCancelError, setEventCancelError] = useState<string | null>(null);
+  const [eventCancelTxHash, setEventCancelTxHash] = useState<string | null>(null);
+  const eventCancelPollIdRef = useRef(0);
 
   // Local auth error (e.g., SIWE with unlinked wallet)
   const [authError, setAuthError] = useState<string | null>(null);
@@ -269,6 +279,52 @@ export default function HomeClient({
       </AlertDescription>
     </Alert>
   ) : null;
+  const eventRsvpAlertNode = eventRsvpMessage || eventRsvpError ? (
+    <Alert
+      variant={eventRsvpError ? "destructive" : undefined}
+      className="glass-item border-[rgba(193,197,226,0.45)] bg-white/80 text-[var(--brand-navy)]"
+    >
+      <AlertDescription className="text-sm">
+        {eventRsvpError || eventRsvpMessage}
+        {eventRsvpTxHash ? (
+          <>
+            {" "}
+            <a
+              href={`${BASE_BLOCK_EXPLORER_URL}/tx/${eventRsvpTxHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4"
+            >
+              View transaction
+            </a>
+          </>
+        ) : null}
+      </AlertDescription>
+    </Alert>
+  ) : null;
+  const eventCancelAlertNode = eventCancelMessage || eventCancelError ? (
+    <Alert
+      variant={eventCancelError ? "destructive" : undefined}
+      className="glass-item border-[rgba(193,197,226,0.45)] bg-white/80 text-[var(--brand-navy)]"
+    >
+      <AlertDescription className="text-sm">
+        {eventCancelError || eventCancelMessage}
+        {eventCancelTxHash ? (
+          <>
+            {" "}
+            <a
+              href={`${BASE_BLOCK_EXPLORER_URL}/tx/${eventCancelTxHash}`}
+              target="_blank"
+              rel="noreferrer"
+              className="underline underline-offset-4"
+            >
+              View transaction
+            </a>
+          </>
+        ) : null}
+      </AlertDescription>
+    </Alert>
+  ) : null;
 
   useEffect(() => {
     if (autoRenewEnabled) {
@@ -304,7 +360,7 @@ export default function HomeClient({
 
   const {
     openMembershipCheckout,
-    openEventCheckout,
+    openEventCheckout: openEventCheckoutWallet,
     checkoutPortal,
     status: checkoutStatus,
   } = useUnlockCheckout({
@@ -368,12 +424,6 @@ export default function HomeClient({
     setIsPurchasing(busy);
   }, [checkoutStatus]);
 
-  const handleQuickRegister = useEventRegistration(
-    (value) => setSelectedTierId(value),
-    openMembershipCheckout,
-    openEventCheckout,
-  );
-
   // Membership state handled via useMembership
 
   const {
@@ -390,6 +440,185 @@ export default function HomeClient({
     authenticated && walletLinked && membershipStatus === 'active',
     showAllNfts,
     initialNfts as any
+  );
+
+  const openEventCheckout = useCallback(
+    async (lockAddress: string, eventDetails?: EventDetails | null) => {
+      if (eventRsvpProcessing) return;
+      const pollId = eventRsvpPollIdRef.current + 1;
+      eventRsvpPollIdRef.current = pollId;
+      setEventRsvpError(null);
+      setEventRsvpMessage(null);
+      setEventRsvpTxHash(null);
+
+      if (!authenticated) {
+        setEventRsvpError("Sign in before RSVP'ing for events.");
+        return;
+      }
+      if (!walletLinked || addressList.length === 0) {
+        setEventRsvpError("Link your wallet before RSVP'ing for events.");
+        return;
+      }
+
+      const normalizedLock = String(lockAddress || "").trim();
+      if (!normalizedLock) {
+        setEventRsvpError("Invalid event lock.");
+        return;
+      }
+
+      setEventRsvpProcessing(true);
+      try {
+        const res = await fetch("/api/events/rsvp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lockAddress: normalizedLock, recipient: addressList[0] }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const code = typeof payload?.code === "string" ? payload.code : null;
+          const message = typeof payload?.error === "string" && payload.error.length
+            ? payload.error
+            : "Unable to RSVP for this event.";
+          if (code === "EVENT_NOT_FREE") {
+            setEventRsvpMessage("This event requires an on-chain checkout. Opening wallet checkout…");
+            openEventCheckoutWallet(normalizedLock, eventDetails ?? null);
+            return;
+          }
+          throw new Error(message);
+        }
+
+        const txHash = typeof payload?.txHash === "string" && payload.txHash.length ? payload.txHash : null;
+        setEventRsvpTxHash(txHash);
+        setEventRsvpMessage(
+          payload?.status === "already-registered"
+            ? "You're already registered for this event."
+            : "RSVP submitted. It will appear in your collection once confirmed on Base.",
+        );
+
+        await refresh();
+
+        if (payload?.status !== "already-registered") {
+          void (async () => {
+            const lockLower = normalizedLock.toLowerCase();
+            const delaysMs = [1500, 2500, 4000, 6500, 10000, 15000];
+            for (const delay of delaysMs) {
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              if (eventRsvpPollIdRef.current !== pollId) return;
+              try {
+                const result = await refresh();
+                const upcoming = (result as any)?.data?.upcomingNfts;
+                const stillUpcoming = Array.isArray(upcoming)
+                  ? upcoming.some((entry: any) => String(entry?.contractAddress ?? "").toLowerCase() === lockLower)
+                  : false;
+                if (!stillUpcoming) {
+                  setEventRsvpMessage("RSVP confirmed. You're registered!");
+                  return;
+                }
+              } catch {}
+            }
+          })();
+        }
+      } catch (err: any) {
+        setEventRsvpError(err?.message || "Failed to RSVP for event.");
+      } finally {
+        setEventRsvpProcessing(false);
+      }
+    },
+    [eventRsvpProcessing, authenticated, walletLinked, addressList, openEventCheckoutWallet, refresh],
+  );
+
+  const cancelEventRsvp = useCallback(
+    async (params: { lockAddress: string; recipient: string; tokenId: string }) => {
+      if (eventCancelProcessing) return;
+      const ok = window.confirm("Cancel your RSVP for this meeting?");
+      if (!ok) return;
+
+      const pollId = eventCancelPollIdRef.current + 1;
+      eventCancelPollIdRef.current = pollId;
+      setEventCancelError(null);
+      setEventCancelMessage(null);
+      setEventCancelTxHash(null);
+
+      if (!authenticated) {
+        setEventCancelError("Sign in before canceling an RSVP.");
+        return;
+      }
+      if (!walletLinked || addressList.length === 0) {
+        setEventCancelError("Link your wallet before canceling an RSVP.");
+        return;
+      }
+
+      const normalizedLock = String(params.lockAddress || "").trim();
+      if (!normalizedLock) {
+        setEventCancelError("Invalid event lock.");
+        return;
+      }
+      const recipient = String(params.recipient || "").trim().toLowerCase();
+      if (!recipient) {
+        setEventCancelError("Missing RSVP wallet address.");
+        return;
+      }
+
+      setEventCancelProcessing(true);
+      try {
+        const res = await fetch("/api/events/cancel-rsvp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lockAddress: normalizedLock, recipient, tokenId: params.tokenId }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(payload?.error || "Failed to cancel RSVP.");
+        }
+
+        const txHash = typeof payload?.txHash === "string" && payload.txHash.length ? payload.txHash : null;
+        setEventCancelTxHash(txHash);
+        setEventCancelMessage(
+          payload?.status === "already-canceled"
+            ? "RSVP is already canceled."
+            : "Cancellation submitted. It will update once confirmed on Base.",
+        );
+
+        await refresh();
+
+        if (payload?.status !== "already-canceled") {
+          void (async () => {
+            const lockLower = normalizedLock.toLowerCase();
+            const tokenId = String(params.tokenId || "").trim();
+            const delaysMs = [1500, 2500, 4000, 6500, 10000, 15000];
+            for (const delay of delaysMs) {
+              await new Promise((resolve) => setTimeout(resolve, delay));
+              if (eventCancelPollIdRef.current !== pollId) return;
+              try {
+                const result = await refresh();
+                const owned = (result as any)?.data?.creatorNfts;
+                const stillOwned = Array.isArray(owned)
+                  ? owned.some((entry: any) =>
+                      String(entry?.contractAddress ?? "").toLowerCase() === lockLower &&
+                      (tokenId ? String(entry?.tokenId ?? "") === tokenId : true),
+                    )
+                  : false;
+                if (!stillOwned) {
+                  setEventCancelMessage("RSVP canceled.");
+                  return;
+                }
+              } catch {}
+            }
+          })();
+        }
+      } catch (err: any) {
+        setEventCancelError(err?.message || "Failed to cancel RSVP.");
+      } finally {
+        setEventCancelProcessing(false);
+      }
+    },
+    [eventCancelProcessing, authenticated, walletLinked, addressList, refresh],
+  );
+
+  const handleQuickRegister = useEventRegistration(
+    (value) => setSelectedTierId(value),
+    openMembershipCheckout,
+    openEventCheckout,
   );
   useEffect(() => {
     if (!authenticated || !walletLinked || membershipStatus !== 'active' || !renewalTierAddress) {
@@ -694,6 +923,8 @@ export default function HomeClient({
         </div>
 	      </section>
         {memberClaimAlertNode}
+        {eventRsvpAlertNode}
+        {eventCancelAlertNode}
       {/* Scenario-driven UI based on auth, wallet linking, and membership */}
       {!ready ? (
         <div className="glass-surface p-8 text-center text-lg text-[var(--brand-navy)]/85">Loading…</div>
@@ -851,6 +1082,9 @@ export default function HomeClient({
             showUpcomingNfts={showUpcomingNfts}
             onToggleUpcoming={setShowUpcomingNfts}
             onRsvp={handleQuickRegister}
+            rsvpProcessing={eventRsvpProcessing}
+            onCancelRsvp={cancelEventRsvp}
+            cancelRsvpProcessing={eventCancelProcessing}
             displayNfts={displayNfts}
             showAllNfts={showAllNfts}
             onToggleShowAll={setShowAllNfts}

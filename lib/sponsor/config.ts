@@ -50,3 +50,31 @@ export function getMemberSponsorConfig(): MemberSponsorConfig {
     maxTxPerDay,
   };
 }
+
+export type EventSponsorConfig = {
+  enabled: boolean;
+  privateKey: string | null;
+  rpcUrl: string;
+  chainId: number;
+  minBalanceWei: bigint | null;
+  maxTxPerDay: number | null;
+};
+
+export function getEventSponsorConfig(): EventSponsorConfig {
+  const enabled = parseBool(process.env.EVENT_SPONSORSHIP_ENABLED);
+  const privateKeyRaw = process.env.EVENT_SPONSOR_PRIVATE_KEY;
+  const privateKey = privateKeyRaw && privateKeyRaw.trim().length ? privateKeyRaw.trim() : null;
+  const rpcUrl =
+    (process.env.EVENT_SPONSOR_RPC_URL || process.env.BASE_RPC_URL || BASE_RPC_URL || "").trim() || BASE_RPC_URL;
+  const minBalanceWei = parseBigIntSafe(process.env.EVENT_SPONSOR_MIN_BALANCE_WEI);
+  const maxTxPerDay = parseIntSafe(process.env.EVENT_SPONSOR_MAX_TX_PER_DAY);
+
+  return {
+    enabled,
+    privateKey,
+    rpcUrl,
+    chainId: BASE_NETWORK_ID,
+    minBalanceWei,
+    maxTxPerDay,
+  };
+}

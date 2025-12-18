@@ -116,6 +116,9 @@ type ActiveMemberProps = {
   showUpcomingNfts: boolean;
   onToggleUpcoming: (value: boolean) => void;
   onRsvp: (lockAddress: string | null | undefined, fallbackUrl?: string | null, details?: EventDetails) => void;
+  rsvpProcessing?: boolean;
+  onCancelRsvp?: (params: { lockAddress: string; recipient: string; tokenId: string }) => void;
+  cancelRsvpProcessing?: boolean;
   displayNfts: DisplayNft[];
   showAllNfts: boolean;
   onToggleShowAll: (value: boolean) => void;
@@ -136,6 +139,9 @@ export function ActiveMemberPanel({
   showUpcomingNfts,
   onToggleUpcoming,
   onRsvp,
+  rsvpProcessing = false,
+  onCancelRsvp,
+  cancelRsvpProcessing = false,
   displayNfts,
   showAllNfts,
   onToggleShowAll,
@@ -168,6 +174,7 @@ export function ActiveMemberPanel({
               show={showUpcomingNfts}
               onToggleShow={onToggleUpcoming}
               onRsvp={onRsvp}
+              rsvpProcessing={rsvpProcessing}
             />
           ) : null}
 
@@ -180,6 +187,8 @@ export function ActiveMemberPanel({
             loading={creatorNftsLoading}
             error={creatorNftsError}
             creatorNfts={creatorNfts}
+            onCancelRsvp={onCancelRsvp}
+            cancelRsvpProcessing={cancelRsvpProcessing}
           />
         </section>
       ) : null}

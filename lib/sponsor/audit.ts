@@ -5,6 +5,7 @@ export type SponsorActionStatus =
   | "attempted"
   | "submitted"
   | "already-member"
+  | "already-registered"
   | "already-canceled"
   | "rejected"
   | "failed";

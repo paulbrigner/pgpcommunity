@@ -21,6 +21,7 @@ export async function reserveDailySponsorTxSlot({
   chainId,
   sponsorAddress,
   maxTxPerDay,
+  scope,
   nowMs = Date.now(),
   client = documentClient,
   tableName = TABLE_NAME,
@@ -28,6 +29,7 @@ export async function reserveDailySponsorTxSlot({
   chainId: number;
   sponsorAddress: string;
   maxTxPerDay: number | null | undefined;
+  scope?: string | null | undefined;
   nowMs?: number;
   client?: DocumentClientLike;
   tableName?: string;
@@ -36,8 +38,12 @@ export async function reserveDailySponsorTxSlot({
   if (!limit || limit <= 0) return null;
 
   const sponsorAddressLower = sponsorAddress.toLowerCase();
+  const scopeKey =
+    typeof scope === "string" && scope.trim().length ? scope.trim().toLowerCase().replace(/[^a-z0-9:_-]/g, "") : null;
   const day = formatUtcDay(nowMs);
-  const id = `SPONSOR_TX_DAY#${chainId}#${sponsorAddressLower}#${day}`;
+  const id = scopeKey
+    ? `SPONSOR_TX_DAY#${chainId}#${sponsorAddressLower}#${scopeKey}#${day}`
+    : `SPONSOR_TX_DAY#${chainId}#${sponsorAddressLower}#${day}`;
   const updatedAt = new Date(nowMs).toISOString();
 
   try {

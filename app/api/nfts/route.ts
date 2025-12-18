@@ -763,11 +763,35 @@ export async function GET(req: NextRequest) {
           ? keyData.expiration
           : null;
         const expiration = expirationRaw != null ? Number(expirationRaw) : null;
-        const nowSec = Math.floor(Date.now() / 1000);
+        const nowMs = Date.now();
+        const nowSec = Math.floor(nowMs / 1000);
         const cancelled = Boolean(keyData.cancelled);
-        const isActive = !cancelled && (!expiration || !Number.isFinite(expiration) || expiration <= 0 || expiration > nowSec);
+        const activeByExpiration = (!expiration || !Number.isFinite(expiration) || expiration <= 0 || expiration > nowSec);
+        const isActive = cancelled
+          ? (expiration != null && Number.isFinite(expiration) && expiration > nowSec)
+          : activeByExpiration;
 
         if (!isActive) {
+          const isFutureEvent = (() => {
+            const dateText = (baseItem.eventDate || baseItem.subtitle || "").trim();
+            if (!dateText) return false;
+            const candidates: string[] = [];
+            const timeText = (eventDetails.startTime || '').trim();
+            if (timeText) {
+              candidates.push(`${dateText} ${timeText}`);
+            }
+            candidates.push(dateText);
+            for (const candidate of candidates) {
+              const parsed = Date.parse(candidate);
+              if (Number.isFinite(parsed)) {
+                return parsed > nowMs;
+              }
+            }
+            return false;
+          })();
+          if (isFutureEvent) {
+            continue;
+          }
           missed.push({ ...baseItem, sortKey: normalizedSortKey });
           missedContracts.add(contractAddress);
           continue;

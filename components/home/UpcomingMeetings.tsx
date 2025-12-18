@@ -21,9 +21,10 @@ type Props = {
   show: boolean;
   onToggleShow: (value: boolean) => void;
   onRsvp: (lockAddress: string | null | undefined, fallbackUrl?: string | null, details?: EventDetails) => void;
+  rsvpProcessing?: boolean;
 };
 
-export function UpcomingMeetings({ items, show, onToggleShow, onRsvp }: Props) {
+export function UpcomingMeetings({ items, show, onToggleShow, onRsvp, rsvpProcessing = false }: Props) {
   if (!items.length) return null;
   return (
     <div className="glass-item space-y-4 p-5 md:col-span-2">
@@ -97,7 +98,8 @@ export function UpcomingMeetings({ items, show, onToggleShow, onRsvp }: Props) {
                             eventDetails
                           )
                         }
-                        disabled={!nft.contractAddress && !nft.registrationUrl}
+                        isLoading={rsvpProcessing}
+                        disabled={rsvpProcessing || (!nft.contractAddress && !nft.registrationUrl)}
                       >
                         RSVP now
                       </Button>

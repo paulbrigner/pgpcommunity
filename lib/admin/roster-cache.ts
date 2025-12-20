@@ -38,14 +38,6 @@ type CachePageItem = {
   members: AdminRoster["members"];
 };
 
-type CacheLockItem = {
-  pk: string;
-  sk: string;
-  type: "ADMIN_ROSTER_CACHE_LOCK";
-  lockId: string;
-  expiresAt: number;
-};
-
 type LoadedRosterCache = {
   roster: AdminRoster;
   isFresh: boolean;
@@ -237,7 +229,8 @@ const releaseRosterCacheLock = async (config: RosterCacheConfig, lockId: string)
 };
 
 const writeRosterPages = async (config: RosterCacheConfig, pages: AdminRoster["members"][]) => {
-  if (!config.tableName) return;
+  const tableName = config.tableName;
+  if (!tableName) return;
   const batches: Array<{ RequestItems: Record<string, any[]> }> = [];
   let current: any[] = [];
   pages.forEach((members, index) => {
@@ -250,12 +243,12 @@ const writeRosterPages = async (config: RosterCacheConfig, pages: AdminRoster["m
     };
     current.push({ PutRequest: { Item: item } });
     if (current.length === 25) {
-      batches.push({ RequestItems: { [config.tableName]: current } });
+      batches.push({ RequestItems: { [tableName]: current } });
       current = [];
     }
   });
   if (current.length) {
-    batches.push({ RequestItems: { [config.tableName]: current } });
+    batches.push({ RequestItems: { [tableName]: current } });
   }
 
   for (const batch of batches) {
@@ -264,26 +257,28 @@ const writeRosterPages = async (config: RosterCacheConfig, pages: AdminRoster["m
 };
 
 const deleteExtraPages = async (config: RosterCacheConfig, previousCount: number, nextCount: number) => {
-  if (!config.tableName || previousCount <= nextCount) return;
+  const tableName = config.tableName;
+  if (!tableName || previousCount <= nextCount) return;
   const deletes: any[] = [];
   for (let i = nextCount + 1; i <= previousCount; i += 1) {
     deletes.push({ DeleteRequest: { Key: { pk: CACHE_PK, sk: buildPageKey(i) } } });
   }
   for (let i = 0; i < deletes.length; i += 25) {
     const batch = deletes.slice(i, i + 25);
-    await documentClient.batchWrite({ RequestItems: { [config.tableName]: batch } });
+    await documentClient.batchWrite({ RequestItems: { [tableName]: batch } });
   }
 };
 
 export async function saveRosterCache(config: RosterCacheConfig, roster: AdminRoster, computedAt: number) {
-  if (!config.enabled || !config.tableName) return;
+  const tableName = config.tableName;
+  if (!config.enabled || !tableName) return;
 
   const pages = chunkMembers(roster.members, config.pageSize);
   const pageCount = pages.length;
   const expiresAt = computedAt + config.ttlSeconds * 1000;
 
   const metaRes = await documentClient.get({
-    TableName: config.tableName,
+    TableName: tableName,
     Key: { pk: CACHE_PK, sk: CACHE_SK_META },
   });
   const previousPageCount = (metaRes.Item as CacheMetaItem | undefined)?.pageCount ?? 0;
@@ -305,7 +300,7 @@ export async function saveRosterCache(config: RosterCacheConfig, roster: AdminRo
     rosterMeta: roster.meta,
   };
   await documentClient.put({
-    TableName: config.tableName,
+    TableName: tableName,
     Item: metaItem,
   });
 

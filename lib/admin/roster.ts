@@ -4,6 +4,7 @@ import { BASE_NETWORK_ID, BASE_RPC_URL, MEMBERSHIP_TIERS, USDC_ADDRESS } from "@
 import { membershipStateService, snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import { pickHighestActiveTier, pickNextActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
 import { getRpcProvider } from "@/lib/rpc/provider";
+import { getRosterCacheConfig, loadRosterCache, rebuildRosterCache } from "@/lib/admin/roster-cache";
 
 type RawUser = {
   id?: string;
@@ -63,6 +64,19 @@ export type AdminRoster = {
     autoRenewOff: number;
     expiringSoon: number;
   };
+  cache?: AdminRosterCacheStatus;
+};
+
+export type AdminRosterCacheStatus = {
+  enabled: boolean;
+  mode: "off" | "read-through" | "stale-while-revalidate";
+  computedAt: number | null;
+  expiresAt: number | null;
+  isFresh: boolean;
+  isStale: boolean;
+  isWithinMaxStale: boolean;
+  rebuildTriggered: boolean;
+  rebuildBlocking: boolean;
 };
 
 export type BuildAdminRosterOptions = {
@@ -70,6 +84,7 @@ export type BuildAdminRosterOptions = {
   includeBalances?: boolean;
   includeTokenIds?: boolean;
   statusFilter?: "all" | "active" | "expired" | "none";
+  forceRefresh?: boolean;
 };
 
 const ERC20_BALANCE_ABI = ["function balanceOf(address owner) view returns (uint256)"] as const;
@@ -107,7 +122,8 @@ async function scanUsers(): Promise<RawUser[]> {
     const res = await documentClient.scan({
       TableName: TABLE_NAME,
       FilterExpression: "#type = :user",
-      ExpressionAttributeNames: { "#type": "type" },
+      ProjectionExpression: "id, #name, email, firstName, lastName, wallets, walletAddress, isAdmin, welcomeEmailSentAt, lastEmailSentAt, lastEmailType, emailBounceReason, emailSuppressed",
+      ExpressionAttributeNames: { "#type": "type", "#name": "name" },
       ExpressionAttributeValues: { ":user": "USER" },
       ExclusiveStartKey,
     });
@@ -327,7 +343,7 @@ async function buildAdminMemberEntry(user: RawUser, options: BuildAdminRosterOpt
   };
 }
 
-export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
+async function buildAdminRosterFresh(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
   const users = await scanUsers();
   const entries = await mapWithLimit(users, MAX_CONCURRENCY, (user) => buildAdminMemberEntry(user, options));
   const members: AdminMember[] = entries.filter((m): m is AdminMember => !!m);
@@ -366,6 +382,73 @@ export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): P
   };
 
   return { members, meta };
+}
+
+export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
+  const includeAllowances = options.includeAllowances !== false;
+  const includeBalances = options.includeBalances !== false;
+  const includeTokenIds = options.includeTokenIds !== false;
+  const statusFilter = options.statusFilter || "all";
+
+  const cacheEligible = !includeAllowances && !includeBalances && !includeTokenIds && statusFilter === "all";
+  const cacheConfig = getRosterCacheConfig();
+  const baseCacheStatus: AdminRosterCacheStatus = {
+    enabled: cacheConfig.enabled,
+    mode: cacheConfig.mode,
+    computedAt: null,
+    expiresAt: null,
+    isFresh: false,
+    isStale: false,
+    isWithinMaxStale: false,
+    rebuildTriggered: false,
+    rebuildBlocking: false,
+  };
+
+  if (cacheEligible && cacheConfig.enabled && !options.forceRefresh) {
+    const cached = await loadRosterCache(cacheConfig);
+    if (cached) {
+      const cacheStatus: AdminRosterCacheStatus = {
+        ...baseCacheStatus,
+        computedAt: cached.computedAt,
+        expiresAt: cached.expiresAt,
+        isFresh: cached.isFresh,
+        isStale: !cached.isFresh,
+        isWithinMaxStale: cached.isWithinMaxStale,
+      };
+      if (cached.isFresh) {
+        return { ...cached.roster, cache: cacheStatus };
+      }
+      if (cacheConfig.mode === "stale-while-revalidate" && cached.isWithinMaxStale) {
+        void rebuildRosterCache(cacheConfig, () => buildAdminRosterFresh(options));
+        return { ...cached.roster, cache: { ...cacheStatus, rebuildTriggered: true, rebuildBlocking: false } };
+      }
+    }
+  }
+
+  if (cacheEligible && cacheConfig.enabled) {
+    const rebuilt = await rebuildRosterCache(cacheConfig, () => buildAdminRosterFresh(options));
+    if (rebuilt.cached) {
+      const computedAt = rebuilt.computedAt ?? Date.now();
+      const cacheStatus: AdminRosterCacheStatus = {
+        ...baseCacheStatus,
+        computedAt,
+        expiresAt: computedAt + cacheConfig.ttlSeconds * 1000,
+        isFresh: true,
+        isStale: false,
+        isWithinMaxStale: true,
+        rebuildTriggered: true,
+        rebuildBlocking: true,
+      };
+      return { ...rebuilt.roster, cache: cacheStatus };
+    }
+    const cacheStatus: AdminRosterCacheStatus = {
+      ...baseCacheStatus,
+      rebuildBlocking: true,
+    };
+    return { ...rebuilt.roster, cache: cacheStatus };
+  }
+
+  return buildAdminRosterFresh(options);
 }
 
 export async function buildAdminMembersByIds(userIds: string[], options: BuildAdminRosterOptions = {}): Promise<AdminMember[]> {

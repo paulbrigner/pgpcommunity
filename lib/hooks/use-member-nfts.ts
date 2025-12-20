@@ -24,7 +24,7 @@ export function useMemberNfts(addressesKey: string, enabled: boolean, includeMis
     staleTime: 1000 * 60 * 3,
     gcTime: 1000 * 60 * 10,
     retry: 2,
-    refetchOnMount: hasInitialData ? false : "always",
+    refetchOnMount: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
     initialData: hasInitialData ? initialData ?? undefined : undefined,

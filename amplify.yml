@@ -42,6 +42,9 @@ frontend:
         - env | grep -e MEMBER_SPONSOR_PRIVATE_KEY >> .env.production
         - env | grep -e EVENT_SPONSORSHIP_ENABLED >> .env.production
         - env | grep -e EVENT_SPONSOR_PRIVATE_KEY >> .env.production
+        - env | grep -e ADMIN_ROSTER_CACHE_TABLE >> .env.production
+        - env | grep -e ADMIN_ROSTER_CACHE_MODE >> .env.production
+        - env | grep -e ADMIN_ROSTER_CACHE_MAX_STALE_SECONDS >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

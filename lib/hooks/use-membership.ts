@@ -56,8 +56,8 @@ export function useMembership({
   }, [walletAddress, wallets]);
 
   const membershipQueryEnabled = ready && authenticated && addresses.length > 0;
-  const needsAllowancesFetch = !initialAllowancesLoaded;
   const hasInitialData = !!initialMembershipSummary;
+  const needsAllowancesFetch = hasInitialData && !initialAllowancesLoaded;
 
   const membershipQuery = useQuery({
     queryKey: ["membership", addressesKey],

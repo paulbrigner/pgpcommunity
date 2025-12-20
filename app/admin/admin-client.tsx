@@ -182,6 +182,36 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
 
   const meta = useMemo(() => computeMetaFromMembers(roster?.members || []), [roster]);
   const hasFailedDetails = useMemo(() => Object.keys(detailFailed).length > 0, [detailFailed]);
+  const cacheNotice = useMemo(() => {
+    const cache = roster?.cache;
+    if (!cache?.enabled) return null;
+    const computedAt = typeof cache.computedAt === "number" ? DateTime.fromMillis(cache.computedAt) : null;
+    const lastUpdated = computedAt?.isValid ? computedAt.toRelative() : null;
+    const lastUpdatedLabel = lastUpdated ? `Last updated ${lastUpdated}.` : "Last updated time unavailable.";
+
+    if (cache.rebuildBlocking) {
+      const prefix = cache.rebuildTriggered
+        ? "Roster cache was stale and just rebuilt."
+        : "Roster cache rebuild was needed; data refreshed without updating the cache.";
+      return {
+        tone: "warn" as const,
+        message: `${prefix} ${lastUpdatedLabel} If this page felt slow, wait a minute before refreshing.`,
+      };
+    }
+    if (cache.isStale) {
+      if (cache.rebuildTriggered) {
+        return {
+          tone: "warn" as const,
+          message: `Roster cache is stale and refreshing in the background. ${lastUpdatedLabel} Give it a minute, then refresh.`,
+        };
+      }
+      return {
+        tone: "warn" as const,
+        message: `Roster cache is stale. ${lastUpdatedLabel} Use Refresh to rebuild.`,
+      };
+    }
+    return null;
+  }, [roster]);
 
   const queueDetails = (ids: string[], resetFailures = false) => {
     if (resetFailures) {
@@ -232,7 +262,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     setDetailError(null);
     setDetailFailed({});
     try {
-      const res = await fetch("/api/admin/members?fields=core", { cache: "no-store" });
+      const res = await fetch("/api/admin/members?fields=core&refresh=1", { cache: "no-store" });
       if (!res.ok) {
         throw new Error(`Refresh failed (${res.status})`);
       }
@@ -1036,6 +1066,14 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           {error && (
             <div className="bg-rose-50/80 px-5 py-3 text-sm text-rose-800">
               {error}
+            </div>
+          )}
+          {cacheNotice && (
+            <div className="bg-amber-50/80 px-5 py-3 text-sm text-amber-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4" aria-hidden="true" />
+                <span>{cacheNotice.message}</span>
+              </div>
             </div>
           )}
           {emailNotice && (

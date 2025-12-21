@@ -137,7 +137,6 @@ export default function HomeClient({
   const [autoRenewMonths, setAutoRenewMonths] = useState<number | null>(null);
   const [autoRenewStateReady, setAutoRenewStateReady] = useState(false);
   const [showAllNfts, setShowAllNfts] = useState(false);
-  const [showUpcomingNfts, setShowUpcomingNfts] = useState(true);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [autoRenewPromptDismissed, setAutoRenewPromptDismissed] = useState(false);
   const [autoRenewProcessing, setAutoRenewProcessing] = useState(false);
@@ -1079,8 +1078,6 @@ export default function HomeClient({
             walletLinked={walletLinked}
             profileComplete={profileComplete}
             upcomingNfts={upcomingNfts}
-            showUpcomingNfts={showUpcomingNfts}
-            onToggleUpcoming={setShowUpcomingNfts}
             onRsvp={handleQuickRegister}
             rsvpProcessing={eventRsvpProcessing}
             onCancelRsvp={cancelEventRsvp}

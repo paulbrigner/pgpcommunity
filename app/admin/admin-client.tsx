@@ -1534,10 +1534,10 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                   Retrieving details...
                 </div>
               )}
-              {cachePolling && (
+              {cachePolling && roster?.cache?.lockActive && (
                 <div className="flex items-center gap-2 text-sm text-[var(--brand-denim)]">
                   <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Checking cache status...
+                  Rebuilding cache...
                 </div>
               )}
             </div>

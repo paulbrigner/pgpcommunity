@@ -1,7 +1,11 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import dynamic from "next/dynamic";
+import { DateTime } from "luxon";
 import { OnboardingChecklist } from "@/components/site/OnboardingChecklist";
 import { NftCollectionSkeleton, UpcomingMeetingsSkeleton } from "@/components/home/Skeletons";
+import { MEMBERSHIP_TIER_ADDRESSES } from "@/lib/config";
+import { buildNftKey } from "@/lib/home-utils";
+import { Select } from "@/components/ui/select";
 import type { EventDetails } from "@/lib/hooks/use-event-registration";
 
 type UpcomingItem = {
@@ -35,6 +39,45 @@ type DisplayNft = {
   tokenType: string | null;
   videoUrl?: string | null;
   sortKey?: number;
+};
+
+const isMeetingNft = (nft: DisplayNft) =>
+  Boolean(nft.eventDate || nft.subtitle || nft.startTime || nft.endTime || nft.location);
+
+const resolveEventTimestamp = (nft: DisplayNft): number | null => {
+  const zone = nft.timezone || "UTC";
+  if (nft.eventDate) {
+    const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
+    if (rawDate.isValid) {
+      if (nft.startTime) {
+        const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
+        if (combined.isValid) return combined.toUTC().toMillis();
+      }
+      if (String(nft.eventDate).includes("T")) {
+        return rawDate.toUTC().toMillis();
+      }
+      return rawDate.endOf("day").toUTC().toMillis();
+    }
+    if (nft.startTime) {
+      const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
+      if (fallback.isValid) return fallback.toUTC().toMillis();
+    }
+    const parsed = Date.parse(String(nft.eventDate));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  if (nft.subtitle) {
+    const parsed = Date.parse(String(nft.subtitle));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+};
+
+const resolveEventYear = (nft: DisplayNft): number | null => {
+  const timestamp = resolveEventTimestamp(nft);
+  if (typeof timestamp === "number") {
+    return DateTime.fromMillis(timestamp).toUTC().year;
+  }
+  return null;
 };
 
 const UpcomingMeetingsLazy = dynamic(
@@ -113,8 +156,6 @@ type ActiveMemberProps = {
   walletLinked: boolean;
   profileComplete: boolean;
   upcomingNfts: UpcomingItem[] | null;
-  showUpcomingNfts: boolean;
-  onToggleUpcoming: (value: boolean) => void;
   onRsvp: (lockAddress: string | null | undefined, fallbackUrl?: string | null, details?: EventDetails) => void;
   rsvpProcessing?: boolean;
   onCancelRsvp?: (params: { lockAddress: string; recipient: string; tokenId: string }) => void;
@@ -136,8 +177,6 @@ export function ActiveMemberPanel({
   walletLinked,
   profileComplete,
   upcomingNfts,
-  showUpcomingNfts,
-  onToggleUpcoming,
   onRsvp,
   rsvpProcessing = false,
   onCancelRsvp,
@@ -151,6 +190,82 @@ export function ActiveMemberPanel({
   creatorNftsError,
   creatorNfts,
 }: ActiveMemberProps) {
+  const [activeTab, setActiveTab] = useState<"rsvp" | "upcoming" | "past">("rsvp");
+  const currentYear = DateTime.now().year;
+  const [selectedPastYear, setSelectedPastYear] = useState<number>(currentYear);
+  const ownedKeySet = useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(creatorNfts)) {
+      for (const nft of creatorNfts) {
+        set.add(buildNftKey(nft.contractAddress, nft.tokenId ?? "upcoming"));
+      }
+    }
+    return set;
+  }, [creatorNfts]);
+  const rsvpMeetings = useMemo(() => {
+    const now = Date.now();
+    return displayNfts.filter((nft) => {
+      if (!isMeetingNft(nft)) return false;
+      if (MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase())) return false;
+      const key = buildNftKey(nft.contractAddress, nft.tokenId ?? "upcoming");
+      if (!ownedKeySet.has(key)) return false;
+      const timestamp = resolveEventTimestamp(nft);
+      return typeof timestamp === "number" && timestamp > now;
+    });
+  }, [displayNfts, ownedKeySet]);
+  const pastMeetings = useMemo(() => {
+    const now = Date.now();
+    return displayNfts.filter((nft) => {
+      if (!isMeetingNft(nft)) return false;
+      if (MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase())) return false;
+      const timestamp = resolveEventTimestamp(nft);
+      if (typeof timestamp !== "number") return true;
+      return timestamp <= now;
+    });
+  }, [displayNfts]);
+  const availablePastYears = useMemo(() => {
+    const years = new Set<number>();
+    years.add(currentYear);
+    for (const meeting of pastMeetings) {
+      const year = resolveEventYear(meeting);
+      if (year) years.add(year);
+    }
+    const previewYear = currentYear + 1;
+    years.add(previewYear);
+    return Array.from(years).sort((a, b) => b - a);
+  }, [currentYear, pastMeetings]);
+  const pastYearOptions = useMemo(
+    () =>
+      availablePastYears.map((year) => ({
+        value: String(year),
+        label: year > currentYear ? `${year} (coming soon)` : String(year),
+        disabled: year > currentYear,
+      })),
+    [availablePastYears, currentYear]
+  );
+  const pastMeetingsForYear = useMemo(
+    () => pastMeetings.filter((nft) => resolveEventYear(nft) === selectedPastYear),
+    [pastMeetings, selectedPastYear]
+  );
+  const missedNftsForYear = useMemo(() => {
+    if (!Array.isArray(missedNfts)) return missedNfts;
+    return missedNfts.filter((nft) => resolveEventYear(nft) === selectedPastYear);
+  }, [missedNfts, selectedPastYear]);
+  const missedKeySetForYear = useMemo(() => {
+    const set = new Set<string>();
+    if (Array.isArray(missedNftsForYear)) {
+      for (const entry of missedNftsForYear) {
+        set.add(buildNftKey(entry.contractAddress, entry.tokenId ?? "upcoming"));
+      }
+    }
+    return set;
+  }, [missedNftsForYear]);
+  const upcomingItems = Array.isArray(upcomingNfts) ? upcomingNfts : [];
+  const tabs = [
+    { id: "rsvp" as const, label: "Your RSVPs" },
+    { id: "upcoming" as const, label: "Upcoming meetings" },
+    { id: "past" as const, label: "Past meetings" },
+  ];
   return (
     <div className="space-y-8">
       <section className="glass-surface p-6 text-center text-[var(--muted-ink)] md:p-8 md:text-left">
@@ -168,28 +283,100 @@ export function ActiveMemberPanel({
             </p>
           </div>
 
-          {upcomingNfts && upcomingNfts.length > 0 ? (
-            <UpcomingMeetingsLazy
-              items={upcomingNfts}
-              show={showUpcomingNfts}
-              onToggleShow={onToggleUpcoming}
-              onRsvp={onRsvp}
-              rsvpProcessing={rsvpProcessing}
+          <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+            <div className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--muted-ink)]">
+              Meetings
+            </div>
+            <div className="flex flex-wrap gap-2" role="tablist">
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      isActive
+                        ? "border-[var(--brand-denim)] bg-[rgba(67,119,243,0.18)] text-[var(--brand-navy)] font-bold shadow-sm ring-2 ring-[rgba(67,119,243,0.35)]"
+                        : "border-[rgba(30,57,91,0.15)] bg-white/70 text-[var(--brand-navy)] hover:border-[var(--brand-navy)]"
+                    }`}
+                    onClick={() => setActiveTab(tab.id)}
+                  >
+                    {tab.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {activeTab === "rsvp" ? (
+            <NftCollectionLazy
+              title="Your RSVPs"
+              displayNfts={rsvpMeetings}
+              showAllNfts={false}
+              onToggleShowAll={() => {}}
+              missedNfts={missedNfts}
+              missedKeySet={missedKeySet}
+              loading={creatorNftsLoading}
+              error={creatorNftsError}
+              creatorNfts={creatorNfts}
+              loadingMessage="Loading your RSVPs…"
+              emptyMessage="You have not RSVPd for any meetings yet."
+              showMissedToggle={false}
+              onCancelRsvp={onCancelRsvp}
+              cancelRsvpProcessing={cancelRsvpProcessing}
             />
           ) : null}
 
-          <NftCollectionLazy
-            displayNfts={displayNfts}
-            showAllNfts={showAllNfts}
-            onToggleShowAll={onToggleShowAll}
-            missedNfts={missedNfts}
-            missedKeySet={missedKeySet}
-            loading={creatorNftsLoading}
-            error={creatorNftsError}
-            creatorNfts={creatorNfts}
-            onCancelRsvp={onCancelRsvp}
-            cancelRsvpProcessing={cancelRsvpProcessing}
-          />
+          {activeTab === "upcoming" ? (
+            upcomingItems.length > 0 ? (
+              <UpcomingMeetingsLazy
+                items={upcomingItems}
+                show={true}
+                onToggleShow={() => {}}
+                onRsvp={onRsvp}
+                rsvpProcessing={rsvpProcessing}
+                showToggle={false}
+              />
+            ) : (
+              <div className="glass-item p-5 text-sm text-[var(--muted-ink)] md:col-span-2">
+                No upcoming meetings available yet. Please check back soon.
+              </div>
+            )
+          ) : null}
+
+          {activeTab === "past" ? (
+            <>
+              <div className="flex flex-wrap items-end justify-between gap-3 md:col-span-2">
+                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted-ink)]">
+                  Filter by year
+                </div>
+                <Select
+                  label="Year"
+                  options={pastYearOptions}
+                  value={String(selectedPastYear)}
+                  onChange={(value) => setSelectedPastYear(Number(value))}
+                  className="min-w-[140px]"
+                />
+              </div>
+              <NftCollectionLazy
+                title="Past meetings"
+                displayNfts={pastMeetingsForYear}
+                showAllNfts={showAllNfts}
+                onToggleShowAll={onToggleShowAll}
+                missedNfts={missedNftsForYear}
+                missedKeySet={missedKeySetForYear}
+                loading={creatorNftsLoading}
+                error={creatorNftsError}
+                creatorNfts={creatorNfts}
+                loadingMessage="Loading past meetings…"
+                emptyMessage={`No past meetings found for ${selectedPastYear}.`}
+                onCancelRsvp={onCancelRsvp}
+                cancelRsvpProcessing={cancelRsvpProcessing}
+              />
+            </>
+          ) : null}
         </section>
       ) : null}
     </div>

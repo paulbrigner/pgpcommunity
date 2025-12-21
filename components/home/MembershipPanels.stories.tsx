@@ -73,8 +73,6 @@ export const Active: Story = {
       walletLinked
       profileComplete
       upcomingNfts={upcoming}
-      showUpcomingNfts
-      onToggleUpcoming={() => {}}
       onRsvp={() => {}}
       displayNfts={[nft]}
       showAllNfts={false}

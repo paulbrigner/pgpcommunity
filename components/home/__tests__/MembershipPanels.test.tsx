@@ -69,8 +69,6 @@ describe("MembershipPanels", () => {
         walletLinked
         profileComplete
         upcomingNfts={upcoming}
-        showUpcomingNfts
-        onToggleUpcoming={() => {}}
         onRsvp={onRsvp}
         displayNfts={[nft]}
         showAllNfts={false}
@@ -85,10 +83,10 @@ describe("MembershipPanels", () => {
 
     expect(screen.getByText(/thank you for being a gold member/i)).toBeInTheDocument();
     expect(screen.getByText(/news & updates/i)).toBeInTheDocument();
-    const rsvpButtons = screen.queryAllByRole("button", { name: /rsvp now/i });
-    if (rsvpButtons.length) {
-      fireEvent.click(rsvpButtons[rsvpButtons.length - 1]);
-      expect(onRsvp).toHaveBeenCalled();
-    }
+    const upcomingTab = screen.getByRole("tab", { name: /upcoming meetings/i });
+    fireEvent.click(upcomingTab);
+    const rsvpButtons = screen.getAllByRole("button", { name: /rsvp now/i });
+    fireEvent.click(rsvpButtons[rsvpButtons.length - 1]);
+    expect(onRsvp).toHaveBeenCalled();
   });
 });

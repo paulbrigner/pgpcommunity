@@ -22,25 +22,36 @@ type Props = {
   onToggleShow: (value: boolean) => void;
   onRsvp: (lockAddress: string | null | undefined, fallbackUrl?: string | null, details?: EventDetails) => void;
   rsvpProcessing?: boolean;
+  showToggle?: boolean;
 };
 
-export function UpcomingMeetings({ items, show, onToggleShow, onRsvp, rsvpProcessing = false }: Props) {
+export function UpcomingMeetings({
+  items,
+  show,
+  onToggleShow,
+  onRsvp,
+  rsvpProcessing = false,
+  showToggle = true,
+}: Props) {
   if (!items.length) return null;
+  const displayItems = showToggle ? show : true;
   return (
     <div className="glass-item space-y-4 p-5 md:col-span-2">
       <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
         <h2 className="text-lg font-semibold text-[var(--brand-navy)]">Upcoming PGP Meetings</h2>
-        <label className="flex items-center gap-2 text-xs">
-          <input
-            type="checkbox"
-            className="h-4 w-4"
-            checked={show}
-            onChange={(e) => onToggleShow(e.target.checked)}
-          />
-          Show upcoming events
-        </label>
+        {showToggle ? (
+          <label className="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={show}
+              onChange={(e) => onToggleShow(e.target.checked)}
+            />
+            Show upcoming events
+          </label>
+        ) : null}
       </div>
-      {show ? (
+      {displayItems ? (
         <div className="grid gap-3 sm:grid-cols-2">
           {[...items]
             .sort((a, b) => {

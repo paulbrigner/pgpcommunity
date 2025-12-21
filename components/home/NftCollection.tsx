@@ -41,6 +41,11 @@ type Props = {
   loading: boolean;
   error: string | null;
   creatorNfts?: DisplayNft[] | null;
+  title?: string;
+  titleAll?: string;
+  emptyMessage?: string;
+  loadingMessage?: string;
+  showMissedToggle?: boolean;
   onCancelRsvp?: (params: { lockAddress: string; recipient: string; tokenId: string }) => void;
   cancelRsvpProcessing?: boolean;
 };
@@ -54,6 +59,11 @@ export function NftCollection({
   loading,
   error,
   creatorNfts,
+  title,
+  titleAll,
+  emptyMessage,
+  loadingMessage,
+  showMissedToggle = true,
   onCancelRsvp,
   cancelRsvpProcessing = false,
 }: Props) {
@@ -66,83 +76,83 @@ export function NftCollection({
     timeLabel: string | null;
     location: string | null;
   } | null>(null);
-	  const [checkinOpen, setCheckinOpen] = useState(false);
-	  const [checkinLoading, setCheckinLoading] = useState(false);
-	  const [checkinError, setCheckinError] = useState<string | null>(null);
-	  const [checkinQrUrl, setCheckinQrUrl] = useState<string | null>(null);
-	  const [checkinEmailLoading, setCheckinEmailLoading] = useState(false);
-	  const [checkinEmailError, setCheckinEmailError] = useState<string | null>(null);
-	  const [checkinEmailSentTo, setCheckinEmailSentTo] = useState<string | null>(null);
-	  const qrObjectUrlRef = useRef<string | null>(null);
-	  const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
+  const [checkinOpen, setCheckinOpen] = useState(false);
+  const [checkinLoading, setCheckinLoading] = useState(false);
+  const [checkinError, setCheckinError] = useState<string | null>(null);
+  const [checkinQrUrl, setCheckinQrUrl] = useState<string | null>(null);
+  const [checkinEmailLoading, setCheckinEmailLoading] = useState(false);
+  const [checkinEmailError, setCheckinEmailError] = useState<string | null>(null);
+  const [checkinEmailSentTo, setCheckinEmailSentTo] = useState<string | null>(null);
+  const qrObjectUrlRef = useRef<string | null>(null);
+  const explorerBase = BASE_BLOCK_EXPLORER_URL.replace(/\/$/, "");
 
-	  const closeCheckin = useCallback(() => {
-	    setCheckinOpen(false);
-	    setCheckinTarget(null);
-	    setCheckinError(null);
-	    setCheckinLoading(false);
-	    setCheckinQrUrl(null);
-	    setCheckinEmailLoading(false);
-	    setCheckinEmailError(null);
-	    setCheckinEmailSentTo(null);
-	    if (qrObjectUrlRef.current) {
-	      URL.revokeObjectURL(qrObjectUrlRef.current);
-	      qrObjectUrlRef.current = null;
-	    }
-	  }, []);
+  const closeCheckin = useCallback(() => {
+    setCheckinOpen(false);
+    setCheckinTarget(null);
+    setCheckinError(null);
+    setCheckinLoading(false);
+    setCheckinQrUrl(null);
+    setCheckinEmailLoading(false);
+    setCheckinEmailError(null);
+    setCheckinEmailSentTo(null);
+    if (qrObjectUrlRef.current) {
+      URL.revokeObjectURL(qrObjectUrlRef.current);
+      qrObjectUrlRef.current = null;
+    }
+  }, []);
 
-	  const sendCheckinQrEmail = useCallback(async () => {
-	    if (!checkinTarget || checkinEmailLoading) return;
-	    setCheckinEmailLoading(true);
-	    setCheckinEmailError(null);
-	    setCheckinEmailSentTo(null);
-	    try {
-	      const res = await fetch("/api/events/checkin-qr/email", {
-	        method: "POST",
-	        headers: { "Content-Type": "application/json" },
-	        body: JSON.stringify({
-	          lockAddress: checkinTarget.lockAddress,
-	          tokenId: checkinTarget.tokenId,
-	        }),
-	      });
-	      const payload = await res.json().catch(() => ({}));
-	      if (!res.ok) {
-	        throw new Error(payload?.error || "Failed to email QR code.");
-	      }
-	      const sentTo = typeof payload?.sentTo === "string" && payload.sentTo.length ? payload.sentTo : null;
-	      if (!sentTo) {
-	        throw new Error("QR code emailed, but destination address was not returned.");
-	      }
-	      setCheckinEmailSentTo(sentTo);
-	    } catch (err: any) {
-	      setCheckinEmailError(err?.message || "Failed to email QR code.");
-	    } finally {
-	      setCheckinEmailLoading(false);
-	    }
-	  }, [checkinEmailLoading, checkinTarget]);
+  const sendCheckinQrEmail = useCallback(async () => {
+    if (!checkinTarget || checkinEmailLoading) return;
+    setCheckinEmailLoading(true);
+    setCheckinEmailError(null);
+    setCheckinEmailSentTo(null);
+    try {
+      const res = await fetch("/api/events/checkin-qr/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lockAddress: checkinTarget.lockAddress,
+          tokenId: checkinTarget.tokenId,
+        }),
+      });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload?.error || "Failed to email QR code.");
+      }
+      const sentTo = typeof payload?.sentTo === "string" && payload.sentTo.length ? payload.sentTo : null;
+      if (!sentTo) {
+        throw new Error("QR code emailed, but destination address was not returned.");
+      }
+      setCheckinEmailSentTo(sentTo);
+    } catch (err: any) {
+      setCheckinEmailError(err?.message || "Failed to email QR code.");
+    } finally {
+      setCheckinEmailLoading(false);
+    }
+  }, [checkinEmailLoading, checkinTarget]);
 
-	  useEffect(() => {
-	    return () => {
-	      if (qrObjectUrlRef.current) {
+  useEffect(() => {
+    return () => {
+      if (qrObjectUrlRef.current) {
         URL.revokeObjectURL(qrObjectUrlRef.current);
         qrObjectUrlRef.current = null;
       }
     };
   }, []);
 
-	  useEffect(() => {
-	    if (!checkinOpen || !checkinTarget) return;
-	    const controller = new AbortController();
-	    setCheckinLoading(true);
-	    setCheckinError(null);
-	    setCheckinQrUrl(null);
-	    setCheckinEmailLoading(false);
-	    setCheckinEmailError(null);
-	    setCheckinEmailSentTo(null);
-	    if (qrObjectUrlRef.current) {
-	      URL.revokeObjectURL(qrObjectUrlRef.current);
-	      qrObjectUrlRef.current = null;
-	    }
+  useEffect(() => {
+    if (!checkinOpen || !checkinTarget) return;
+    const controller = new AbortController();
+    setCheckinLoading(true);
+    setCheckinError(null);
+    setCheckinQrUrl(null);
+    setCheckinEmailLoading(false);
+    setCheckinEmailError(null);
+    setCheckinEmailSentTo(null);
+    if (qrObjectUrlRef.current) {
+      URL.revokeObjectURL(qrObjectUrlRef.current);
+      qrObjectUrlRef.current = null;
+    }
 
     void (async () => {
       const params = new URLSearchParams({
@@ -196,11 +206,11 @@ export function NftCollection({
             </div>
           ) : null}
 
-	          <div className="flex w-full flex-col items-center justify-center gap-3">
-	            {checkinLoading ? (
-	              <div className="rounded-lg bg-[rgba(67,119,243,0.08)] px-4 py-3 text-sm text-[var(--brand-navy)]">
-	                Loading QR code…
-	              </div>
+          <div className="flex w-full flex-col items-center justify-center gap-3">
+            {checkinLoading ? (
+              <div className="rounded-lg bg-[rgba(67,119,243,0.08)] px-4 py-3 text-sm text-[var(--brand-navy)]">
+                Loading QR code…
+              </div>
             ) : checkinError ? (
               <div className="w-full rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {checkinError}
@@ -212,210 +222,218 @@ export function NftCollection({
                 onClick={() => window.open(checkinQrUrl, "_blank", "noreferrer")}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-	                <img
-	                  src={checkinQrUrl}
-	                  alt="Unlock event check-in QR code"
-	                  className="h-auto w-full"
-	                />
-	              </button>
-	            ) : null}
+                <img
+                  src={checkinQrUrl}
+                  alt="Unlock event check-in QR code"
+                  className="h-auto w-full"
+                />
+              </button>
+            ) : null}
 
-	            {checkinQrUrl ? (
-	              <>
-	                {checkinEmailSentTo ? (
-	                  <div className="w-full max-w-xs rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-	                    QR code emailed to <span className="font-medium">{checkinEmailSentTo}</span>.
-	                  </div>
-	                ) : null}
-	                {checkinEmailError ? (
-	                  <div className="w-full max-w-xs rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-	                    {checkinEmailError}
-	                  </div>
-	                ) : null}
-	                <Button
-	                  type="button"
-	                  variant="outlined-primary"
-	                  className="w-full max-w-xs"
-	                  isLoading={checkinEmailLoading}
-	                  onClick={sendCheckinQrEmail}
-	                >
-	                  Email this QR
-	                </Button>
-	                <div className="flex w-full max-w-xs flex-col gap-2 sm:flex-row">
-	                  <Button
-	                    type="button"
-	                    variant="secondary"
-	                    className="flex-1"
-	                    onClick={() => window.open(checkinQrUrl, "_blank", "noreferrer")}
-	                  >
-	                    Open full screen
-	                  </Button>
-	                  <Button
-	                    type="button"
-	                    variant="outline"
-	                    className="flex-1"
-	                    onClick={closeCheckin}
-	                  >
-	                    Done
-	                  </Button>
-	                </div>
-	              </>
-	            ) : (
-	              <Button type="button" variant="outline" onClick={closeCheckin}>
-	                Close
-	              </Button>
+            {checkinQrUrl ? (
+              <>
+                {checkinEmailSentTo ? (
+                  <div className="w-full max-w-xs rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+                    QR code emailed to <span className="font-medium">{checkinEmailSentTo}</span>.
+                  </div>
+                ) : null}
+                {checkinEmailError ? (
+                  <div className="w-full max-w-xs rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {checkinEmailError}
+                  </div>
+                ) : null}
+                <Button
+                  type="button"
+                  variant="outlined-primary"
+                  className="w-full max-w-xs"
+                  isLoading={checkinEmailLoading}
+                  onClick={sendCheckinQrEmail}
+                >
+                  Email this QR
+                </Button>
+                <div className="flex w-full max-w-xs flex-col gap-2 sm:flex-row">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => window.open(checkinQrUrl, "_blank", "noreferrer")}
+                  >
+                    Open full screen
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={closeCheckin}
+                  >
+                    Done
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button type="button" variant="outline" onClick={closeCheckin}>
+                Close
+              </Button>
             )}
           </div>
         </div>
       </Drawer>
 
       <div className="glass-item space-y-4 p-5 md:col-span-2">
-      <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
-        <h2 className="text-lg font-semibold text-[var(--brand-navy)]">
-          {showAllNfts ? 'All PGP NFTs' : 'Your PGP NFT Collection'}
-        </h2>
-        {missedNfts && missedNfts.length > 0 ? (
-          <label className="flex items-center gap-1 text-xs">
-            <input
-              type="checkbox"
-              className="h-4 w-4"
-              checked={showAllNfts}
-              onChange={(e) => onToggleShowAll(e.target.checked)}
-            />
-            Show meetings you missed
-          </label>
-        ) : null}
-      </div>
-      {loading ? (
-        <p className="text-sm text-[var(--muted-ink)]">Loading your collection…</p>
-      ) : error ? (
-        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-      ) : displayNfts.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-2">
-          {displayNfts.map((nft) => {
-            const displayId = nft.tokenId?.startsWith('0x')
-              ? (() => {
-                  try {
-                    return BigInt(nft.tokenId).toString();
-                  } catch {
-                    return nft.tokenId;
+        <div className="flex items-center justify-between gap-2 text-[var(--muted-ink)]">
+          <h2 className="text-lg font-semibold text-[var(--brand-navy)]">
+            {showAllNfts
+              ? titleAll ?? title ?? "All PGP NFTs"
+              : title ?? "Your PGP NFT Collection"}
+          </h2>
+          {showMissedToggle && missedNfts && missedNfts.length > 0 ? (
+            <label className="flex items-center gap-1 text-xs">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={showAllNfts}
+                onChange={(e) => onToggleShowAll(e.target.checked)}
+              />
+              Show meetings you missed
+            </label>
+          ) : null}
+        </div>
+        {loading ? (
+          <p className="text-sm text-[var(--muted-ink)]">{loadingMessage ?? "Loading your collection…"}</p>
+        ) : error ? (
+          <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+        ) : displayNfts.length > 0 ? (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {displayNfts.map((nft) => {
+              const displayId = nft.tokenId?.startsWith('0x')
+                ? (() => {
+                    try {
+                      return BigInt(nft.tokenId).toString();
+                    } catch {
+                      return nft.tokenId;
+                    }
+                  })()
+                : nft.tokenId ?? '';
+              const explorerUrl = nft.tokenId
+                ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
+                : `${explorerBase}/address/${nft.contractAddress}`;
+              const isOwned = Array.isArray(creatorNfts)
+                && creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
+              const eventStart = (() => {
+                if (!nft.eventDate) return null;
+                const zone = nft.timezone || 'UTC';
+                const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
+                if (rawDate.isValid) {
+                  if (nft.startTime) {
+                    const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
+                    if (combined.isValid) return combined;
                   }
-                })()
-              : nft.tokenId ?? '';
-            const explorerUrl = nft.tokenId
-              ? `${explorerBase}/token/${nft.contractAddress}?a=${encodeURIComponent(displayId)}`
-              : `${explorerBase}/address/${nft.contractAddress}`;
-            const isOwned = Array.isArray(creatorNfts)
-              && creatorNfts.some((owned) => owned.contractAddress === nft.contractAddress && owned.tokenId === nft.tokenId && owned.owner);
-            const eventStart = (() => {
-              if (!nft.eventDate) return null;
-              const zone = nft.timezone || 'UTC';
-              const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
-              if (rawDate.isValid) {
+                  if (String(nft.eventDate).includes('T')) {
+                    return rawDate;
+                  }
+                  return rawDate.endOf('day');
+                }
                 if (nft.startTime) {
-                  const combined = DateTime.fromISO(`${rawDate.toISODate()}T${nft.startTime}`, { zone });
-                  if (combined.isValid) return combined;
+                  const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
+                  if (fallback.isValid) return fallback;
                 }
-                if (String(nft.eventDate).includes('T')) {
-                  return rawDate;
-                }
-                return rawDate.endOf('day');
-              }
-              if (nft.startTime) {
-                const fallback = DateTime.fromISO(`${nft.eventDate}T${nft.startTime}`, { zone });
-                if (fallback.isValid) return fallback;
-              }
-              return null;
-            })();
-	    const futureTimeMs = (() => {
-	      if (eventStart) return eventStart.toUTC().toMillis();
-	      const dateParsed = nft.eventDate ? Date.parse(String(nft.eventDate)) : NaN;
-	      if (Number.isFinite(dateParsed)) return dateParsed;
-	      const subtitleParsed = nft.subtitle ? Date.parse(String(nft.subtitle)) : NaN;
-	      if (Number.isFinite(subtitleParsed)) return subtitleParsed;
-	      return null;
-	    })();
-	    const isFutureMeeting = typeof futureTimeMs === 'number' && futureTimeMs > Date.now();
-	    const isUpcomingRegistration = isFutureMeeting && isOwned;
-	    const isMembershipTier = MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase());
-	    const canCancelRsvp = Boolean(!isMembershipTier && isUpcomingRegistration && nft.owner && typeof onCancelRsvp === "function");
-	    const canCheckin = Boolean(!isMembershipTier && isUpcomingRegistration && nft.owner && nft.tokenId);
-	    const eventLabels = formatEventDisplay(
-	      nft.eventDate,
-	      nft.startTime,
-	      nft.endTime,
-              nft.timezone
-            );
-            const showEventDetails = isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
-            const calendarLinks = showEventDetails
-              ? buildCalendarLinks(
-                  nft.title ?? 'PGP Event',
-                  nft.eventDate,
-                  nft.startTime,
-                  nft.endTime,
-                  nft.timezone,
-                  nft.location,
-                  nft.description ?? null
-                )
-              : { google: null, ics: null };
-            const subtitle = showEventDetails
-              ? null
-              : (() => {
-                  const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
-                  if (!text) return null;
-                  const normalizedTitle = nft.title?.trim().toLowerCase();
-                  const normalizedText = text.toLowerCase();
-                  if (normalizedTitle && normalizedTitle === normalizedText) return null;
-                  if (text.length > 80) return null;
-                  return text;
-                })();
-            const shortenedDescription = showEventDetails
-              ? null
-              : (() => {
-                  const source = (() => {
-                    const desc = nft.description?.trim();
-                    if (desc && desc.length) return desc;
-                    const sub = nft.subtitle?.trim();
-                    if (sub && sub.length) return sub;
-                    const collection = nft.collectionName?.trim();
-                    if (collection && collection.length) return collection;
-                    return '';
+                return null;
+              })();
+              const futureTimeMs = (() => {
+                if (eventStart) return eventStart.toUTC().toMillis();
+                const dateParsed = nft.eventDate ? Date.parse(String(nft.eventDate)) : NaN;
+                if (Number.isFinite(dateParsed)) return dateParsed;
+                const subtitleParsed = nft.subtitle ? Date.parse(String(nft.subtitle)) : NaN;
+                if (Number.isFinite(subtitleParsed)) return subtitleParsed;
+                return null;
+              })();
+              const isFutureMeeting = typeof futureTimeMs === "number" && futureTimeMs > Date.now();
+              const isUpcomingRegistration = isFutureMeeting && isOwned;
+              const isMembershipTier = MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase());
+              const canCancelRsvp = Boolean(
+                !isMembershipTier && isUpcomingRegistration && nft.owner && typeof onCancelRsvp === "function"
+              );
+              const canCheckin = Boolean(!isMembershipTier && isUpcomingRegistration && nft.owner && nft.tokenId);
+              const eventLabels = formatEventDisplay(
+                nft.eventDate,
+                nft.startTime,
+                nft.endTime,
+                nft.timezone
+              );
+              const showEventDetails =
+                isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
+              const calendarLinks = showEventDetails
+                ? buildCalendarLinks(
+                    nft.title ?? 'PGP Event',
+                    nft.eventDate,
+                    nft.startTime,
+                    nft.endTime,
+                    nft.timezone,
+                    nft.location,
+                    nft.description ?? null
+                  )
+                : { google: null, ics: null };
+              const subtitle = showEventDetails
+                ? null
+                : (() => {
+                    const text = (nft.subtitle || nft.collectionName || nft.description || '').trim();
+                    if (!text) return null;
+                    const normalizedTitle = nft.title?.trim().toLowerCase();
+                    const normalizedText = text.toLowerCase();
+                    if (normalizedTitle && normalizedTitle === normalizedText) return null;
+                    if (text.length > 80) return null;
+                    return text;
                   })();
-                  if (!source) return null;
-                  const plain = stripMarkdown(source);
-                  if (!plain) return null;
-                  const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
-                  const enrichedMarkdown = source.replace(/(^|\s)(https?:\/\/[^\s)]+)/g, (match, prefix, url, offset, str) => {
-                    const before = str.slice(0, offset + prefix.length);
-                    if (/\[[^\]]*$/.test(before)) return match;
-                    return `${prefix}[${url}](${url})`;
-                  });
-                  return {
-                    preview,
-                    fullMarkdown: enrichedMarkdown,
-                  } as const;
-                })();
-            const handleDownloadIcs = () => {
-              if (calendarLinks.ics) {
-                downloadIcs(calendarLinks.ics, nft.title || 'PGP Event');
-              }
-            };
-            const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
-            const tokenIdKey = nft.tokenId ?? 'upcoming';
-            const itemKey = buildNftKey(nft.contractAddress, tokenIdKey);
-            const isMissed = showAllNfts && missedKeySet.has(itemKey);
-            const ringClass = isUpcomingRegistration
-              ? 'ring-2 ring-[rgba(67,119,243,0.45)]'
-              : isMissed
-              ? 'ring-2 ring-[rgba(239,68,68,0.45)]'
-              : '';
-            const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
-            const isDescriptionOpen = openDescriptionKey === descriptionKey;
-            return (
-              <div
-                key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
-                className={`muted-card flex gap-3 p-3 ${ringClass} ${isOwned ? '' : 'opacity-80'}`}
-              >
+              const shortenedDescription = showEventDetails
+                ? null
+                : (() => {
+                    const source = (() => {
+                      const desc = nft.description?.trim();
+                      if (desc && desc.length) return desc;
+                      const sub = nft.subtitle?.trim();
+                      if (sub && sub.length) return sub;
+                      const collection = nft.collectionName?.trim();
+                      if (collection && collection.length) return collection;
+                      return '';
+                    })();
+                    if (!source) return null;
+                    const plain = stripMarkdown(source);
+                    if (!plain) return null;
+                    const preview = plain.length > 140 ? `${plain.slice(0, 140)}…` : plain;
+                    const enrichedMarkdown = source.replace(
+                      /(^|\s)(https?:\/\/[^\s)]+)/g,
+                      (match, prefix, url, offset, str) => {
+                        const before = str.slice(0, offset + prefix.length);
+                        if (/\[[^\]]*$/.test(before)) return match;
+                        return `${prefix}[${url}](${url})`;
+                      }
+                    );
+                    return {
+                      preview,
+                      fullMarkdown: enrichedMarkdown,
+                    } as const;
+                  })();
+              const handleDownloadIcs = () => {
+                if (calendarLinks.ics) {
+                  downloadIcs(calendarLinks.ics, nft.title || 'PGP Event');
+                }
+              };
+              const ownerKey = 'owner' in nft && nft.owner ? nft.owner : 'none';
+              const tokenIdKey = nft.tokenId ?? 'upcoming';
+              const itemKey = buildNftKey(nft.contractAddress, tokenIdKey);
+              const isMissed = showAllNfts && missedKeySet.has(itemKey);
+              const ringClass = isUpcomingRegistration
+                ? 'ring-2 ring-[rgba(67,119,243,0.45)]'
+                : isMissed
+                ? 'ring-2 ring-[rgba(239,68,68,0.45)]'
+                : '';
+              const descriptionKey = `${nft.contractAddress}-${tokenIdKey}-${ownerKey}-description`;
+              const isDescriptionOpen = openDescriptionKey === descriptionKey;
+              return (
+                <div
+                  key={`${nft.contractAddress}-${tokenIdKey}-${ownerKey}`}
+                  className={`muted-card flex gap-3 p-3 ${ringClass} ${isOwned ? '' : 'opacity-80'}`}
+                >
                 {nft.image ? (
                   <a
                     href={explorerUrl}
@@ -610,7 +628,7 @@ export function NftCollection({
         </div>
       ) : (
         <p className="text-sm text-[var(--muted-ink)]">
-          No creator NFTs or POAPs detected yet. Join community events to start collecting!
+          {emptyMessage ?? "No creator NFTs or POAPs detected yet. Join community events to start collecting!"}
         </p>
       )}
     </div>

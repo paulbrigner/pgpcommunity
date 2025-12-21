@@ -21,9 +21,15 @@ export async function GET(request: NextRequest) {
     const fields = parseFields(searchParams.get("fields"));
     const statusParam = (searchParams.get("status") || "").toLowerCase();
     const refreshParam = (searchParams.get("refresh") || "").toLowerCase();
+    const preferStaleParam = (searchParams.get("preferStale") || searchParams.get("prefer_stale") || "").toLowerCase();
+    const triggerRebuildParam = (searchParams.get("triggerRebuild") || searchParams.get("trigger_rebuild") || "").toLowerCase();
+    const forceRebuildParam = (searchParams.get("forceRebuild") || searchParams.get("force_rebuild") || "").toLowerCase();
     const allowedStatuses = new Set(["active", "expired", "none", "all"]);
     const statusFilter = allowedStatuses.has(statusParam) ? (statusParam as any) : "all";
     const forceRefresh = refreshParam === "1" || refreshParam === "true" || refreshParam === "yes";
+    const preferStale = preferStaleParam === "1" || preferStaleParam === "true" || preferStaleParam === "yes";
+    const triggerRebuild = triggerRebuildParam === "1" || triggerRebuildParam === "true" || triggerRebuildParam === "yes";
+    const forceRebuild = forceRebuildParam === "1" || forceRebuildParam === "true" || forceRebuildParam === "yes";
 
     const hasFields = fields.size > 0;
     const hasAll = fields.has("all");
@@ -38,6 +44,9 @@ export async function GET(request: NextRequest) {
       includeTokenIds,
       statusFilter,
       forceRefresh,
+      preferStale,
+      triggerRebuild,
+      forceRebuild,
     });
     return NextResponse.json(roster);
   } catch (err) {

@@ -15,6 +15,21 @@ type RosterCacheConfig = {
   tiersHash: string;
 };
 
+export type AdminRosterCacheStatus = {
+  enabled: boolean;
+  mode: "off" | "read-through" | "stale-while-revalidate";
+  computedAt: number | null;
+  expiresAt: number | null;
+  isFresh: boolean;
+  isStale: boolean;
+  isWithinMaxStale: boolean;
+  rebuildTriggered: boolean;
+  rebuildBlocking: boolean;
+  missing: boolean;
+  lockActive: boolean;
+  lockExpiresAt: number | null;
+};
+
 type CacheMetaItem = {
   pk: string;
   sk: string;
@@ -55,6 +70,21 @@ const DEFAULT_TTL_SECONDS = 600;
 const DEFAULT_MAX_STALE_SECONDS = 3600;
 const DEFAULT_PAGE_SIZE = 100;
 const LOCK_TTL_MS = 5 * 60 * 1000;
+
+const buildBaseCacheStatus = (config: RosterCacheConfig): AdminRosterCacheStatus => ({
+  enabled: config.enabled,
+  mode: config.mode,
+  computedAt: null,
+  expiresAt: null,
+  isFresh: false,
+  isStale: false,
+  isWithinMaxStale: false,
+  rebuildTriggered: false,
+  rebuildBlocking: false,
+  missing: false,
+  lockActive: false,
+  lockExpiresAt: null,
+});
 
 const normalizeMode = (value: string | undefined): CacheMode => {
   if (!value) return "off";
@@ -186,6 +216,48 @@ export async function loadRosterCache(config: RosterCacheConfig): Promise<Loaded
     isWithinMaxStale,
     computedAt: meta.computedAt,
     expiresAt: meta.expiresAt,
+  };
+}
+
+export async function loadRosterCacheStatus(config: RosterCacheConfig): Promise<AdminRosterCacheStatus> {
+  const base = buildBaseCacheStatus(config);
+  if (!config.enabled || !config.tableName) return base;
+
+  const tableName = config.tableName;
+  const [metaRes, lockRes] = await Promise.all([
+    documentClient.get({ TableName: tableName, Key: { pk: CACHE_PK, sk: CACHE_SK_META } }),
+    documentClient.get({ TableName: tableName, Key: { pk: CACHE_PK, sk: CACHE_SK_LOCK } }),
+  ]);
+
+  const now = Date.now();
+  const lockItem = lockRes.Item as { expiresAt?: number } | undefined;
+  const lockActive = typeof lockItem?.expiresAt === "number" && lockItem.expiresAt > now;
+  const lockExpiresAt = lockActive ? lockItem?.expiresAt ?? null : null;
+
+  const meta = metaRes.Item as CacheMetaItem | undefined;
+  if (!isCacheMetaValid(meta, config)) {
+    return {
+      ...base,
+      missing: true,
+      lockActive,
+      lockExpiresAt,
+    };
+  }
+
+  const isFresh = meta.expiresAt > now;
+  const maxStaleMs = config.maxStaleSeconds * 1000;
+  const isWithinMaxStale = now - meta.computedAt <= maxStaleMs;
+
+  return {
+    ...base,
+    computedAt: meta.computedAt,
+    expiresAt: meta.expiresAt,
+    isFresh,
+    isStale: !isFresh,
+    isWithinMaxStale,
+    missing: false,
+    lockActive,
+    lockExpiresAt,
   };
 }
 

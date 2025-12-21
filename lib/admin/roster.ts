@@ -1,10 +1,23 @@
 import { Contract, formatUnits } from "ethers";
 import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
-import { BASE_NETWORK_ID, BASE_RPC_URL, MEMBERSHIP_TIERS, USDC_ADDRESS } from "@/lib/config";
+import {
+  BASE_NETWORK_ID,
+  BASE_RPC_URL,
+  MEMBERSHIP_TIERS,
+  UNLOCK_SUBGRAPH_API_KEY,
+  UNLOCK_SUBGRAPH_ID,
+  UNLOCK_SUBGRAPH_URL,
+  USDC_ADDRESS,
+} from "@/lib/config";
 import { membershipStateService, snapshotToMembershipSummary, type AllowanceState } from "@/lib/membership-state-service";
 import { pickHighestActiveTier, pickNextActiveTier, resolveTierLabel } from "@/lib/membership-tiers";
 import { getRpcProvider } from "@/lib/rpc/provider";
-import { getRosterCacheConfig, loadRosterCache, rebuildRosterCache } from "@/lib/admin/roster-cache";
+import {
+  getRosterCacheConfig,
+  loadRosterCache,
+  rebuildRosterCache,
+  type AdminRosterCacheStatus,
+} from "@/lib/admin/roster-cache";
 
 type RawUser = {
   id?: string;
@@ -20,6 +33,7 @@ type RawUser = {
   lastEmailType?: string | null;
   emailBounceReason?: string | null;
   emailSuppressed?: boolean | null;
+  isTestMember?: boolean | null;
 };
 
 export type AdminMember = {
@@ -51,6 +65,8 @@ export type AdminMember = {
   emailBounceReason: string | null;
   emailSuppressed: boolean | null;
   membershipCheckedAt: number | null;
+  memberSince: number | null;
+  isTestMember: boolean;
 };
 
 export type AdminRoster = {
@@ -67,34 +83,31 @@ export type AdminRoster = {
   cache?: AdminRosterCacheStatus;
 };
 
-export type AdminRosterCacheStatus = {
-  enabled: boolean;
-  mode: "off" | "read-through" | "stale-while-revalidate";
-  computedAt: number | null;
-  expiresAt: number | null;
-  isFresh: boolean;
-  isStale: boolean;
-  isWithinMaxStale: boolean;
-  rebuildTriggered: boolean;
-  rebuildBlocking: boolean;
-};
-
 export type BuildAdminRosterOptions = {
   includeAllowances?: boolean;
   includeBalances?: boolean;
   includeTokenIds?: boolean;
   statusFilter?: "all" | "active" | "expired" | "none";
   forceRefresh?: boolean;
+  preferStale?: boolean;
+  triggerRebuild?: boolean;
+  forceRebuild?: boolean;
+  memberSinceByWallet?: Record<string, number | null>;
 };
 
 const ERC20_BALANCE_ABI = ["function balanceOf(address owner) view returns (uint256)"] as const;
 const provider = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
 const usdcContract = USDC_ADDRESS ? new Contract(USDC_ADDRESS, ERC20_BALANCE_ABI, provider) : null;
 const balanceCache = new Map<string, { ethBalance: string | null; usdcBalance: string | null }>();
+const blockTimestampCache = new Map<number, number>();
 const LOG_RPC_DEBUG = process.env.RPC_DEBUG === "true";
 const MAX_CONCURRENCY = 2;
 const BALANCE_RETRIES = 2;
 const BALANCE_RETRY_DELAY_MS = 300;
+const MEMBER_JOIN_BATCH_SIZE = 100;
+const MEMBER_JOIN_PAGE_SIZE = 1000;
+const MEMBER_JOIN_BLOCK_CONCURRENCY = 3;
+const DEFAULT_SUBGRAPH_ENDPOINT = "https://gateway.thegraph.com/api";
 const rpcDebugInfo = (() => {
   try {
     const u = new URL(BASE_RPC_URL || "");
@@ -122,7 +135,7 @@ async function scanUsers(): Promise<RawUser[]> {
     const res = await documentClient.scan({
       TableName: TABLE_NAME,
       FilterExpression: "#type = :user",
-      ProjectionExpression: "id, #name, email, firstName, lastName, wallets, walletAddress, isAdmin, welcomeEmailSentAt, lastEmailSentAt, lastEmailType, emailBounceReason, emailSuppressed",
+      ProjectionExpression: "id, #name, email, firstName, lastName, wallets, walletAddress, isAdmin, isTestMember, welcomeEmailSentAt, lastEmailSentAt, lastEmailType, emailBounceReason, emailSuppressed",
       ExpressionAttributeNames: { "#type": "type", "#name": "name" },
       ExpressionAttributeValues: { ":user": "USER" },
       ExclusiveStartKey,
@@ -146,6 +159,166 @@ function normalizeWallets(wallets: any): string[] {
         .filter((addr) => addr.length === 42 && addr.startsWith("0x")),
     ),
   );
+}
+
+function normalizeWallet(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim().toLowerCase();
+  if (trimmed.length !== 42 || !trimmed.startsWith("0x")) return null;
+  return trimmed;
+}
+
+function buildSubgraphUrl(): string | null {
+  if (UNLOCK_SUBGRAPH_URL?.trim()) {
+    return UNLOCK_SUBGRAPH_URL.trim();
+  }
+  if (UNLOCK_SUBGRAPH_API_KEY?.trim() && UNLOCK_SUBGRAPH_ID?.trim()) {
+    return `${DEFAULT_SUBGRAPH_ENDPOINT}/${UNLOCK_SUBGRAPH_API_KEY.trim()}/subgraphs/id/${UNLOCK_SUBGRAPH_ID.trim()}`;
+  }
+  return null;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+async function resolveBlockTimestamp(blockNumber: number): Promise<number | null> {
+  if (!Number.isFinite(blockNumber) || blockNumber <= 0) return null;
+  const cached = blockTimestampCache.get(blockNumber);
+  if (typeof cached === "number") return cached;
+  try {
+    const block = await provider.getBlock(blockNumber);
+    const timestamp = typeof block?.timestamp === "number" ? block.timestamp : null;
+    if (typeof timestamp === "number") {
+      blockTimestampCache.set(blockNumber, timestamp);
+      return timestamp;
+    }
+  } catch (err) {
+    if (LOG_RPC_DEBUG) {
+      console.warn("Admin roster: failed to resolve block timestamp", blockNumber, err);
+    }
+  }
+  return null;
+}
+
+async function fetchMemberJoinBlocks(lockAddress: string, owners: string[]): Promise<Record<string, number>> {
+  const endpoint = buildSubgraphUrl();
+  if (!endpoint || !owners.length) return {};
+  const normalizedOwners = Array.from(
+    new Set(
+      owners
+        .map((addr) => (typeof addr === "string" ? addr.trim().toLowerCase() : ""))
+        .filter((addr) => addr.length === 42 && addr.startsWith("0x")),
+    ),
+  );
+  if (!normalizedOwners.length) return {};
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (UNLOCK_SUBGRAPH_API_KEY?.trim()) {
+    headers["x-api-key"] = UNLOCK_SUBGRAPH_API_KEY.trim();
+    headers["authorization"] = `Bearer ${UNLOCK_SUBGRAPH_API_KEY.trim()}`;
+  }
+
+  const ownerBlocks: Record<string, number> = {};
+  const ownerChunks = chunkArray(normalizedOwners, MEMBER_JOIN_BATCH_SIZE);
+  for (const chunk of ownerChunks) {
+    let skip = 0;
+    while (true) {
+      const payload = {
+        query: `
+          query MemberJoinBlocks($lock: String!, $owners: [String!], $first: Int!, $skip: Int!) {
+            keys(first: $first, skip: $skip, where: { lock: $lock, owner_in: $owners }) {
+              owner
+              createdAtBlock
+            }
+          }
+        `,
+        variables: {
+          lock: lockAddress.toLowerCase(),
+          owners: chunk,
+          first: MEMBER_JOIN_PAGE_SIZE,
+          skip,
+        },
+      };
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+          cache: "no-store",
+        });
+        if (!res.ok) {
+          throw new Error(`Subgraph responded with ${res.status}`);
+        }
+        const body = await res.json();
+        if (Array.isArray(body?.errors) && body.errors.length) {
+          throw new Error(body.errors[0]?.message || "Subgraph error");
+        }
+        const rows: any[] = Array.isArray(body?.data?.keys) ? body.data.keys : [];
+        if (!rows.length) break;
+        for (const row of rows) {
+          const owner = typeof row?.owner === "string" ? row.owner.toLowerCase() : null;
+          if (!owner) continue;
+          const rawBlock = row?.createdAtBlock;
+          const blockNum = typeof rawBlock === "number" ? rawBlock : Number(rawBlock);
+          if (!Number.isFinite(blockNum) || blockNum <= 0) continue;
+          const current = ownerBlocks[owner];
+          if (typeof current !== "number" || blockNum < current) {
+            ownerBlocks[owner] = blockNum;
+          }
+        }
+        if (rows.length < MEMBER_JOIN_PAGE_SIZE) break;
+        skip += rows.length;
+      } catch (err) {
+        if (LOG_RPC_DEBUG) {
+          console.warn("Admin roster: member join subgraph fetch failed", err);
+        }
+        break;
+      }
+    }
+  }
+
+  return ownerBlocks;
+}
+
+async function fetchMemberJoinDates(lockAddress: string, owners: string[]): Promise<Record<string, number>> {
+  const ownerBlocks = await fetchMemberJoinBlocks(lockAddress, owners);
+  const blockNumbers = Array.from(new Set(Object.values(ownerBlocks)));
+  if (!blockNumbers.length) return {};
+
+  await mapWithLimit(blockNumbers, MEMBER_JOIN_BLOCK_CONCURRENCY, async (blockNumber) => {
+    await resolveBlockTimestamp(blockNumber);
+    return blockNumber;
+  });
+
+  const result: Record<string, number> = {};
+  for (const [owner, blockNumber] of Object.entries(ownerBlocks)) {
+    const timestamp = blockTimestampCache.get(blockNumber);
+    if (typeof timestamp === "number") {
+      result[owner] = timestamp;
+    }
+  }
+  return result;
+}
+
+function resolveMemberSince(addresses: string[], memberSinceByWallet?: Record<string, number | null>): number | null {
+  if (!memberSinceByWallet || !addresses.length) return null;
+  let earliest: number | null = null;
+  for (const addr of addresses) {
+    const normalized = normalizeWallet(addr);
+    if (!normalized) continue;
+    const value = memberSinceByWallet[normalized];
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue;
+    if (earliest == null || value < earliest) {
+      earliest = value;
+    }
+  }
+  return earliest;
 }
 
 async function fetchBalances(address: string | null): Promise<{ ethBalance: string | null; usdcBalance: string | null }> {
@@ -273,6 +446,7 @@ async function buildAdminMemberEntry(user: RawUser, options: BuildAdminRosterOpt
   let autoRenew: boolean | null = null;
   let allowances: Record<string, AllowanceState> = {};
   let membershipCheckedAt: number | null = null;
+  let memberSince: number | null = null;
 
   if (addresses.length) {
     try {
@@ -304,6 +478,9 @@ async function buildAdminMemberEntry(user: RawUser, options: BuildAdminRosterOpt
       allowances = {};
     }
   }
+
+  const joinAddresses = Array.from(new Set([...(wallets || []), ...(primaryWallet ? [primaryWallet] : [])]));
+  memberSince = resolveMemberSince(joinAddresses, options.memberSinceByWallet);
 
   if (options.statusFilter && options.statusFilter !== "all" && membershipStatus !== options.statusFilter) {
     return null;
@@ -340,12 +517,32 @@ async function buildAdminMemberEntry(user: RawUser, options: BuildAdminRosterOpt
     emailBounceReason: user.emailBounceReason || null,
     emailSuppressed: typeof user.emailSuppressed === "boolean" ? !!user.emailSuppressed : null,
     membershipCheckedAt,
+    memberSince,
+    isTestMember: typeof user.isTestMember === "boolean" ? user.isTestMember : false,
   };
 }
 
 async function buildAdminRosterFresh(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
   const users = await scanUsers();
-  const entries = await mapWithLimit(users, MAX_CONCURRENCY, (user) => buildAdminMemberEntry(user, options));
+  const memberTier =
+    MEMBERSHIP_TIERS.find((tier) => tier.neverExpires || tier.renewable === false) ||
+    MEMBERSHIP_TIERS[MEMBERSHIP_TIERS.length - 1];
+  let memberSinceByWallet: Record<string, number | null> = {};
+  if (memberTier) {
+    const addressSet = new Set<string>();
+    for (const user of users) {
+      normalizeWallets(user.wallets).forEach((addr) => addressSet.add(addr));
+      const primary = normalizeWallet(user.walletAddress);
+      if (primary) addressSet.add(primary);
+    }
+    if (addressSet.size) {
+      memberSinceByWallet = await fetchMemberJoinDates(memberTier.checksumAddress, Array.from(addressSet));
+    }
+  }
+
+  const entries = await mapWithLimit(users, MAX_CONCURRENCY, (user) =>
+    buildAdminMemberEntry(user, { ...options, memberSinceByWallet }),
+  );
   const members: AdminMember[] = entries.filter((m): m is AdminMember => !!m);
 
   const nowSec = Math.floor(Date.now() / 1000);
@@ -384,11 +581,31 @@ async function buildAdminRosterFresh(options: BuildAdminRosterOptions = {}): Pro
   return { members, meta };
 }
 
+const emptyRosterMeta = {
+  total: 0,
+  active: 0,
+  expired: 0,
+  none: 0,
+  autoRenewOn: 0,
+  autoRenewOff: 0,
+  expiringSoon: 0,
+};
+
+const buildEmptyRoster = (cache?: AdminRosterCacheStatus): AdminRoster => ({
+  members: [],
+  meta: { ...emptyRosterMeta },
+  ...(cache ? { cache } : {}),
+});
+
 export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): Promise<AdminRoster> {
   const includeAllowances = options.includeAllowances !== false;
   const includeBalances = options.includeBalances !== false;
   const includeTokenIds = options.includeTokenIds !== false;
   const statusFilter = options.statusFilter || "all";
+  const preferStale = !!options.preferStale;
+  const triggerRebuild = !!options.triggerRebuild;
+  const forceRebuild = !!options.forceRebuild;
+  const shouldTriggerRebuild = triggerRebuild || forceRebuild;
 
   const cacheEligible = !includeAllowances && !includeBalances && !includeTokenIds && statusFilter === "all";
   const cacheConfig = getRosterCacheConfig();
@@ -402,6 +619,9 @@ export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): P
     isWithinMaxStale: false,
     rebuildTriggered: false,
     rebuildBlocking: false,
+    missing: false,
+    lockActive: false,
+    lockExpiresAt: null,
   };
 
   if (cacheEligible && cacheConfig.enabled && !options.forceRefresh) {
@@ -416,12 +636,46 @@ export async function buildAdminRoster(options: BuildAdminRosterOptions = {}): P
         isWithinMaxStale: cached.isWithinMaxStale,
       };
       if (cached.isFresh) {
+        if (shouldTriggerRebuild) {
+          void rebuildRosterCache(cacheConfig, () => buildAdminRosterFresh(options));
+          return {
+            ...cached.roster,
+            cache: {
+              ...cacheStatus,
+              rebuildTriggered: true,
+              rebuildBlocking: false,
+            },
+          };
+        }
         return { ...cached.roster, cache: cacheStatus };
+      }
+      if (preferStale) {
+        if (shouldTriggerRebuild) {
+          void rebuildRosterCache(cacheConfig, () => buildAdminRosterFresh(options));
+        }
+        return {
+          ...cached.roster,
+          cache: {
+            ...cacheStatus,
+            rebuildTriggered: shouldTriggerRebuild,
+            rebuildBlocking: false,
+          },
+        };
       }
       if (cacheConfig.mode === "stale-while-revalidate" && cached.isWithinMaxStale) {
         void rebuildRosterCache(cacheConfig, () => buildAdminRosterFresh(options));
         return { ...cached.roster, cache: { ...cacheStatus, rebuildTriggered: true, rebuildBlocking: false } };
       }
+    } else if (preferStale) {
+      if (shouldTriggerRebuild) {
+        void rebuildRosterCache(cacheConfig, () => buildAdminRosterFresh(options));
+      }
+      return buildEmptyRoster({
+        ...baseCacheStatus,
+        missing: true,
+        rebuildTriggered: shouldTriggerRebuild,
+        rebuildBlocking: false,
+      });
     }
   }
 

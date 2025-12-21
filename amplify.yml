@@ -45,6 +45,7 @@ frontend:
         - env | grep -e ADMIN_ROSTER_CACHE_TABLE >> .env.production
         - env | grep -e ADMIN_ROSTER_CACHE_MODE >> .env.production
         - env | grep -e ADMIN_ROSTER_CACHE_MAX_STALE_SECONDS >> .env.production
+        - env | grep -e ADMIN_ROSTER_CACHE_TTL_SECONDS >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

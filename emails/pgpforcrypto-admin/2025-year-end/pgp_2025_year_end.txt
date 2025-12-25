@@ -1,0 +1,22 @@
+Dear PGP* Community,
+
+As we close out 2025, I want to thank you for making this a strong and productive year for PGP* (Pretty Good Policy) for Crypto.
+
+Across our briefings, roundtables, and special convenings, PGP* brought together policymakers, technologists, academics, and civil society leaders to work through some of the most consequential issues at the intersection of crypto, privacy, security, and regulation. The quality of discussion throughout the year reflected a shared commitment to policy that is technically informed, grounded in real-world constraints, and capable of supporting both innovation and public-interest outcomes.
+
+Throughout the year, several core themes consistently shaped our conversations: market structure and token classification; stablecoins, payments, and compliance design; developer protections and the treatment of open-source software; financial inclusion beyond legacy financial rails; and the growing importance of tax, custody, and risk management as digital assets mature. Speakers brought perspectives from Congress, regulatory agencies, industry, advocacy organizations, and academia, keeping discussions focused on what is workable rather than theoretical.
+
+Privacy was a defining focus of PGP* in 2025 -- not as an abstract principle, but as a design and policy challenge. Sessions examined zero-knowledge proofs, MPC, and private compute as compliance tools; digital identity and age verification systems; confidential stablecoins and selective disclosure frameworks; and the tradeoffs between usability, security, and unlinkability. A recurring takeaway was clear: privacy and compliance are not binary, and policy outcomes depend heavily on design choices.
+
+In October, PGP* co-hosted the 2nd Annual DC Privacy Summit with Project Glitch. The Summit convened regulators, cryptographers, builders, and policy leaders for deeper, full-day discussions on where privacy, security, and digital identity are converging -- and where risks are accelerating. The Summit complemented the ongoing PGP* series and reinforced the value of sustained, technically grounded dialogue.
+
+PGP* activity continued through the end of the year with additional briefings and roundtables that built on earlier discussions as legislation evolved, cases developed, and technical capabilities matured. That continuity is central to what PGP* aims to provide.
+
+PGP* exists because of its community. Thank you to the speakers, attendees, moderators, partners, and supporters who showed up throughout the year with rigor, curiosity, and good faith. Your engagement is what makes this forum valuable.
+
+We look forward to continuing this work together in 2026.
+
+Best regards,
+Paul
+
+Unsubscribe: email admin@pgpforcrypto.org with "unsubscribe" in the subject line.

@@ -37,6 +37,7 @@ This software is under active development and has not undergone a full independe
 - Communications: send welcome or custom emails to selected users.
 - Token visibility: inspect member token IDs and allowances per lock to troubleshoot renewals or auto-renew setup.
 - Quick actions: adminize users, clear or refresh cached membership state as needed.
+- Roster cache rebuilds run via a standalone Lambda (SAM) so Amplify does not time out on long rebuilds.
 
 ## Persistence & Data Flow
 - **Sessions/Auth**: NextAuth with DynamoDB adapter stores Users, Accounts, and VerificationTokens. JWT-based sessions are enriched with profile and membership fields for short TTLs to reduce on-chain checks.
@@ -74,6 +75,15 @@ EVENT_SPONSOR_PRIVATE_KEY=
 EVENT_SPONSOR_RPC_URL=
 EVENT_SPONSOR_MIN_BALANCE_WEI=
 EVENT_SPONSOR_MAX_TX_PER_DAY=
+
+# Admin roster cache + rebuild
+ADMIN_ROSTER_CACHE_TABLE=
+ADMIN_ROSTER_CACHE_MODE=stale-while-revalidate
+ADMIN_ROSTER_CACHE_TTL_SECONDS=600
+ADMIN_ROSTER_CACHE_MAX_STALE_SECONDS=3600
+ADMIN_ROSTER_CACHE_PAGE_SIZE=100
+ADMIN_ROSTER_REBUILD_URL=
+ADMIN_ROSTER_REBUILD_SECRET=
 
 # NextAuth
 # Server-only secrets

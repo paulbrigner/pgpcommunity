@@ -1,0 +1,10 @@
+[
+  {
+    "Destination": {"ToAddresses": ["alice@example.com"]},
+    "ReplacementTemplateData": "{}"
+  },
+  {
+    "Destination": {"ToAddresses": ["bob@example.com"]},
+    "ReplacementTemplateData": "{}"
+  }
+]

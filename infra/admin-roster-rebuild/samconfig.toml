@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "admin-roster-rebuild"
+resolve_s3 = true
+s3_prefix = "admin-roster-rebuild"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "NextAuthTable=\"NextAuth\" AdminRosterCacheTable=\"AdminRosterCache\" AdminRosterCacheMode=\"stale-while-revalidate\" AdminRosterCacheTtlSeconds=\"21600\" AdminRosterCacheMaxStaleSeconds=\"3600\" AdminRosterCachePageSize=\"100\" NextPublicLockTiers=\"[{\\\"id\\\":\\\"member\\\",\\\"address\\\":\\\"0xCb9c9a907ca52d73Dacec83892696F47430f6dbb\\\",\\\"label\\\":\\\"Member\\\",\\\"order\\\":3,\\\"renewable\\\":false,\\\"gasSponsored\\\":true,\\\"neverExpires\\\":true},{\\\"id\\\":\\\"holder\\\",\\\"address\\\":\\\"0xed16cd934780a48697c2fd89f1b13ad15f0b64e1\\\",\\\"label\\\":\\\"Holder\\\",\\\"order\\\":0},{\\\"id\\\":\\\"staker\\\",\\\"address\\\":\\\"0xb5d2e305c589b1d7a1873c73637adf9a52724105\\\",\\\"label\\\":\\\"Staker\\\",\\\"order\\\":1},{\\\"id\\\":\\\"builder\\\",\\\"address\\\":\\\"0xdd7fff4931409e2d1da47be9798fd404cc44e9a9\\\",\\\"label\\\":\\\"Builder\\\",\\\"order\\\":2}]\" NextPublicLockAddress=\"0xed16cd934780a48697c2fd89f1b13ad15f0b64e1\" NextPublicBaseRpcUrl=\"https://base-mainnet.g.alchemy.com/v2/JgJqq8rht0v4i_j77aEOV\" NextPublicBaseNetworkId=\"8453\" NextPublicUsdcAddress=\"0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913\" NextPublicUnlockSubgraphUrl=\"\" UnlockSubgraphId=\"ECQhJQV8KWMfAAgWf8WV5duy1si9TnZpL4f194oGLrWW\" RosterRebuildSchedule=\"rate(6 hours)\""
+image_repositories = []
+
+[default.global.parameters]
+region = "us-east-1"

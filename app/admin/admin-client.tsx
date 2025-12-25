@@ -531,10 +531,44 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     }
   }, []);
 
+  const triggerRosterRebuild = useCallback(
+    async (options?: { refreshRoster?: boolean; showError?: boolean }) => {
+      const refreshRoster = options?.refreshRoster !== false;
+      const showError = options?.showError !== false;
+      rebuildRequestedRef.current = true;
+      try {
+        const res = await fetch("/api/admin/members/rebuild", { method: "POST", cache: "no-store" });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          rebuildRequestedRef.current = false;
+          throw new Error(payload?.error || `Roster rebuild failed (${res.status})`);
+        }
+        const status = await fetchCacheStatus();
+        if (status) {
+          setRoster((prev) => {
+            if (!prev) return prev;
+            return { ...prev, cache: { ...prev.cache, ...status } };
+          });
+        }
+        if (refreshRoster) {
+          await fetchRoster({
+            preferStale: true,
+            resetDetails: false,
+            showLoading: false,
+          });
+        }
+      } catch (err: any) {
+        if (showError) {
+          setError(typeof err?.message === "string" ? err.message : "Failed to rebuild roster cache");
+        }
+      }
+    },
+    [fetchCacheStatus, fetchRoster],
+  );
+
   const handleRefresh = async () => {
     await fetchRoster({
       preferStale: true,
-      triggerRebuild: true,
       resetDetails: true,
       showLoading: true,
     });
@@ -543,21 +577,18 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   const handleCacheRebuild = async () => {
     if (cacheRebuildLoading) return;
     setCacheRebuildLoading(true);
-    await fetchRoster({
-      preferStale: true,
-      triggerRebuild: true,
-      forceRebuild: true,
-      resetDetails: false,
-      showLoading: false,
-    });
-    setCacheRebuildLoading(false);
+    setError(null);
+    try {
+      await triggerRosterRebuild({ refreshRoster: true, showError: true });
+    } finally {
+      setCacheRebuildLoading(false);
+    }
   };
 
   useEffect(() => {
     if (roster) return;
     void fetchRoster({
       preferStale: true,
-      triggerRebuild: true,
       resetDetails: true,
       showLoading: true,
     });
@@ -584,8 +615,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     }
 
     if (!rebuildRequestedRef.current && (cache?.missing || cache?.isStale)) {
-      rebuildRequestedRef.current = true;
-      void fetchRoster({ preferStale: true, triggerRebuild: true, showLoading: false });
+      void triggerRosterRebuild({ refreshRoster: false, showError: false });
     }
 
     if (pollTimerRef.current) return;
@@ -617,7 +647,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       }
       setCachePolling(false);
     };
-  }, [cachePolling, fetchCacheStatus, fetchRoster, roster]);
+  }, [cachePolling, fetchCacheStatus, fetchRoster, roster, triggerRosterRebuild]);
 
   useEffect(() => {
     if (!AUTO_DETAIL_ENABLED) return;

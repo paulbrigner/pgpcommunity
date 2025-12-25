@@ -27,9 +27,11 @@ This document describes how the admin interface works today, the underlying tech
   - `membership-state-service` fetches membership snapshots (status, expiry, tokenIds, allowances) per wallet set.
   - Balances: per-wallet ETH (`getBalance`) and USDC (`balanceOf`) on Base RPC.
   - Dynamo tables: NextAuth users (includes `isAdmin`, email metadata), refund requests (`REFUND_REQUEST#id` with GSI1), email logs (per-event records).
+  - Roster cache rebuilds are handled by a standalone Lambda (SAM stack in `infra/admin-roster-rebuild`) that updates the cache table asynchronously.
 - **APIs**:
   - `/api/admin/members`: build roster (user + membership snapshot + balances).
   - `/api/admin/members/token-ids`: active token IDs per user across locks (returns `tokenIds` map and `activeLocks` list).
+  - `/api/admin/members/rebuild`: admin-gated trigger for the external roster-rebuild Lambda.
   - `/api/admin/email/send`: admin-gated email sender; logs events and updates per-user email fields.
   - `/api/admin/users/adminize`: set/unset `isAdmin` by userId/email/wallet.
   - `/api/admin/refund/requests`: list refund requests with `canExecute` based on lock-manager check.
@@ -74,6 +76,7 @@ This document describes how the admin interface works today, the underlying tech
 - **Refund confirmation modal**: summarizes actions and optional override amount per key.
 - **Refund requests panel**: shows status, wallet (clickable), tier label, created date, and actions (Issue refund/Reject).
 - **Feedback**: Success/error banners inline; errors also logged to console for debugging.
+- **Cache rebuild**: “Rebuild cache” calls the external Lambda via `/api/admin/members/rebuild`; the roster shows cached data while status polling waits for the rebuild to finish.
 
 ## Ops & Configuration
 - Env:
@@ -81,7 +84,12 @@ This document describes how the admin interface works today, the underlying tech
   - USDC address: `NEXT_PUBLIC_USDC_ADDRESS` (used for balances/decimals fallback).
   - Email SMTP: `EMAIL_*`.
   - Dynamo: `NEXTAUTH_TABLE`, region, etc.
+  - Roster rebuild Lambda: `ADMIN_ROSTER_REBUILD_URL`, `ADMIN_ROSTER_REBUILD_SECRET` (UI proxy calls Lambda).
   - Admin flag: `isAdmin` on user record; CLI `scripts/adminize.ts` and API `adminize` route available.
+- Roster cache rebuild Lambda:
+  - Deployed via SAM in `infra/admin-roster-rebuild`.
+  - Triggered on a schedule + on demand from `/api/admin/members/rebuild`.
+  - Uses a shared header secret (`ADMIN_ROSTER_REBUILD_SECRET`) so the endpoint is not public.
 - Permissions:
   - Lock manager role required for on-chain refunds; ensure admin wallet is manager on all membership locks.
   - Refund locks must have sufficient balance; if underfunded, on-chain tx reverts.
@@ -102,9 +110,9 @@ This document describes how the admin interface works today, the underlying tech
 - Cancellation/refund flow aligned to on-chain Unlock calls (`expireAndRefundFor`), using override/keyPrice and per-lock decimals; active-key targeting only.
 
 ## Performance Options (Admin UI Loading)
-- **Server-side hydrate with cached snapshots (current)**  
-  - Pros: Fewer client RPC calls; consistent membership state on load.  
-  - Cons: Can be very slow for larger user counts because the server precomputes everything (snapshots, balances) per request; snapshot freshness depends on cache TTL; balances may still lag.
+- **Cached roster + background rebuild (current)**  
+  - Pros: Fast initial load from Dynamo cache; rebuilds happen asynchronously via Lambda to avoid Amplify timeouts.  
+  - Cons: Snapshot freshness depends on cache TTL; details/balances still lag until fetched.
 - **Incremental client fetch (lazy details)**  
   - Pros: Smaller initial payload; fetch balances/tokenIds on demand per row; reduces server load.  
   - Cons: Per-row spinners; perceived latency as rows populate; more client RPCs.

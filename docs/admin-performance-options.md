@@ -12,6 +12,7 @@ This doc outlines practical steps to improve load and interaction performance on
 - **Cursor/paginated queries**: Fetch members/refunds in pages, not all at once. Potential: first paint much faster on large datasets; reduces memory/CPU.
 - **Server-side filtering/search**: Do search/sort/filter on the server to avoid shipping large lists to the client. Potential: significant when data grows (hundreds/thousands of rows).
 - **Batch related data**: Combine common lookups (members + token IDs + allowances) into a single API call when loading the dashboard. Potential: save 1–2 RTTs (~50–400 ms).
+- **Background roster cache rebuild (implemented)**: Offload cache rebuilds to a standalone Lambda (SAM) that runs on a schedule and via the “Rebuild cache” button, avoiding Amplify request timeouts.
 
 ## 3) Optimize rendering
 - **Virtualize tables/lists**: Use windowing for member/refund tables when row counts grow. Potential: stable frames for >100 rows, avoids layout thrash.

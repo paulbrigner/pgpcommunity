@@ -1,0 +1,117 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: "Admin roster cache rebuild Lambda (scheduled + on-demand)"
+
+Parameters:
+  NextAuthTable:
+    Type: String
+  AdminRosterCacheTable:
+    Type: String
+  AdminRosterCacheMode:
+    Type: String
+    Default: stale-while-revalidate
+  AdminRosterCacheTtlSeconds:
+    Type: Number
+    Default: 600
+  AdminRosterCacheMaxStaleSeconds:
+    Type: Number
+    Default: 3600
+  AdminRosterCachePageSize:
+    Type: Number
+    Default: 100
+  NextPublicLockTiers:
+    Type: String
+    Default: ""
+  NextPublicLockAddress:
+    Type: String
+    Default: ""
+  NextPublicBaseRpcUrl:
+    Type: String
+    Default: "https://mainnet.base.org"
+  NextPublicBaseNetworkId:
+    Type: String
+    Default: "8453"
+  NextPublicUsdcAddress:
+    Type: String
+    Default: ""
+  NextPublicUnlockSubgraphUrl:
+    Type: String
+    Default: ""
+  UnlockSubgraphId:
+    Type: String
+    Default: ""
+  UnlockSubgraphApiKey:
+    Type: String
+    Default: ""
+    NoEcho: true
+  AdminRosterRebuildSecret:
+    Type: String
+    Default: "tfXQCUfxKsmNzvQuJ9xdFCn9SM9VVfrk3eu8jEd4YX7sqKy82oy9qlli2hEtx9gS"
+    NoEcho: true
+  RosterRebuildSchedule:
+    Type: String
+    Default: "rate(6 hours)"
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 900
+    MemorySize: 1024
+    Architectures:
+      - x86_64
+
+Resources:
+  AdminRosterRebuildFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handler.handler
+      Description: "Rebuilds the admin roster cache in DynamoDB."
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref NextAuthTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref AdminRosterCacheTable
+      Environment:
+        Variables:
+          REGION_AWS: !Ref AWS::Region
+          NEXTAUTH_TABLE: !Ref NextAuthTable
+          ADMIN_ROSTER_CACHE_TABLE: !Ref AdminRosterCacheTable
+          ADMIN_ROSTER_CACHE_MODE: !Ref AdminRosterCacheMode
+          ADMIN_ROSTER_CACHE_TTL_SECONDS: !Ref AdminRosterCacheTtlSeconds
+          ADMIN_ROSTER_CACHE_MAX_STALE_SECONDS: !Ref AdminRosterCacheMaxStaleSeconds
+          ADMIN_ROSTER_CACHE_PAGE_SIZE: !Ref AdminRosterCachePageSize
+          NEXT_PUBLIC_LOCK_TIERS: !Ref NextPublicLockTiers
+          NEXT_PUBLIC_LOCK_ADDRESS: !Ref NextPublicLockAddress
+          NEXT_PUBLIC_BASE_RPC_URL: !Ref NextPublicBaseRpcUrl
+          NEXT_PUBLIC_BASE_NETWORK_ID: !Ref NextPublicBaseNetworkId
+          NEXT_PUBLIC_USDC_ADDRESS: !Ref NextPublicUsdcAddress
+          NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL: !Ref NextPublicUnlockSubgraphUrl
+          UNLOCK_SUBGRAPH_ID: !Ref UnlockSubgraphId
+          UNLOCK_SUBGRAPH_API_KEY: !Ref UnlockSubgraphApiKey
+          ADMIN_ROSTER_REBUILD_SECRET: !Ref AdminRosterRebuildSecret
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /admin/roster/rebuild
+            Method: post
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: !Ref RosterRebuildSchedule
+            Enabled: true
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Target: "es2020"
+        Sourcemap: true
+        Minify: true
+        EntryPoints:
+          - handler.ts
+        Tsconfig: ../tsconfig.lambda.json
+
+Outputs:
+  AdminRosterRebuildApiUrl:
+    Description: "API endpoint to trigger a rebuild."
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/admin/roster/rebuild"

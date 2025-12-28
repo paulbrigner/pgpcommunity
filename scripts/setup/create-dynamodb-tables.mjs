@@ -3,13 +3,14 @@
  * Create DynamoDB tables for a fresh install (NextAuth + admin roster cache).
  *
  * Usage:
- *   REGION_AWS=us-east-1 NEXTAUTH_TABLE=NextAuth ADMIN_ROSTER_CACHE_TABLE=AdminRosterCache \
+ *   REGION_AWS=us-east-1 NEXTAUTH_TABLE=NextAuth ADMIN_ROSTER_CACHE_TABLE=AdminRosterCache EVENT_METADATA_TABLE=EventMetadata \
  *     node scripts/setup/create-dynamodb-tables.mjs
  *
  *   node scripts/setup/create-dynamodb-tables.mjs \
  *     --region us-east-1 \
  *     --nextauth-table NextAuth \
- *     --cache-table AdminRosterCache
+ *     --cache-table AdminRosterCache \
+ *     --event-table EventMetadata
  *
  *   node scripts/setup/create-dynamodb-tables.mjs --skip-cache
  *   node scripts/setup/create-dynamodb-tables.mjs --skip-ttl
@@ -34,7 +35,9 @@ const usage = () => {
       "  --region <region>              AWS region (or REGION_AWS/AWS_REGION env)",
       "  --nextauth-table <name>        NextAuth table name (or NEXTAUTH_TABLE env)",
       "  --cache-table <name>           Admin roster cache table name (or ADMIN_ROSTER_CACHE_TABLE env)",
+      "  --event-table <name>           Event metadata table name (or EVENT_METADATA_TABLE env)",
       "  --skip-cache                   Do not create the admin roster cache table",
+      "  --skip-event                   Do not create the event metadata table",
       "  --skip-ttl                     Do not enable TTL on any table",
       "  --skip-ttl-nextauth            Do not enable TTL on the NextAuth table",
       "  --skip-ttl-cache               Do not enable TTL on the cache table",
@@ -45,7 +48,9 @@ const usage = () => {
 let region = process.env.REGION_AWS || process.env.AWS_REGION || "";
 let nextAuthTable = process.env.NEXTAUTH_TABLE || "NextAuth";
 let cacheTable = process.env.ADMIN_ROSTER_CACHE_TABLE || "";
+let eventTable = process.env.EVENT_METADATA_TABLE || "";
 let skipCache = false;
+let skipEvent = false;
 let skipTtl = false;
 let skipTtlNextAuth = false;
 let skipTtlCache = false;
@@ -71,8 +76,17 @@ for (let i = 0; i < args.length; i += 1) {
     i += 1;
     continue;
   }
+  if (arg === "--event-table" && args[i + 1]) {
+    eventTable = args[i + 1];
+    i += 1;
+    continue;
+  }
   if (arg === "--skip-cache") {
     skipCache = true;
+    continue;
+  }
+  if (arg === "--skip-event") {
+    skipEvent = true;
     continue;
   }
   if (arg === "--skip-ttl" || arg === "--no-ttl") {
@@ -103,7 +117,7 @@ if (!nextAuthTable) {
 
 const client = new DynamoDBClient({ region });
 
-async function ensureTtlEnabled({ tableName, attributeName, skip }: { tableName: string; attributeName: string; skip: boolean }) {
+async function ensureTtlEnabled({ tableName, attributeName, skip }) {
   if (skip || skipTtl) return;
   try {
     const res = await client.send(new DescribeTimeToLiveCommand({ TableName: tableName }));
@@ -127,7 +141,7 @@ async function ensureTtlEnabled({ tableName, attributeName, skip }: { tableName:
   console.log(`TTL enabled on ${tableName} for attribute ${attributeName}.`);
 }
 
-async function describeTable(tableName: string) {
+async function describeTable(tableName) {
   try {
     const res = await client.send(new DescribeTableCommand({ TableName: tableName }));
     return res.Table || null;
@@ -138,20 +152,20 @@ async function describeTable(tableName: string) {
   }
 }
 
-function hasKeySchema(table: any, hash: string, range: string | null) {
+function hasKeySchema(table, hash, range) {
   const keys = Array.isArray(table?.KeySchema) ? table.KeySchema : [];
-  const hashOk = keys.some((k: any) => k.AttributeName === hash && k.KeyType === "HASH");
-  const rangeOk = range ? keys.some((k: any) => k.AttributeName === range && k.KeyType === "RANGE") : true;
+  const hashOk = keys.some((k) => k.AttributeName === hash && k.KeyType === "HASH");
+  const rangeOk = range ? keys.some((k) => k.AttributeName === range && k.KeyType === "RANGE") : true;
   return hashOk && rangeOk;
 }
 
-function hasGsi(table: any, indexName: string, hash: string, range: string) {
+function hasGsi(table, indexName, hash, range) {
   const gsis = Array.isArray(table?.GlobalSecondaryIndexes) ? table.GlobalSecondaryIndexes : [];
-  return gsis.some((idx: any) => {
+  return gsis.some((idx) => {
     if (idx.IndexName !== indexName) return false;
     const keys = Array.isArray(idx.KeySchema) ? idx.KeySchema : [];
-    const hashOk = keys.some((k: any) => k.AttributeName === hash && k.KeyType === "HASH");
-    const rangeOk = keys.some((k: any) => k.AttributeName === range && k.KeyType === "RANGE");
+    const hashOk = keys.some((k) => k.AttributeName === hash && k.KeyType === "HASH");
+    const rangeOk = keys.some((k) => k.AttributeName === range && k.KeyType === "RANGE");
     return hashOk && rangeOk;
   });
 }
@@ -249,9 +263,44 @@ async function ensureRosterCacheTable() {
   await ensureTtlEnabled({ tableName: cacheTable, attributeName: "expiresAtEpochSec", skip: skipTtlCache });
 }
 
+async function ensureEventMetadataTable() {
+  if (skipEvent) {
+    console.log("Skipping event metadata table creation.");
+    return;
+  }
+  if (!eventTable) {
+    console.log("EVENT_METADATA_TABLE not set; skipping event metadata table creation.");
+    return;
+  }
+
+  const existing = await describeTable(eventTable);
+  if (existing) {
+    const keyOk = hasKeySchema(existing, "lockAddress", null);
+    if (!keyOk) {
+      console.warn(`Table ${eventTable} exists but does not match event metadata schema (lockAddress).`);
+    } else {
+      console.log(`Event metadata table exists: ${eventTable}`);
+    }
+    return;
+  }
+
+  await client.send(
+    new CreateTableCommand({
+      TableName: eventTable,
+      BillingMode: "PAY_PER_REQUEST",
+      KeySchema: [{ AttributeName: "lockAddress", KeyType: "HASH" }],
+      AttributeDefinitions: [{ AttributeName: "lockAddress", AttributeType: "S" }],
+    }),
+  );
+  console.log(`CreateTable issued for event metadata table: ${eventTable}. Waiting for ACTIVE...`);
+  await waitUntilTableExists({ client, maxWaitTime: 60 }, { TableName: eventTable });
+  console.log(`Event metadata table is ACTIVE: ${eventTable}`);
+}
+
 async function main() {
   await ensureNextAuthTable();
   await ensureRosterCacheTable();
+  await ensureEventMetadataTable();
 }
 
 main().catch((err) => {

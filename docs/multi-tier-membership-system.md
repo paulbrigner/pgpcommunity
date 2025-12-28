@@ -7,7 +7,7 @@ The membership system supports four Unlock-based tiers (Member, Holder, Staker, 
 - `NEXT_PUBLIC_LOCK_TIERS`: JSON array of tier objects `{ id?, address, label?, order?, renewable?, gasSponsored?, neverExpires? }`. First entry becomes the primary lock for backward-compatibility.
 - `NEXT_PUBLIC_UNLOCK_ADDRESS`: Unlock proxy on Base.
 - `NEXT_PUBLIC_BASE_*`: network, RPC, explorer.
-- Optional: `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL` (or ID/API key) for tokenId resolution; `CHECKOUT_CONFIGS` for event locks; `HIDDEN_UNLOCK_CONTRACTS` to hide specific locks.
+- Optional: `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL` (or ID/API key) for tokenId resolution; event locks are discovered on-chain.
 - `.env.example` documents the tier array and related settings.
 
 ## Membership Evaluation

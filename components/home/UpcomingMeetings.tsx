@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import type { EventDetails } from "@/lib/hooks/use-event-registration";
 
@@ -69,6 +70,7 @@ export function UpcomingMeetings({
                 location: nft.location || null,
                 description: nft.description || null,
               };
+              const detailHref = nft.contractAddress ? `/events/${nft.contractAddress}` : nft.registrationUrl;
               return (
                 <div
                   key={`upcoming-${nft.contractAddress}`}
@@ -114,15 +116,21 @@ export function UpcomingMeetings({
                       >
                         RSVP now
                       </Button>
-                      {nft.registrationUrl ? (
-                        <a
-                          href={nft.registrationUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-[var(--brand-denim)] hover:underline"
-                        >
-                          View event details
-                        </a>
+                      {detailHref ? (
+                        detailHref.startsWith("/") ? (
+                          <Link href={detailHref} className="text-[var(--brand-denim)] hover:underline">
+                            View event details
+                          </Link>
+                        ) : (
+                          <a
+                            href={detailHref}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[var(--brand-denim)] hover:underline"
+                          >
+                            View event details
+                          </a>
+                        )
                       ) : null}
                     </div>
                   </div>

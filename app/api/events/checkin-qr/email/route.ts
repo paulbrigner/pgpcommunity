@@ -7,7 +7,6 @@ import { Contract, Wallet, getAddress, isAddress } from "ethers";
 import { SiweMessage } from "siwe";
 import {
   BASE_NETWORK_ID,
-  CHECKOUT_CONFIGS,
   EMAIL_FROM,
   EMAIL_SERVER,
   EMAIL_SERVER_HOST,
@@ -162,7 +161,7 @@ async function isAllowedEventLock(lockAddressLower: string, provider: any): Prom
     } catch {}
   }
 
-  return Boolean(CHECKOUT_CONFIGS[lockAddressLower]);
+  return false;
 }
 
 type CachedLocksmithToken = {

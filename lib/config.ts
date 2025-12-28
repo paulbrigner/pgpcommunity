@@ -90,27 +90,6 @@ export const USDC_ADDRESS = process.env.NEXT_PUBLIC_USDC_ADDRESS as string;
 export const UNLOCK_SUBGRAPH_URL = process.env.NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL as string | undefined;
 export const UNLOCK_SUBGRAPH_ID = process.env.UNLOCK_SUBGRAPH_ID as string | undefined;
 export const UNLOCK_SUBGRAPH_API_KEY = process.env.UNLOCK_SUBGRAPH_API_KEY as string | undefined;
-export const HIDDEN_UNLOCK_CONTRACTS = (process.env.HIDDEN_UNLOCK_CONTRACTS || '')
-  .split(',')
-  .map((addr) => addr.trim().toLowerCase())
-  .filter((addr) => addr.length > 0);
-export const CHECKOUT_CONFIGS = (() => {
-  const map: Record<string, string> = {};
-  const raw = process.env.CHECKOUT_CONFIGS || '';
-  for (const entry of raw
-    .split(/[\n;]+/)
-    .map((part) => part.trim())
-    .filter(Boolean)) {
-    const separatorIndex = entry.indexOf(':');
-    if (separatorIndex === -1) continue;
-    const addr = entry.slice(0, separatorIndex).trim();
-    const value = entry.slice(separatorIndex + 1).trim();
-    if (addr && value) {
-      map[addr.toLowerCase()] = value;
-    }
-  }
-  return map;
-})();
 export const LOCKSMITH_BASE_URL = process.env.NEXT_PUBLIC_LOCKSMITH_BASE || "https://locksmith.unlock-protocol.com";
 export const PRIVATE_KEY_SECRET = (process.env.PRIVATE_KEY_SECRET || "").replace(/\\n/g, "\n") as string;
 export const CLOUDFRONT_DOMAIN = process.env.CLOUDFRONT_DOMAIN as string;
@@ -119,6 +98,7 @@ export const AWS_REGION = process.env.REGION_AWS as string;
 export const NEXTAUTH_URL = process.env.NEXTAUTH_URL as string;
 export const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET as string;
 export const NEXTAUTH_TABLE = process.env.NEXTAUTH_TABLE as string;
+export const EVENT_METADATA_TABLE = process.env.EVENT_METADATA_TABLE as string | undefined;
 export const EMAIL_SERVER = process.env.EMAIL_SERVER as string;
 export const EMAIL_FROM = process.env.EMAIL_FROM as string;
 export const EMAIL_SERVER_HOST = process.env.EMAIL_SERVER_HOST as string | undefined;

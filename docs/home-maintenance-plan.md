@@ -40,7 +40,7 @@ Implemented with React Query keys `["membership", addressesKey]` and `["nfts", a
   - Data flow: membership fetch → RSVP checkout → refresh; NFT fetch; upcoming events; missed vs owned display.
   - Hook contracts: `useMembership`, `useMemberNfts`, `useEventRegistration`.
   - UI composition: which panels/components render under which membership state.
-  - Env/config touchpoints: `CHECKOUT_CONFIGS`, `NEXT_PUBLIC_*` lock addresses, Base RPC, etc.
+  - Env/config touchpoints: `NEXT_PUBLIC_*` lock addresses, Base RPC, etc.
   - Status: `docs/home-architecture.md` created; expand if more detail is needed.
 
 ## 6) Rollout steps

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getServerSession } from "next-auth";
 import type { Session } from "next-auth";
 import { ShieldCheck } from "lucide-react";
@@ -41,6 +42,20 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         </div>
         <div className="pointer-events-none absolute -left-14 -top-20 h-36 w-36 rounded-full bg-[rgba(67,119,243,0.15)] blur-3xl" />
         <div className="pointer-events-none absolute -right-6 bottom-0 h-24 w-24 rounded-full bg-[rgba(11,11,67,0.08)] blur-3xl" />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <Link
+          href="/admin"
+          className="rounded-full border border-[rgba(67,119,243,0.25)] bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--brand-denim)] transition hover:border-[rgba(67,119,243,0.45)]"
+        >
+          Member roster
+        </Link>
+        <Link
+          href="/admin/events"
+          className="rounded-full border border-[rgba(67,119,243,0.25)] bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--brand-denim)] transition hover:border-[rgba(67,119,243,0.45)]"
+        >
+          Event metadata
+        </Link>
       </div>
       {children}
     </div>

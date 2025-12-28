@@ -1,7 +1,6 @@
 import { getAddress } from 'ethers';
 import {
   BASE_NETWORK_ID,
-  CHECKOUT_CONFIGS,
   MEMBERSHIP_RECURRING_PAYMENTS,
   MEMBERSHIP_REFERRER_ADDRESS,
   MEMBERSHIP_TIERS,
@@ -57,55 +56,7 @@ for (const tier of MEMBERSHIP_TIERS) {
   membershipTargetMap.set(target.checksumAddress.toLowerCase(), target);
 }
 
-const parseOverrides = (value: string | undefined): CheckoutOverrides => {
-  if (!value) return null;
-  try {
-    const parsed = JSON.parse(value);
-    if (parsed && typeof parsed === 'object') {
-      const overrides = parsed as Record<string, unknown>;
-      const recurringRaw = overrides.recurringPayments;
-      if (typeof recurringRaw === 'string') {
-        const normalized = recurringRaw.trim().toLowerCase();
-        if (normalized === 'forever') {
-          overrides.recurringPayments = 'forever';
-        } else {
-          const numeric = Number(recurringRaw);
-          if (Number.isFinite(numeric) && numeric > 0) {
-            overrides.recurringPayments = numeric;
-          }
-        }
-      }
-      return overrides as CheckoutOverrides;
-    }
-  } catch (err) {
-    console.error('Failed to parse CHECKOUT_CONFIG override:', err);
-  }
-  return null;
-};
-
 const eventTargetMap = new Map<string, CheckoutTarget>();
-for (const [lock, raw] of Object.entries(CHECKOUT_CONFIGS)) {
-  const normalized = normalizeAddress(lock);
-  if (!normalized) continue;
-  const overrides = parseOverrides(raw);
-  const membershipTarget = membershipTargetMap.get(normalized);
-  if (membershipTarget && overrides) {
-    membershipTarget.overrides = {
-      ...(membershipTarget.overrides ?? {}),
-      ...overrides,
-    } as CheckoutOverrides;
-    continue;
-  }
-  const target: CheckoutTarget = {
-    id: normalized,
-    type: 'event',
-    lockAddress: normalized,
-    checksumAddress: lock,
-    network: BASE_NETWORK_ID,
-    overrides,
-  };
-  eventTargetMap.set(normalized, target);
-}
 
 export const MEMBERSHIP_CHECKOUT_TARGETS: CheckoutTarget[] = Array.from(new Set(membershipTargetMap.values()));
 

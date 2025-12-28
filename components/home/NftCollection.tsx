@@ -30,6 +30,9 @@ type DisplayNft = {
   tokenType: string | null;
   videoUrl?: string | null;
   sortKey?: number;
+  eventStatus?: "active" | "expired" | null;
+  expiresAt?: number | null;
+  eventTimestamp?: number | null;
 };
 
 type Props = {

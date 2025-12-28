@@ -16,7 +16,7 @@
 - Extend vs purchase: prefers `extendKey` when a key exists; blocks purchase when an existing key is detected without a resolvable token ID to avoid max-keys reverts.
 - Token IDs: fetched from subgraph first, with on-chain enumeration fallback; missing IDs block renewal to prevent accidental `purchaseKey` on max-keys locks.
 - ERC20 safeguards: balance check before dispatch; approvals are capped to 12 months of membership cost instead of unlimited allowances (unless an explicit override is provided).
-- Legacy paywall: removed. All entry points use the Unlock component flow (`useUnlockCheckout`) inside our drawer UI. The paywall dependency was dropped from docs/deps; tiers come from `NEXT_PUBLIC_LOCK_TIERS`, events from `CHECKOUT_CONFIGS`.
+- Legacy paywall: removed. All entry points use the Unlock component flow (`useUnlockCheckout`) inside our drawer UI. The paywall dependency was dropped from docs/deps; tiers come from `NEXT_PUBLIC_LOCK_TIERS`, events are discovered on-chain.
 
 ## UI & UX State
 - Home/onboarding: tier picker passes explicit `tierId` into checkout. Quick-register routes membership locks through the same flow; paywall usage removed.
@@ -39,4 +39,4 @@
 - Entitlements: formalize tier-based gating rules and differentiated perks/content.
 - Analytics/telemetry: capture tier adoption and checkout outcomes.
 - Tests: expand unit/integration coverage for multi-tier checkout, allowance handling, and token ID fallback paths.
-- Ops/docs: keep references to the old paywall removed; ensure onboarding docs mention the Unlock component flow and the `NEXT_PUBLIC_LOCK_TIERS` / `CHECKOUT_CONFIGS` env requirements.
+- Ops/docs: keep references to the old paywall removed; ensure onboarding docs mention the Unlock component flow and the `NEXT_PUBLIC_LOCK_TIERS` env requirements.

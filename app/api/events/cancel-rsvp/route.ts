@@ -3,7 +3,6 @@ import { getToken } from "next-auth/jwt";
 import { Contract, Wallet, getAddress, isAddress } from "ethers";
 import {
   BASE_NETWORK_ID,
-  CHECKOUT_CONFIGS,
   MEMBERSHIP_TIER_ADDRESSES,
   NEXTAUTH_SECRET,
   PRIMARY_LOCK_ADDRESS,
@@ -185,7 +184,7 @@ async function isAllowedEventLock(lockAddressLower: string, provider: any): Prom
     } catch {}
   }
 
-  return Boolean(CHECKOUT_CONFIGS[lockAddressLower]);
+  return false;
 }
 
 const isNonEmptyString = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0;

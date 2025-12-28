@@ -39,12 +39,18 @@ type DisplayNft = {
   tokenType: string | null;
   videoUrl?: string | null;
   sortKey?: number;
+  eventStatus?: "active" | "expired" | null;
+  expiresAt?: number | null;
+  eventTimestamp?: number | null;
 };
 
 const isMeetingNft = (nft: DisplayNft) =>
-  Boolean(nft.eventDate || nft.subtitle || nft.startTime || nft.endTime || nft.location);
+  Boolean(nft.eventDate || nft.subtitle || nft.startTime || nft.endTime || nft.location || nft.eventStatus);
 
 const resolveEventTimestamp = (nft: DisplayNft): number | null => {
+  if (typeof nft.eventTimestamp === "number" && Number.isFinite(nft.eventTimestamp)) {
+    return nft.eventTimestamp;
+  }
   const zone = nft.timezone || "UTC";
   if (nft.eventDate) {
     const rawDate = DateTime.fromISO(String(nft.eventDate), { zone });
@@ -68,6 +74,9 @@ const resolveEventTimestamp = (nft: DisplayNft): number | null => {
   if (nft.subtitle) {
     const parsed = Date.parse(String(nft.subtitle));
     if (Number.isFinite(parsed)) return parsed;
+  }
+  if (typeof nft.expiresAt === "number" && Number.isFinite(nft.expiresAt) && nft.expiresAt > 0) {
+    return nft.expiresAt * 1000;
   }
   return null;
 };
@@ -204,23 +213,32 @@ export function ActiveMemberPanel({
   }, [creatorNfts]);
   const rsvpMeetings = useMemo(() => {
     const now = Date.now();
+    const nowSec = Math.floor(now / 1000);
+    const maxFutureSec = nowSec + 60 * 60 * 24 * 366;
+    const isReasonableFutureExpiration = (expiresAt?: number | null) =>
+      typeof expiresAt === "number" && Number.isFinite(expiresAt) && expiresAt > nowSec && expiresAt <= maxFutureSec;
     return displayNfts.filter((nft) => {
       if (!isMeetingNft(nft)) return false;
       if (MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase())) return false;
       const key = buildNftKey(nft.contractAddress, nft.tokenId ?? "upcoming");
       if (!ownedKeySet.has(key)) return false;
       const timestamp = resolveEventTimestamp(nft);
-      return typeof timestamp === "number" && timestamp > now;
+      if (typeof timestamp === "number") return timestamp > now;
+      return isReasonableFutureExpiration(nft.expiresAt);
     });
   }, [displayNfts, ownedKeySet]);
   const pastMeetings = useMemo(() => {
     const now = Date.now();
+    const nowSec = Math.floor(now / 1000);
+    const maxFutureSec = nowSec + 60 * 60 * 24 * 366;
+    const isReasonableFutureExpiration = (expiresAt?: number | null) =>
+      typeof expiresAt === "number" && Number.isFinite(expiresAt) && expiresAt > nowSec && expiresAt <= maxFutureSec;
     return displayNfts.filter((nft) => {
       if (!isMeetingNft(nft)) return false;
       if (MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase())) return false;
       const timestamp = resolveEventTimestamp(nft);
-      if (typeof timestamp !== "number") return true;
-      return timestamp <= now;
+      if (typeof timestamp === "number") return timestamp <= now;
+      return !isReasonableFutureExpiration(nft.expiresAt);
     });
   }, [displayNfts]);
   const availablePastYears = useMemo(() => {

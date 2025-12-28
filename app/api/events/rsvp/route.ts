@@ -3,7 +3,6 @@ import { getToken } from "next-auth/jwt";
 import { Contract, Wallet, ZeroAddress, getAddress, isAddress } from "ethers";
 import {
   BASE_NETWORK_ID,
-  CHECKOUT_CONFIGS,
   MEMBERSHIP_REFERRER_ADDRESS,
   MEMBERSHIP_TIER_ADDRESSES,
   NEXTAUTH_SECRET,
@@ -179,7 +178,7 @@ async function isAllowedEventLock(lockAddressLower: string, provider: any): Prom
     } catch {}
   }
 
-  return Boolean(CHECKOUT_CONFIGS[lockAddressLower]);
+  return false;
 }
 
 const jsonError = (status: number, payload: Record<string, unknown>) =>

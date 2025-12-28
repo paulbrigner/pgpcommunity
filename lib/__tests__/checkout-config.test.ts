@@ -16,7 +16,6 @@ describe('checkout-config', () => {
     ]);
     process.env.NEXT_PUBLIC_UNLOCK_ADDRESS = '0x0000000000000000000000000000000000000000';
     process.env.NEXT_PUBLIC_BASE_NETWORK_ID = '8453';
-    process.env.CHECKOUT_CONFIGS = '0x3333333333333333333333333333333333333333:{"locks":{"0x3333333333333333333333333333333333333333":{"network":8453}}}';
     vi.resetModules();
   });
 
@@ -24,7 +23,6 @@ describe('checkout-config', () => {
     delete process.env.NEXT_PUBLIC_LOCK_TIERS;
     delete process.env.NEXT_PUBLIC_UNLOCK_ADDRESS;
     delete process.env.NEXT_PUBLIC_BASE_NETWORK_ID;
-    delete process.env.CHECKOUT_CONFIGS;
     vi.resetModules();
   });
 
@@ -38,7 +36,7 @@ describe('checkout-config', () => {
     expect(builders?.id).toBe('builders');
   });
 
-  it('returns event checkout target when configured', async () => {
+  it('returns event checkout target for an event lock', async () => {
     const mod = await import('../checkout-config');
     const { getEventCheckoutTarget } = mod;
     const eventTarget = getEventCheckoutTarget('0x3333333333333333333333333333333333333333');

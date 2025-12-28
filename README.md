@@ -24,7 +24,7 @@ This software is under active development and has not undergone a full independe
   - Members can change tiers (upgrade/downgrade), cancel/disable auto-renew, request refunds (with reason/status tracking), and view expiry and allowances.
 
 ## Unlock Protocol Integration
-- **Checkout & RSVPs**: Client-only Unlock checkout via `useUnlockCheckout` for memberships and event RSVPs. Lock/tier configs come from `NEXT_PUBLIC_LOCK_TIERS` and optional overrides in `CHECKOUT_CONFIGS`. After a checkout completes, the app invalidates membership caches and refetches status/allowances.
+- **Checkout & RSVPs**: Client-only Unlock checkout via `useUnlockCheckout` for memberships and event RSVPs. Tier configs come from `NEXT_PUBLIC_LOCK_TIERS`, while event locks are discovered on-chain. After a checkout completes, the app invalidates membership caches and refetches status/allowances.
 - **Membership state**: Membership is derived from Unlock locks on Base. The server snapshots status/expiry, tokenIds (when available), and USDC allowances for auto-renew, caches briefly, and hydrates the client. React Query keeps this data fresh with short TTLs.
 - **Event NFTs**: `/api/nfts` pulls owned/earned event NFTs (and missed/upcoming data) on Base. Metadata is consolidated via Alchemy to avoid repeated on-chain tokenURI fetches and to normalize image/trait fields; fall back to raw chain data when metadata is sparse.
 - **Subgraph/token IDs**: When locks are not enumerable, the app can use Unlock’s subgraph (`UNLOCK_SUBGRAPH_ID`/`UNLOCK_SUBGRAPH_API_KEY` or `NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL`) to resolve token IDs for renewals and ownership checks.
@@ -62,8 +62,6 @@ NEXT_PUBLIC_UNLOCK_SUBGRAPH_URL=
 ## Server-only (do not prefix with NEXT_PUBLIC_)
 UNLOCK_SUBGRAPH_ID=
 UNLOCK_SUBGRAPH_API_KEY=
-HIDDEN_UNLOCK_CONTRACTS=
-CHECKOUT_CONFIGS=
 REGION_AWS=us-east-1
 MEMBER_SPONSORSHIP_ENABLED=false
 MEMBER_SPONSOR_PRIVATE_KEY=
@@ -105,14 +103,6 @@ EMAIL_FROM=PGP Community <no-reply@your-domain>
 # Option B: Single SMTP URL (must URL-encode username/password if they contain special chars)
  # EMAIL_SERVER=smtp://SMTP_USER:SMTP_PASS@email-smtp.us-east-1.amazonaws.com:587
 ```
-
-`CHECKOUT_CONFIGS` format example:
-
-```
-CHECKOUT_CONFIGS=0x1111111111111111111111111111111111111111:{"locks":{"0x1111111111111111111111111111111111111111":{"network":8453}},"title":"Register"};0x2222222222222222222222222222222222222222:{"locks":{"0x2222222222222222222222222222222222222222":{"network":8453}},"title":"Register"}
-```
-
-Each pair maps a lock address to a JSON config snippet (as a single-line JSON string). Separate pairs with semicolons. The new Unlock checkout helpers merge these overrides with sensible defaults when embedding the React-based checkout component. If an address is omitted, the UI falls back to the tier metadata in `lib/checkout-config.ts` and still renders a purchase drawer, but without the extra customizations from this map.
 
 Notes:
 - Ensure server-only env vars are set in Amplify build/deploy environment (not exposed to the client).
@@ -214,7 +204,7 @@ Protecting API routes
 
 ## Architecture Notes
 - Wallet auth via NextAuth + SIWE (only for previously linked wallets).
-- Client-side Unlock checkout opens on demand; tiers come from `NEXT_PUBLIC_LOCK_TIERS` and event configs from `CHECKOUT_CONFIGS`. After checkout, membership and allowances are refreshed.
+- Client-side Unlock checkout opens on demand; tiers come from `NEXT_PUBLIC_LOCK_TIERS` and event locks are discovered on-chain. After checkout, membership and allowances are refreshed.
 
 ## Dependencies
 - **Core**: Next.js 15+, TypeScript, AWS Amplify, Tailwind CSS v4 (CLI)

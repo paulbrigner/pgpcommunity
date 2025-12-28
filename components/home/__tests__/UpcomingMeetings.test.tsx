@@ -88,10 +88,23 @@ describe("UpcomingMeetings", () => {
     expect(onRsvp).toHaveBeenCalledWith("0xlock", "https://event.test", expect.any(Object));
   });
 
-  it("shows event details link when registrationUrl exists", () => {
+  it("links to internal event details when contract address exists", () => {
     render(
       <UpcomingMeetings
         items={[baseItem]}
+        show={true}
+        onToggleShow={() => {}}
+        onRsvp={() => {}}
+      />
+    );
+    const links = screen.getAllByText(/view event details/i);
+    expect(links[links.length - 1]).toHaveAttribute("href", "/events/0xlock");
+  });
+
+  it("falls back to external event details when contract address is missing", () => {
+    render(
+      <UpcomingMeetings
+        items={[{ ...baseItem, contractAddress: "" }]}
         show={true}
         onToggleShow={() => {}}
         onRsvp={() => {}}

@@ -35,6 +35,17 @@ const requiredFields: Array<keyof EventMetadataFormValues> = [
 ];
 
 const normalizeField = (value: string) => value.trim();
+const DEFAULT_TIMEZONE = "America/New_York";
+const TIMEZONE_OPTIONS = [
+  { value: "America/New_York", label: "America/New_York (ET)" },
+  { value: "America/Chicago", label: "America/Chicago (CT)" },
+  { value: "America/Denver", label: "America/Denver (MT)" },
+  { value: "America/Los_Angeles", label: "America/Los_Angeles (PT)" },
+  { value: "America/Phoenix", label: "America/Phoenix (MST)" },
+  { value: "America/Anchorage", label: "America/Anchorage (AKT)" },
+  { value: "Pacific/Honolulu", label: "Pacific/Honolulu (HST)" },
+  { value: "UTC", label: "UTC" },
+];
 
 export function EventMetadataForm({
   initialValues,
@@ -49,7 +60,7 @@ export function EventMetadataForm({
     date: initialValues?.date ?? "",
     startTime: initialValues?.startTime ?? "",
     endTime: initialValues?.endTime ?? "",
-    timezone: initialValues?.timezone ?? "",
+    timezone: initialValues?.timezone?.trim() || DEFAULT_TIMEZONE,
     location: initialValues?.location ?? "",
     imageUrl: initialValues?.imageUrl ?? "",
     status: initialValues?.status === "published" ? "published" : "draft",
@@ -152,12 +163,20 @@ export function EventMetadataForm({
         </label>
         <label className="space-y-1">
           <span className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted-ink)]">Timezone</span>
-          <input
+          <select
             value={values.timezone}
             onChange={handleChange("timezone")}
-            placeholder="America/New_York"
             className="w-full rounded-md border border-[rgba(11,11,67,0.18)] bg-white px-3 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)]"
-          />
+          >
+            {values.timezone && !TIMEZONE_OPTIONS.some((option) => option.value === values.timezone) ? (
+              <option value={values.timezone}>{values.timezone} (custom)</option>
+            ) : null}
+            {TIMEZONE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
 

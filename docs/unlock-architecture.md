@@ -55,6 +55,24 @@ The lists below reflect what we observe in this app and the Unlock APIs we use.
 - Event details (schedule, location, rich description) are off-chain today.
 - If we want to avoid off-chain dependency, we should store event metadata ourselves and treat Unlock as the key ownership source only.
 
+## Option C: Self-hosted Event Metadata + tokenURI
+To reduce reliance on Unlock's backend, we now keep event metadata in our own DynamoDB table and serve token metadata directly from this app.
+
+### What changes
+- Event metadata is stored in `EVENT_METADATA_TABLE` and edited via the Admin Events UI.
+- Public token metadata is served from `GET /api/events/metadata/{lockAddress}/{tokenId}`.
+- Each event lock should have its base tokenURI set to `https://<site>/api/events/metadata/<lockAddress>/`.
+
+### How to update tokenURI on-chain
+- Use `scripts/setup/set-event-token-uri.mjs` with a lock-manager private key (the event sponsor wallet works if it is a lock manager).
+- This updates `setLockMetadata(name, symbol, baseTokenURI)` so existing NFTs resolve to the new metadata.
+
+### Draft vs published
+- Draft metadata is not exposed publicly; tokenURI responses return a safe placeholder ("Details coming soon.").
+
+### Remaining Unlock dependencies
+- QR check-in and ticket QR email still use Unlock's Locksmith API (separate from metadata storage).
+
 ## Privacy Considerations
 ### What Unlock May Store Off-chain
 - Email addresses used for email-required checkouts, QR delivery, and approvals.

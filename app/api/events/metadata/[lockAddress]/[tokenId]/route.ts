@@ -54,9 +54,10 @@ async function getLockName(lockAddress: string): Promise<string | null> {
   }
 }
 
-export async function GET(_request: NextRequest, context: { params: { lockAddress: string; tokenId: string } }) {
-  const rawLock = context.params?.lockAddress;
-  const tokenId = context.params?.tokenId;
+export async function GET(_request: NextRequest, context: { params: Promise<{ lockAddress: string; tokenId: string }> }) {
+  const params = await context.params;
+  const rawLock = params?.lockAddress;
+  const tokenId = params?.tokenId;
   const lockChecksum = checksumLockAddress(rawLock);
   const lockLower = normalizeLockAddress(rawLock);
 

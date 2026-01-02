@@ -1492,84 +1492,84 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
               <p className="section-eyebrow text-[var(--brand-denim)]">Members</p>
               <span className="text-sm text-muted-foreground">On-chain roster · wallets · email status.</span>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 sm:flex-nowrap">
-              <input
-                type="search"
-                placeholder="Search name, email, wallet, tier"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                className="w-full rounded-full border border-[rgba(11,11,67,0.12)] bg-white px-4 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)] sm:w-48"
-              />
-              <select
-                value={tierFilter}
-                onChange={(e) => setTierFilter(e.target.value)}
-                className="w-full rounded-full border border-[rgba(11,11,67,0.12)] bg-white px-3 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)] sm:w-32"
-              >
-                <option value="all">All tiers</option>
-                <option value="test">Test members</option>
-                {TIER_FILTERS.map((tier) => (
-                  <option key={tier.value} value={tier.value}>
-                    {tier.label}
-                  </option>
-                ))}
-                {roster?.members?.some((member) => !resolveMemberTierKey(member)) ? (
-                  <option value="none">No membership</option>
-                ) : null}
-              </select>
-              <select
-                value={sortKey}
-                onChange={(e) => setSortKey(e.target.value as SortKey)}
-                className="w-full rounded-full border border-[rgba(11,11,67,0.12)] bg-white px-3 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)] sm:w-36"
-              >
-                <option value="last-name">Sort: Last name</option>
-                <option value="joined">Sort: Joined date</option>
-                <option value="expiry">Sort: Expiry date</option>
-              </select>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
-                className="w-full justify-center sm:w-[72px]"
-              >
-                <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
-                {sortDirection === "asc" ? "Asc" : "Desc"}
-              </Button>
-              <Button
-                onClick={handleRetrieveDetails}
-                isLoading={detailsInFlight}
-                size="sm"
-                variant="outline"
-                className="w-full whitespace-nowrap sm:w-auto"
-                disabled={filteredMembers.length === 0}
-              >
-                Retrieve details
-              </Button>
-              <Button onClick={handleRefresh} isLoading={loading} size="sm" variant="outlined-primary" className="w-full whitespace-nowrap sm:w-auto">
-                <RefreshCcw className="h-4 w-4" aria-hidden="true" />
-                Refresh
-              </Button>
-              <Button
-                onClick={handleCacheRebuild}
-                isLoading={cacheRebuildLoading}
-                size="sm"
-                variant="outline"
-                className="w-full whitespace-nowrap sm:w-auto"
-                disabled={!cacheSummary.enabled}
-              >
-                Rebuild cache
-              </Button>
-              {detailsInFlight && (
-                <div className="flex items-center gap-2 text-sm text-[var(--brand-denim)]">
-                  <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Retrieving details...
-                </div>
-              )}
-              {cachePolling && roster?.cache?.lockActive && (
-                <div className="flex items-center gap-2 text-sm text-[var(--brand-denim)]">
-                  <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  Rebuilding cache...
-                </div>
-              )}
+            <div className="mt-3 flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+                <input
+                  type="search"
+                  placeholder="Search name, email, wallet, tier"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  className="w-full rounded-full border border-[rgba(11,11,67,0.12)] bg-white px-4 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)] sm:w-48"
+                />
+                <select
+                  value={tierFilter}
+                  onChange={(e) => setTierFilter(e.target.value)}
+                  className="w-full rounded-full border border-[rgba(11,11,67,0.12)] bg-white px-3 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)] sm:w-32"
+                >
+                  <option value="all">All tiers</option>
+                  <option value="test">Test members</option>
+                  {TIER_FILTERS.map((tier) => (
+                    <option key={tier.value} value={tier.value}>
+                      {tier.label}
+                    </option>
+                  ))}
+                  {roster?.members?.some((member) => !resolveMemberTierKey(member)) ? (
+                    <option value="none">No membership</option>
+                  ) : null}
+                </select>
+                <select
+                  value={sortKey}
+                  onChange={(e) => setSortKey(e.target.value as SortKey)}
+                  className="w-full rounded-full border border-[rgba(11,11,67,0.12)] bg-white px-3 py-2 text-sm text-[#0b0b43] shadow-inner outline-none transition focus:border-[rgba(67,119,243,0.5)] focus:ring-2 focus:ring-[rgba(67,119,243,0.12)] sm:w-36"
+                >
+                  <option value="last-name">Sort: Last name</option>
+                  <option value="joined">Sort: Joined date</option>
+                  <option value="expiry">Sort: Expiry date</option>
+                </select>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"))}
+                  className="w-full justify-center sm:w-[72px]"
+                >
+                  <ArrowUpDown className="h-4 w-4" aria-hidden="true" />
+                  {sortDirection === "asc" ? "Asc" : "Desc"}
+                </Button>
+              </div>
+              <div className="ml-auto flex flex-wrap items-center gap-2">
+                <Button
+                  onClick={handleRetrieveDetails}
+                  isLoading={detailsInFlight}
+                  size="sm"
+                  variant="outline"
+                  className="w-full whitespace-nowrap sm:w-auto"
+                  disabled={filteredMembers.length === 0}
+                >
+                  Retrieve details
+                </Button>
+                <Button
+                  onClick={handleCacheRebuild}
+                  isLoading={cacheRebuildLoading}
+                  size="sm"
+                  variant="outline"
+                  className="w-full whitespace-nowrap sm:w-auto"
+                  disabled={!cacheSummary.enabled}
+                >
+                  Rebuild cache
+                </Button>
+                {detailsInFlight && (
+                  <div className="flex items-center gap-2 text-sm text-[var(--brand-denim)]">
+                    <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Retrieving details...
+                  </div>
+                )}
+                {cachePolling && roster?.cache?.lockActive && (
+                  <div className="flex items-center gap-2 text-sm text-[var(--brand-denim)]">
+                    <RefreshCcw className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    Rebuilding cache...
+                  </div>
+                )}
+              </div>
             </div>
             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="font-semibold text-[var(--brand-denim)]">{cacheSummary.label}</span>

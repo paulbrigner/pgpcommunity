@@ -12,6 +12,7 @@ import { BASE_BLOCK_EXPLORER_URL } from "@/lib/config";
 import type { EventDetails } from "@/lib/hooks/use-event-registration";
 import { CalendarDays, MapPin, ArrowLeft } from "lucide-react";
 import { EventMetadataForm, type EventMetadataFormValues } from "@/components/admin/EventMetadataForm";
+import { DateTime } from "luxon";
 
 type EventPayload = {
   lockAddress: string;
@@ -90,6 +91,8 @@ export function EventDetailsClient({ lockAddress }: Props) {
   const [rsvpStatus, setRsvpStatus] = useState<"unknown" | "registered" | "not-registered">("unknown");
   const [rsvpStatusLoading, setRsvpStatusLoading] = useState(false);
   const [adminEditing, setAdminEditing] = useState(false);
+  const [attendanceStatus, setAttendanceStatus] = useState<"unknown" | "loading" | "checked-in" | "not-checked-in" | "not-registered" | "unavailable">("unknown");
+  const [attendanceCheckedInAt, setAttendanceCheckedInAt] = useState<string | null>(null);
 
   const { openEventCheckout, checkoutPortal } = useUnlockCheckout({
     onEventComplete: async () => {
@@ -141,6 +144,8 @@ export function EventDetailsClient({ lockAddress }: Props) {
     setRsvpTxHash(null);
     setRsvpStatus("unknown");
     setRsvpStatusLoading(false);
+    setAttendanceStatus("unknown");
+    setAttendanceCheckedInAt(null);
     void (async () => {
       try {
         await loadEvent(controller.signal);
@@ -186,6 +191,84 @@ export function EventDetailsClient({ lockAddress }: Props) {
     })();
     return () => controller.abort();
   }, [addressList, authenticated, event?.lockAddress, lockAddress, walletLinked]);
+
+  const isPastMeeting = useMemo(() => {
+    if (!event?.date) return false;
+    const zone = event.timezone || "UTC";
+    const baseDate = DateTime.fromISO(event.date, { zone });
+    if (!baseDate.isValid) return false;
+    const endDateTime = (() => {
+      if (event.endTime) {
+        const end = DateTime.fromISO(`${event.date}T${event.endTime}`, { zone });
+        if (end.isValid) return end;
+      }
+      if (event.startTime) {
+        const start = DateTime.fromISO(`${event.date}T${event.startTime}`, { zone });
+        if (start.isValid) return start.plus({ hours: 2 });
+      }
+      return baseDate.endOf("day");
+    })();
+    if (!endDateTime.isValid) return false;
+    return endDateTime.toUTC().toMillis() < Date.now();
+  }, [event?.date, event?.endTime, event?.startTime, event?.timezone]);
+
+  useEffect(() => {
+    if (!event?.lockAddress || !isPastMeeting) {
+      setAttendanceStatus("unknown");
+      setAttendanceCheckedInAt(null);
+      return;
+    }
+    if (!authenticated || !walletLinked || addressList.length === 0) {
+      setAttendanceStatus("unknown");
+      setAttendanceCheckedInAt(null);
+      return;
+    }
+    if (rsvpStatus !== "registered") {
+      setAttendanceStatus(rsvpStatus === "not-registered" ? "not-registered" : "unknown");
+      setAttendanceCheckedInAt(null);
+      return;
+    }
+
+    const controller = new AbortController();
+    setAttendanceStatus("loading");
+    setAttendanceCheckedInAt(null);
+    void (async () => {
+      try {
+        const res = await fetch("/api/events/checkin-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ lockAddress: event.lockAddress, recipients: addressList }),
+          signal: controller.signal,
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(payload?.error || "Unable to check attendance.");
+        }
+        if (!payload?.registered) {
+          setAttendanceStatus("not-registered");
+          setAttendanceCheckedInAt(null);
+          return;
+        }
+        if (payload?.checkedIn === true) {
+          setAttendanceStatus("checked-in");
+          setAttendanceCheckedInAt(typeof payload?.checkedInAt === "string" ? payload.checkedInAt : null);
+          return;
+        }
+        if (payload?.checkedIn === false) {
+          setAttendanceStatus("not-checked-in");
+          setAttendanceCheckedInAt(null);
+          return;
+        }
+        setAttendanceStatus("unavailable");
+        setAttendanceCheckedInAt(null);
+      } catch {
+        if (controller.signal.aborted) return;
+        setAttendanceStatus("unavailable");
+        setAttendanceCheckedInAt(null);
+      }
+    })();
+    return () => controller.abort();
+  }, [addressList, authenticated, event?.lockAddress, isPastMeeting, rsvpStatus, walletLinked]);
 
   const handleRsvp = async () => {
     if (rsvpProcessing) return;
@@ -256,7 +339,7 @@ export function EventDetailsClient({ lockAddress }: Props) {
     ? formatEventDisplay(event.date ?? null, event.startTime ?? null, event.endTime ?? null, event.timezone ?? null)
     : { dateLabel: null, timeLabel: null };
   const descriptionText = event?.description ? normalizeDescription(event.description) : null;
-  const calendarLinks = event && rsvpStatus === "registered"
+  const calendarLinks = event && rsvpStatus === "registered" && !isPastMeeting
     ? buildCalendarLinks(
         event.title || "PGP Event",
         event.date,
@@ -267,6 +350,15 @@ export function EventDetailsClient({ lockAddress }: Props) {
         event.description ?? null,
       )
     : { google: null, ics: null };
+  const attendanceLabel = (() => {
+    if (!isPastMeeting) return null;
+    if (attendanceStatus === "loading") return "Checking attendance...";
+    if (attendanceStatus === "checked-in") return "Checked in";
+    if (attendanceStatus === "not-checked-in") return "Not checked in";
+    if (attendanceStatus === "not-registered") return "No RSVP on record";
+    if (attendanceStatus === "unavailable") return "Attendance unavailable";
+    return null;
+  })();
   const handleDownloadIcs = () => {
     if (calendarLinks.ics) {
       downloadIcs(calendarLinks.ics, event?.title || "PGP Event");
@@ -325,7 +417,7 @@ export function EventDetailsClient({ lockAddress }: Props) {
             <div className="flex flex-col gap-6 md:flex-row md:items-start">
               <div className="flex-1 space-y-4">
                 <div className="text-xs uppercase tracking-[0.3em] text-[var(--muted-ink)]">
-                  Upcoming meeting
+                  {isPastMeeting ? "Past meeting" : "Upcoming meeting"}
                 </div>
                 <h1 className="text-2xl font-semibold text-[var(--brand-navy)] md:text-3xl">
                   {event.title}
@@ -353,6 +445,12 @@ export function EventDetailsClient({ lockAddress }: Props) {
                 <div className="text-xs text-[var(--muted-ink)]">
                   We&apos;ll sponsor the RSVP when possible (no gas required).
                 </div>
+                {attendanceLabel ? (
+                  <div className="text-xs text-[var(--muted-ink)]">
+                    Attendance: {attendanceLabel}
+                    {attendanceCheckedInAt ? ` (${attendanceCheckedInAt})` : ""}
+                  </div>
+                ) : null}
                 {event.isAdmin && event.metadataStatus ? (
                   <div className="text-xs font-semibold uppercase tracking-[0.2em] text-[var(--muted-ink)]">
                     Metadata status: {event.metadataStatus}

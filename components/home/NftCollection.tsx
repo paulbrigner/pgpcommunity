@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { DateTime } from "luxon";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
@@ -353,6 +354,7 @@ export function NftCollection({
               const isFutureMeeting = typeof futureTimeMs === "number" && futureTimeMs > Date.now();
               const isUpcomingRegistration = isFutureMeeting && isOwned;
               const isMembershipTier = MEMBERSHIP_TIER_ADDRESSES.has(nft.contractAddress.toLowerCase());
+              const detailHref = !isMembershipTier ? `/events/${nft.contractAddress}` : null;
               const canCancelRsvp = Boolean(
                 !isMembershipTier && isUpcomingRegistration && nft.owner && typeof onCancelRsvp === "function"
               );
@@ -365,6 +367,7 @@ export function NftCollection({
               );
               const showEventDetails =
                 isFutureMeeting && (eventLabels.dateLabel || eventLabels.timeLabel || nft.location);
+              const showDetailLink = Boolean(detailHref);
               const calendarLinks = showEventDetails
                 ? buildCalendarLinks(
                     nft.title ?? 'PGP Event',
@@ -477,7 +480,7 @@ export function NftCollection({
                       {nft.location ? (
                         <div className="whitespace-pre-wrap">Location: {nft.location}</div>
                       ) : null}
-                      {(calendarLinks.google || calendarLinks.ics || canCancelRsvp || canCheckin) ? (
+                      {(calendarLinks.google || calendarLinks.ics || canCancelRsvp || canCheckin || showDetailLink) ? (
                         <div className="flex flex-wrap items-center gap-2">
                           {calendarLinks.google ? (
                             <Button asChild size="sm" variant="secondary">
@@ -539,6 +542,14 @@ export function NftCollection({
                               Cancel RSVP
                             </Button>
                           ) : null}
+                          {showDetailLink ? (
+                            <Link
+                              href={detailHref as string}
+                              className="text-xs font-medium text-[var(--brand-denim)] hover:underline"
+                            >
+                              View event details
+                            </Link>
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
@@ -581,7 +592,7 @@ export function NftCollection({
                       </a>
                     </div>
                   ) : null}
-                  {!showEventDetails && canCancelRsvp ? (
+                  {!showEventDetails && (canCancelRsvp || canCheckin || showDetailLink) ? (
                     <div className="pt-1">
                       <div className="flex flex-wrap items-center gap-2">
                         {canCheckin ? (
@@ -605,22 +616,32 @@ export function NftCollection({
                             Check-In w/QR
                           </Button>
                         ) : null}
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          isLoading={cancelRsvpProcessing}
-                          disabled={cancelRsvpProcessing}
-                          onClick={() =>
-                            onCancelRsvp?.({
-                              lockAddress: nft.contractAddress,
-                              recipient: nft.owner as string,
-                              tokenId: nft.tokenId,
-                            })
-                          }
-                        >
-                          Cancel RSVP
-                        </Button>
+                        {canCancelRsvp ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            isLoading={cancelRsvpProcessing}
+                            disabled={cancelRsvpProcessing}
+                            onClick={() =>
+                              onCancelRsvp?.({
+                                lockAddress: nft.contractAddress,
+                                recipient: nft.owner as string,
+                                tokenId: nft.tokenId,
+                              })
+                            }
+                          >
+                            Cancel RSVP
+                          </Button>
+                        ) : null}
+                        {showDetailLink ? (
+                          <Link
+                            href={detailHref as string}
+                            className="text-xs font-medium text-[var(--brand-denim)] hover:underline"
+                          >
+                            View event details
+                          </Link>
+                        ) : null}
                       </div>
                     </div>
                   ) : null}

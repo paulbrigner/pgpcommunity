@@ -1129,7 +1129,7 @@ export default function HomeClient({
               <ul className="space-y-3">
                 {MEMBERSHIP_TIERS.map((tier) => {
                   const summaryTier = membershipSummary?.tiers?.find((entry) => entry.tier.id === tier.id);
-                  const label = tier.label || summaryTier?.metadata?.name || formatAddressShort(tier.checksumAddress);
+                  const label = summaryTier?.metadata?.name || tier.label || formatAddressShort(tier.checksumAddress);
                   const statusLabel = summaryTier?.status ?? 'none';
                   const statusDisplay =
                     statusLabel === 'active'
@@ -1187,8 +1187,8 @@ export default function HomeClient({
                       return optionId ? keys.includes(optionId) : false;
                     }) ?? null;
                   const label =
-                    tier.label ||
                     summaryTier?.metadata?.name ||
+                    tier.label ||
                     formatAddressShort(tier.checksumAddress) ||
                     `Tier ${index + 1}`;
                   const priceDisplay = (() => {
@@ -1357,8 +1357,8 @@ function WalletReadyNote({ membershipSummary, selectedTierId, tiers, allowances 
 
   const fallbackTier = tiers[0] || null;
   const selectedLabel =
-    selectedTierSummary?.tier?.label ||
     selectedTierSummary?.metadata?.name ||
+    selectedTierSummary?.tier?.label ||
     (fallbackTier ? fallbackTier.label || fallbackTier.id : "membership");
 
 	  const priceDisplay = useMemo(() => {

@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
-import { Contract, Wallet, getAddress, isAddress } from "ethers";
-import { SiweMessage } from "siwe";
+import { Contract, getAddress, isAddress } from "ethers";
 import {
   BASE_NETWORK_ID,
-  LOCKSMITH_BASE_URL,
+  BASE_RPC_URL,
   NEXTAUTH_SECRET,
-  UNLOCK_SUBGRAPH_API_KEY,
-  UNLOCK_SUBGRAPH_ID,
-  UNLOCK_SUBGRAPH_URL,
 } from "@/lib/config";
 import { getRpcProvider } from "@/lib/rpc/provider";
-import { getEventSponsorConfig } from "@/lib/sponsor/config";
 import { isAllowedEventLock } from "@/lib/events/discovery";
+import { getCheckIn } from "@/lib/events/checkin-store";
+import { fetchSubgraph } from "@/lib/subgraph/client";
 
 export const runtime = "nodejs";
 
@@ -20,32 +17,10 @@ const LOCK_ABI = [
   "function tokenOfOwnerByIndex(address _keyOwner, uint256 _index) view returns (uint256)",
 ] as const;
 
-const GRAPH_GATEWAY_BASE = "https://gateway.thegraph.com/api/subgraphs/id";
-const RESOLVED_SUBGRAPH_URL =
-  UNLOCK_SUBGRAPH_URL ||
-  (UNLOCK_SUBGRAPH_ID ? `${GRAPH_GATEWAY_BASE}/${UNLOCK_SUBGRAPH_ID}` : BASE_NETWORK_ID ? `https://subgraph.unlock-protocol.com/${BASE_NETWORK_ID}` : null);
-
-const SUBGRAPH_AUTH_HEADERS = UNLOCK_SUBGRAPH_API_KEY
-  ? { Authorization: `Bearer ${UNLOCK_SUBGRAPH_API_KEY}` }
-  : undefined;
-
-async function fetchSubgraph(body: string) {
-  if (!RESOLVED_SUBGRAPH_URL) {
-    throw new Error("Unlock subgraph URL not configured");
-  }
-  return fetch(RESOLVED_SUBGRAPH_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(SUBGRAPH_AUTH_HEADERS ?? {}),
-    },
-    body,
-    cache: "no-store",
-  });
-}
-
-async function fetchTokenIdFromSubgraph(lockAddressLower: string, ownerLower: string): Promise<string | null> {
-  if (!RESOLVED_SUBGRAPH_URL) return null;
+async function fetchTokenIdFromSubgraph(
+  lockAddressLower: string,
+  ownerLower: string,
+): Promise<string | null> {
   try {
     const body = JSON.stringify({
       query: `query TokenIdForOwner($lock: String!, $owner: String!) {
@@ -53,10 +28,7 @@ async function fetchTokenIdFromSubgraph(lockAddressLower: string, ownerLower: st
           tokenId
         }
       }`,
-      variables: {
-        lock: lockAddressLower,
-        owner: ownerLower,
-      },
+      variables: { lock: lockAddressLower, owner: ownerLower },
     });
     const res = await fetchSubgraph(body);
     if (!res.ok) return null;
@@ -68,88 +40,103 @@ async function fetchTokenIdFromSubgraph(lockAddressLower: string, ownerLower: st
   }
 }
 
-type CachedLocksmithToken = {
-  walletAddressLower: string;
-  accessToken: string;
-  obtainedAt: number;
-};
-
-let cachedLocksmithToken: CachedLocksmithToken | null = null;
-const LOCKSMITH_TOKEN_TTL_MS = 10 * 60 * 1000;
-
-async function loginToLocksmith(params: { sponsor: Wallet; chainId: number; baseUrl: string }): Promise<string> {
-  const { sponsor, chainId, baseUrl } = params;
-  const walletAddressLower = sponsor.address.toLowerCase();
-  const cached = cachedLocksmithToken;
-  if (cached && cached.walletAddressLower === walletAddressLower && Date.now() - cached.obtainedAt < LOCKSMITH_TOKEN_TTL_MS) {
-    return cached.accessToken;
-  }
-
-  const nonceRes = await fetch(`${baseUrl}/v2/auth/nonce`, { cache: "no-store" });
-  if (!nonceRes.ok) {
-    throw new Error(`Locksmith nonce fetch failed (${nonceRes.status}).`);
-  }
-  const nonce = (await nonceRes.text()).trim();
-  if (!nonce) {
-    throw new Error("Locksmith nonce response was empty.");
-  }
-
-  const domain = (() => {
-    try {
-      return new URL(baseUrl).host;
-    } catch {
-      return "locksmith.unlock-protocol.com";
-    }
-  })();
-
-  const message = new SiweMessage({
-    domain,
-    address: sponsor.address,
-    statement: "Sign in to Unlock",
-    uri: baseUrl,
-    version: "1",
-    chainId,
-    nonce,
-  });
-  const prepared = message.prepareMessage();
-  const signature = await sponsor.signMessage(prepared);
-
-  const loginRes = await fetch(`${baseUrl}/v2/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message: prepared, signature }),
-    cache: "no-store",
-  });
-  if (!loginRes.ok) {
-    const detail = await loginRes.text().catch(() => "");
-    throw new Error(`Locksmith login failed (${loginRes.status}): ${detail || "Unknown error"}`);
-  }
-  const payload = await loginRes.json().catch(() => ({} as any));
-  const accessToken = typeof payload?.accessToken === "string" && payload.accessToken.length ? payload.accessToken : null;
-  if (!accessToken) {
-    throw new Error("Locksmith login did not return an accessToken.");
-  }
-
-  cachedLocksmithToken = { walletAddressLower, accessToken, obtainedAt: Date.now() };
-  return accessToken;
-}
-
 const jsonError = (status: number, payload: Record<string, unknown>) =>
-  NextResponse.json(payload, { status, headers: { "Cache-Control": "no-store" } });
+  NextResponse.json(payload, {
+    status,
+    headers: { "Cache-Control": "no-store" },
+  });
 
-export async function POST(request: NextRequest) {
-  const sponsorConfig = getEventSponsorConfig();
-
+export async function GET(request: NextRequest) {
   const token = await getToken({ req: request as any, secret: NEXTAUTH_SECRET });
   if (!token?.sub) {
     return jsonError(401, { error: "Unauthorized", code: "UNAUTHORIZED" });
   }
 
-  if (!sponsorConfig.enabled) {
-    return jsonError(503, { error: "Check-in status is temporarily unavailable.", code: "SPONSOR_DISABLED" });
+  const { searchParams } = new URL(request.url);
+  const rawLock = searchParams.get("lockAddress")?.trim() || "";
+  const rawTokenId = searchParams.get("tokenId")?.trim() || "";
+  if (!rawLock || !isAddress(rawLock)) {
+    return jsonError(400, { error: "Valid lockAddress required.", code: "INVALID_LOCK" });
   }
-  if (!sponsorConfig.privateKey) {
-    return jsonError(500, { error: "Sponsor wallet not configured.", code: "SPONSOR_NOT_CONFIGURED" });
+
+  const lockChecksum = getAddress(rawLock);
+  const lockLower = lockChecksum.toLowerCase();
+  if (!(await isAllowedEventLock(lockLower))) {
+    return jsonError(404, { error: "Event not found." });
+  }
+
+  let resolvedTokenId: string | null = rawTokenId || null;
+
+  // If no tokenId provided, try to resolve from recipients (wallets)
+  if (!resolvedTokenId) {
+    const rawRecipients = searchParams.get("recipients")?.trim() || "";
+    const recipients = rawRecipients
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s && isAddress(s))
+      .map((s) => getAddress(s));
+
+    if (recipients.length) {
+      const provider = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
+      const lockReader = new Contract(lockChecksum, LOCK_ABI, provider);
+
+      for (const recipient of recipients) {
+        const recipientLower = recipient.toLowerCase();
+        resolvedTokenId = await fetchTokenIdFromSubgraph(lockLower, recipientLower);
+        if (resolvedTokenId) break;
+        try {
+          const tid = await lockReader.tokenOfOwnerByIndex(recipient, 0n);
+          if (tid != null) {
+            resolvedTokenId = typeof tid === "bigint" ? tid.toString() : String(tid);
+            break;
+          }
+        } catch {
+          // continue
+        }
+      }
+    }
+  }
+
+  if (!resolvedTokenId) {
+    return NextResponse.json(
+      { registered: false, tokenId: null, checkedIn: false, checkedInAt: null },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  // Check local DB first
+  const localRecord = await getCheckIn(lockLower, resolvedTokenId);
+  if (localRecord) {
+    return NextResponse.json(
+      {
+        registered: true,
+        tokenId: resolvedTokenId,
+        checkedIn: true,
+        checkedInAt: localRecord.checkedInAt,
+        method: localRecord.method,
+        source: "local",
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  }
+
+  return NextResponse.json(
+    {
+      registered: true,
+      tokenId: resolvedTokenId,
+      checkedIn: false,
+      checkedInAt: null,
+      source: "local",
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
+
+// Keep POST for backward compatibility during transition
+export async function POST(request: NextRequest) {
+  const token = await getToken({ req: request as any, secret: NEXTAUTH_SECRET });
+  if (!token?.sub) {
+    return jsonError(401, { error: "Unauthorized", code: "UNAUTHORIZED" });
   }
 
   const body = await request.json().catch(() => null);
@@ -177,7 +164,7 @@ export async function POST(request: NextRequest) {
     return jsonError(404, { error: "Event not found." });
   }
 
-  const provider = getRpcProvider(sponsorConfig.rpcUrl, sponsorConfig.chainId);
+  const provider = getRpcProvider(BASE_RPC_URL, BASE_NETWORK_ID);
   const lockReader = new Contract(lockChecksum, LOCK_ABI, provider);
 
   let resolvedTokenId: string | null = null;
@@ -186,13 +173,13 @@ export async function POST(request: NextRequest) {
     resolvedTokenId = await fetchTokenIdFromSubgraph(lockLower, recipientLower);
     if (resolvedTokenId) break;
     try {
-      const tokenId = await lockReader.tokenOfOwnerByIndex(recipient, 0n);
-      if (tokenId != null) {
-        resolvedTokenId = (typeof tokenId === "bigint" ? tokenId.toString() : String(tokenId));
+      const tid = await lockReader.tokenOfOwnerByIndex(recipient, 0n);
+      if (tid != null) {
+        resolvedTokenId = typeof tid === "bigint" ? tid.toString() : String(tid);
         break;
       }
     } catch {
-      // ignore and continue
+      // continue
     }
   }
 
@@ -203,44 +190,26 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const sponsor = new Wallet(sponsorConfig.privateKey, provider);
-  const locksmithBase = (LOCKSMITH_BASE_URL || "https://locksmith.unlock-protocol.com").replace(/\/+$/, "");
-
-  let accessToken = await loginToLocksmith({ sponsor, chainId: sponsorConfig.chainId, baseUrl: locksmithBase });
-  const ticketUrl = `${locksmithBase}/v2/api/ticket/${sponsorConfig.chainId}/${lockChecksum}/${resolvedTokenId}`;
-
-  let ticketRes = await fetch(ticketUrl, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    cache: "no-store",
-  });
-  if (ticketRes.status === 401) {
-    accessToken = await loginToLocksmith({ sponsor, chainId: sponsorConfig.chainId, baseUrl: locksmithBase });
-    ticketRes = await fetch(ticketUrl, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      cache: "no-store",
-    });
+  // Check local DB
+  const localRecord = await getCheckIn(lockLower, resolvedTokenId);
+  if (localRecord) {
+    return NextResponse.json(
+      {
+        registered: true,
+        tokenId: resolvedTokenId,
+        checkedIn: true,
+        checkedInAt: localRecord.checkedInAt,
+      },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   }
-
-  if (!ticketRes.ok) {
-    const detail = await ticketRes.text().catch(() => "");
-    return jsonError(ticketRes.status, { error: detail || "Unable to load ticket status." });
-  }
-
-  const payload = await ticketRes.json().catch(() => ({} as any));
-  const checkedInAt =
-    (typeof payload?.checkedInAt === "string" && payload.checkedInAt.length ? payload.checkedInAt : null) ||
-    (typeof payload?.checkinAt === "string" && payload.checkinAt.length ? payload.checkinAt : null) ||
-    (typeof payload?.checkedInTimestamp === "string" && payload.checkedInTimestamp.length ? payload.checkedInTimestamp : null) ||
-    null;
-  const hasCheckins = Array.isArray(payload?.checkins) && payload.checkins.length > 0;
-  const checkedIn = payload?.checkedIn === true || Boolean(checkedInAt) || hasCheckins;
 
   return NextResponse.json(
     {
       registered: true,
       tokenId: resolvedTokenId,
-      checkedIn,
-      checkedInAt,
+      checkedIn: false,
+      checkedInAt: null,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

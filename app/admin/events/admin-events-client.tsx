@@ -112,9 +112,14 @@ export default function AdminEventsClient() {
               On-chain discovered events with editable, member-facing metadata.
             </p>
           </div>
-          <Button variant="ghost" onClick={fetchEvents} disabled={loading}>
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" asChild>
+              <Link href="/admin/events/checkin">Check-in</Link>
+            </Button>
+            <Button variant="ghost" onClick={fetchEvents} disabled={loading}>
+              Refresh
+            </Button>
+          </div>
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <input

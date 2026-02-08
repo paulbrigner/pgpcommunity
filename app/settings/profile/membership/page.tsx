@@ -254,7 +254,7 @@ export default function MembershipSettingsPage() {
             day: "numeric",
           })
         : null;
-      const baseLabel = tier.label || summary?.metadata?.name || `Tier ${index + 1}`;
+      const baseLabel = summary?.metadata?.name || tier.label || `Tier ${index + 1}`;
       let detail = "Not owned yet";
       const isMemberOption = memberTierAddressLower
         ? tier.checksumAddress.toLowerCase() === memberTierAddressLower

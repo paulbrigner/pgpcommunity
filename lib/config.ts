@@ -99,6 +99,7 @@ export const NEXTAUTH_URL = process.env.NEXTAUTH_URL as string;
 export const NEXTAUTH_SECRET = process.env.NEXTAUTH_SECRET as string;
 export const NEXTAUTH_TABLE = process.env.NEXTAUTH_TABLE as string;
 export const EVENT_METADATA_TABLE = process.env.EVENT_METADATA_TABLE as string | undefined;
+export const EVENT_CHECKIN_TABLE = process.env.EVENT_CHECKIN_TABLE as string | undefined;
 export const EMAIL_SERVER = process.env.EMAIL_SERVER as string;
 export const EMAIL_FROM = process.env.EMAIL_FROM as string;
 export const EMAIL_SERVER_HOST = process.env.EMAIL_SERVER_HOST as string | undefined;

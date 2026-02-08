@@ -134,7 +134,7 @@ export const resolveTierLabel = (
   fallbackId?: string | null | undefined
 ): string | null => {
   if (tier) {
-    return tier.tier.label || tier.metadata?.name || tier.tier.checksumAddress || null;
+    return tier.metadata?.name || tier.tier.label || tier.tier.checksumAddress || null;
   }
   if (fallbackId) {
     const normalized = normalize(fallbackId);

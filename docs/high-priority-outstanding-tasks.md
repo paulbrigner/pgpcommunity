@@ -32,14 +32,6 @@ High-level tasks:
 - Decide whether to update membership tokenURI to point to our metadata endpoint (similar to Option C for events).
 - Document the migration plan (manual entry vs script backfill for existing tiers).
 
-## Runbook: Deploy a New Event Lock (current workflow)
-Use Unlock for the on-chain lock deployment, and then wire it into our app.
+## Runbook: Deploy a New Event Lock
 
-Steps:
-1) Create the lock in Unlock (Base). Use a free price (token address = zero, key price = 0) for sponsored RSVPs.
-2) Add the event sponsor wallet as a Lock Manager (required for sponsored RSVP + check-in).
-3) Ensure on-chain discovery: the lock should either share the primary deployer or include the primary lock owner as a lock manager.
-4) Set the lock’s base tokenURI to our metadata endpoint:\n   `EVENT_METADATA_BASE_URL=https://pgpforcrypto.org node scripts/setup/set-event-token-uri.mjs --lock <LOCK_ADDRESS>`
-5) Add and publish the metadata in Admin → Events.
-6) Verify the event appears on the home page and `/events/<LOCK_ADDRESS>` loads.
-7) Test RSVP (sponsored) and check-in QR (until we replace it with DB-based check-ins).
+See **[docs/new-event-setup-guide.md](./new-event-setup-guide.md)** for the full step-by-step guide, including an explanation of the tokenURI configuration and why self-hosted metadata matters for privacy and third-party independence.

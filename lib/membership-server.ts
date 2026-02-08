@@ -1,6 +1,7 @@
 import { Contract } from 'ethers';
 import { LOCKSMITH_BASE_URL, MEMBERSHIP_TIERS, MembershipTierConfig } from '@/lib/config';
 import { getRpcProvider } from '@/lib/rpc/provider';
+import { getMembershipMetadata } from '@/lib/membership/metadata-store';
 
 const ABI = [
   'function getHasValidKey(address _owner) view returns (bool)',
@@ -38,10 +39,32 @@ export type MembershipSummary = {
 const lockMetadataCache = new Map<string, any>();
 
 async function fetchTierMetadata(lockAddress: string, networkId: number) {
-  if (!LOCKSMITH_BASE_URL) return null;
   const key = `${networkId}:${lockAddress.toLowerCase()}`;
   if (lockMetadataCache.has(key)) {
     return lockMetadataCache.get(key);
+  }
+
+  // Check local DB first for published membership metadata
+  try {
+    const localMeta = await getMembershipMetadata(lockAddress);
+    if (localMeta && localMeta.status === 'published') {
+      const data = {
+        name: localMeta.name,
+        description: localMeta.description ?? null,
+        image: localMeta.imageUrl ?? null,
+        price: null, // price comes from on-chain keyPrice
+      };
+      lockMetadataCache.set(key, data);
+      return data;
+    }
+  } catch {
+    // Local DB not configured or unavailable; fall through to Locksmith
+  }
+
+  // Fall back to Locksmith
+  if (!LOCKSMITH_BASE_URL) {
+    lockMetadataCache.set(key, null);
+    return null;
   }
   try {
     const url = `${LOCKSMITH_BASE_URL}/v2/api/metadata/${networkId}/locks/${lockAddress}`;

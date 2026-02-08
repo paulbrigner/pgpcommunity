@@ -56,6 +56,12 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         >
           Event metadata
         </Link>
+        <Link
+          href="/admin/membership-metadata"
+          className="rounded-full border border-[rgba(67,119,243,0.25)] bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-[var(--brand-denim)] transition hover:border-[rgba(67,119,243,0.45)]"
+        >
+          Membership metadata
+        </Link>
       </div>
       {children}
     </div>

@@ -10,7 +10,8 @@
  *     --region us-east-1 \
  *     --nextauth-table NextAuth \
  *     --cache-table AdminRosterCache \
- *     --event-table EventMetadata
+ *     --event-table EventMetadata \
+ *     --checkin-table EventCheckin
  *
  *   node scripts/setup/create-dynamodb-tables.mjs --skip-cache
  *   node scripts/setup/create-dynamodb-tables.mjs --skip-ttl
@@ -36,8 +37,10 @@ const usage = () => {
       "  --nextauth-table <name>        NextAuth table name (or NEXTAUTH_TABLE env)",
       "  --cache-table <name>           Admin roster cache table name (or ADMIN_ROSTER_CACHE_TABLE env)",
       "  --event-table <name>           Event metadata table name (or EVENT_METADATA_TABLE env)",
+      "  --checkin-table <name>         Event check-in table name (or EVENT_CHECKIN_TABLE env)",
       "  --skip-cache                   Do not create the admin roster cache table",
       "  --skip-event                   Do not create the event metadata table",
+      "  --skip-checkin                 Do not create the event check-in table",
       "  --skip-ttl                     Do not enable TTL on any table",
       "  --skip-ttl-nextauth            Do not enable TTL on the NextAuth table",
       "  --skip-ttl-cache               Do not enable TTL on the cache table",
@@ -49,8 +52,10 @@ let region = process.env.REGION_AWS || process.env.AWS_REGION || "";
 let nextAuthTable = process.env.NEXTAUTH_TABLE || "NextAuth";
 let cacheTable = process.env.ADMIN_ROSTER_CACHE_TABLE || "";
 let eventTable = process.env.EVENT_METADATA_TABLE || "";
+let checkinTable = process.env.EVENT_CHECKIN_TABLE || "";
 let skipCache = false;
 let skipEvent = false;
+let skipCheckin = false;
 let skipTtl = false;
 let skipTtlNextAuth = false;
 let skipTtlCache = false;
@@ -85,8 +90,17 @@ for (let i = 0; i < args.length; i += 1) {
     skipCache = true;
     continue;
   }
+  if (arg === "--checkin-table" && args[i + 1]) {
+    checkinTable = args[i + 1];
+    i += 1;
+    continue;
+  }
   if (arg === "--skip-event") {
     skipEvent = true;
+    continue;
+  }
+  if (arg === "--skip-checkin") {
+    skipCheckin = true;
     continue;
   }
   if (arg === "--skip-ttl" || arg === "--no-ttl") {
@@ -297,10 +311,51 @@ async function ensureEventMetadataTable() {
   console.log(`Event metadata table is ACTIVE: ${eventTable}`);
 }
 
+async function ensureEventCheckinTable() {
+  if (skipCheckin) {
+    console.log("Skipping event check-in table creation.");
+    return;
+  }
+  if (!checkinTable) {
+    console.log("EVENT_CHECKIN_TABLE not set; skipping event check-in table creation.");
+    return;
+  }
+
+  const existing = await describeTable(checkinTable);
+  if (existing) {
+    const keyOk = hasKeySchema(existing, "pk", "sk");
+    if (!keyOk) {
+      console.warn(`Table ${checkinTable} exists but does not match check-in schema (pk/sk).`);
+    } else {
+      console.log(`Event check-in table exists: ${checkinTable}`);
+    }
+    return;
+  }
+
+  await client.send(
+    new CreateTableCommand({
+      TableName: checkinTable,
+      BillingMode: "PAY_PER_REQUEST",
+      KeySchema: [
+        { AttributeName: "pk", KeyType: "HASH" },
+        { AttributeName: "sk", KeyType: "RANGE" },
+      ],
+      AttributeDefinitions: [
+        { AttributeName: "pk", AttributeType: "S" },
+        { AttributeName: "sk", AttributeType: "S" },
+      ],
+    }),
+  );
+  console.log(`CreateTable issued for event check-in table: ${checkinTable}. Waiting for ACTIVE...`);
+  await waitUntilTableExists({ client, maxWaitTime: 60 }, { TableName: checkinTable });
+  console.log(`Event check-in table is ACTIVE: ${checkinTable}`);
+}
+
 async function main() {
   await ensureNextAuthTable();
   await ensureRosterCacheTable();
   await ensureEventMetadataTable();
+  await ensureEventCheckinTable();
 }
 
 main().catch((err) => {

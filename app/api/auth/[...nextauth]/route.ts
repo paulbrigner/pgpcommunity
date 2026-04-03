@@ -20,58 +20,6 @@ import {
 import { getMembershipSummary } from "@/lib/membership-server";
 import { documentClient, TABLE_NAME } from "@/lib/dynamodb";
 
-const PENDING_SIGNUP_PREFIX = "PENDING_SIGNUP#";
-
-async function consumePendingSignup(email: string | null | undefined, userId: string, adapter: any) {
-  if (!email || !userId) return null;
-  const normalizedEmail = email.trim().toLowerCase();
-  const key = `${PENDING_SIGNUP_PREFIX}${normalizedEmail}`;
-  const pending = await documentClient.get({
-    TableName: TABLE_NAME,
-    Key: { pk: key, sk: key },
-  });
-  const item = pending.Item as any;
-  const wallet = item?.wallet ? String(item.wallet).toLowerCase() : null;
-  if (!wallet) {
-    if (item) {
-      await documentClient.delete({ TableName: TABLE_NAME, Key: { pk: key, sk: key } });
-    }
-    return null;
-  }
-
-  try {
-    const existing = await adapter.getUserByAccount({
-      provider: "ethereum",
-      providerAccountId: wallet,
-    });
-    if (existing && existing.id && existing.id !== userId) {
-      await documentClient.delete({ TableName: TABLE_NAME, Key: { pk: key, sk: key } });
-      return null;
-    }
-    if (!existing) {
-      await adapter.linkAccount({
-        userId,
-        type: "credentials",
-        provider: "ethereum",
-        providerAccountId: wallet,
-      });
-    }
-
-    const user = await adapter.getUser(userId);
-    const current = Array.isArray((user as any)?.wallets)
-      ? ((user as any).wallets as string[])
-      : [];
-    if (!current.includes(wallet)) {
-      await adapter.updateUser({ id: userId, wallets: [...current, wallet] });
-    }
-  } catch (err) {
-    console.error("Failed to consume pending signup", err);
-  }
-
-  await documentClient.delete({ TableName: TABLE_NAME, Key: { pk: key, sk: key } });
-  return wallet;
-}
-
 // Ensure NextAuth sees a base URL for callbacks (used by Email provider)
 if (!process.env.NEXTAUTH_URL && NEXTAUTH_URL) {
   process.env.NEXTAUTH_URL = NEXTAUTH_URL;
@@ -245,11 +193,7 @@ export const authOptions = {
           const adapter: any = DynamoDBAdapter(documentClient as any, {
             tableName: TABLE_NAME,
           });
-          let userRecord = await adapter.getUser(token.sub);
-          if (userRecord?.email) {
-            await consumePendingSignup((userRecord as any).email as string, token.sub, adapter);
-            userRecord = await adapter.getUser(token.sub);
-          }
+          const userRecord = await adapter.getUser(token.sub);
           const wallets = Array.isArray((userRecord as any)?.wallets)
             ? ((userRecord as any).wallets as string[])
             : [];

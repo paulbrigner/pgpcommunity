@@ -124,16 +124,6 @@ function SignupFlow({ callbackUrl }: { callbackUrl: string }) {
     try {
       if (!/.+@.+\..+/.test(email)) throw new Error("Enter a valid email address");
       if (!walletAddress) throw new Error("Wallet address missing. Please reconnect.");
-      const pendingRes = await fetch("/api/signup/pending", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, wallet: walletAddress }),
-      });
-      if (!pendingRes.ok) {
-        let detail: any = undefined;
-        try { detail = await pendingRes.json(); } catch {}
-        throw new Error(detail?.error || "Failed to save signup state");
-      }
       try {
         localStorage.removeItem("pendingProfile");
       } catch {}
@@ -203,7 +193,7 @@ function SignupFlow({ callbackUrl }: { callbackUrl: string }) {
             <Mail className="h-5 w-5" /> Enter Your Email
           </div>
           <p className="text-sm text-muted-foreground">
-            We&apos;ll send you a verification link to complete your sign-up.
+            We&apos;ll send you a verification link to sign in. After that, link your wallet from your account settings.
           </p>
           <div className="rounded-md border border-emerald-300/60 bg-emerald-50 p-3 text-sm text-emerald-900 dark:text-emerald-200 dark:bg-emerald-500/10">
             <div className="flex items-start gap-2">

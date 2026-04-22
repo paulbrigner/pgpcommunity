@@ -3,6 +3,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DateTime } from "luxon";
 import { AlertTriangle, ArrowUpDown, MailCheck, MailQuestion, RefreshCcw, Wallet } from "lucide-react";
+import {
+  SensitiveDataText,
+  formatSensitiveValue,
+  useAdminSensitiveData,
+} from "@/components/admin/sensitive-data";
 import type { AdminMember, AdminRoster } from "@/lib/admin/roster";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -119,6 +124,10 @@ const getFirstName = (member: AdminMember): string => {
   return parts[0] || "";
 };
 
+const getMemberDisplayName = (member: Pick<AdminMember, "name" | "firstName" | "lastName">): string => {
+  return member.name?.trim() || `${member.firstName || ""} ${member.lastName || ""}`.trim();
+};
+
 function formatExpiry(expiry: number | null) {
   if (!expiry) return { label: "No expiry", detail: null };
   const dt = DateTime.fromSeconds(expiry);
@@ -172,6 +181,7 @@ function emailStatus(member: AdminMember) {
 }
 
 export default function AdminClient({ initialRoster, currentAdminId }: Props) {
+  const { sensitiveDataVisible } = useAdminSensitiveData();
   const filteredInitialRoster = useMemo(() => {
     if (!initialRoster) return null;
     if (!currentAdminId) return initialRoster;
@@ -245,6 +255,25 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     }
   };
 
+  const formatMemberIdentity = useCallback(
+    (member: Pick<AdminMember, "id" | "name" | "email" | "firstName" | "lastName">) => {
+      const displayName = getMemberDisplayName(member);
+      if (member.email) {
+        return formatSensitiveValue(member.email, "email", sensitiveDataVisible);
+      }
+      if (displayName) {
+        return formatSensitiveValue(displayName, "name", sensitiveDataVisible);
+      }
+      return member.id;
+    },
+    [sensitiveDataVisible],
+  );
+
+  const formatEmailRecipient = useCallback(
+    (email: string | null | undefined) => formatSensitiveValue(email, "email", sensitiveDataVisible),
+    [sensitiveDataVisible],
+  );
+
   const toggleMemberDetails = useCallback((id: string) => {
     setExpandedMembers((prev) => ({ ...prev, [id]: !prev[id] }));
   }, []);
@@ -271,7 +300,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
               });
     const searched = q
       ? tierFiltered.filter((member) => {
-          const name = member.name || `${member.firstName || ""} ${member.lastName || ""}`.trim();
+          const name = getMemberDisplayName(member);
           const haystack = [
             name,
             member.email,
@@ -301,7 +330,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
         const byExpiry = compareOptionalNumber(a.membershipExpiry, b.membershipExpiry, sortDirection);
         if (byExpiry !== 0) return byExpiry;
       }
-      return compareStrings(a.name || a.email || "", b.name || b.email || "", sortDirection);
+      return compareStrings(getMemberDisplayName(a) || a.email || "", getMemberDisplayName(b) || b.email || "", sortDirection);
     });
 
     return sorted;
@@ -725,7 +754,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       updateMemberEmailMeta(member.id, sentAt, data?.emailType || type, !!data?.markWelcome);
       setEmailNotice({
         tone: "success",
-        message: `${data?.emailType === "welcome" ? "Welcome email" : "Email"} sent to ${member.email}`,
+        message: `${data?.emailType === "welcome" ? "Welcome email" : "Email"} sent to ${formatEmailRecipient(member.email) || "this member"}`,
       });
       return true;
     } catch (err: any) {
@@ -738,7 +767,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   };
 
   const defaultWelcomeCopy = (member: AdminMember) => {
-    const name = member.firstName || member.name;
+    const name = sensitiveDataVisible ? member.firstName || member.name : null;
     const greeting = name ? `Hi ${name},` : "Hi there,";
     return {
       subject: "Welcome to PGP Community",
@@ -747,7 +776,8 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   };
 
   const openCustomModal = (member: AdminMember) => {
-    const greeting = member.firstName || member.name ? `Hello ${member.firstName || member.name},` : "Hello,";
+    const greetingName = sensitiveDataVisible ? member.firstName || member.name : null;
+    const greeting = greetingName ? `Hello ${greetingName},` : "Hello,";
     setEmailModalMember(member);
     setEmailModalMode("custom");
     setEmailSubject("PGP Community update");
@@ -786,7 +816,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           : prev,
       );
       setActionModalMember((prev) => (prev && prev.id === member.id ? { ...prev, isAdmin: target } : prev));
-      setEmailNotice({ tone: "success", message: `${target ? "Granted" : "Removed"} admin for ${member.email || member.name || member.id}` });
+      setEmailNotice({ tone: "success", message: `${target ? "Granted" : "Removed"} admin for ${formatMemberIdentity(member)}` });
     } catch (err: any) {
       const msg = typeof err?.message === "string" ? err.message : "Failed to update admin flag";
       setAdminError(msg);
@@ -828,7 +858,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
       setActionModalMember((prev) => (prev && prev.id === member.id ? { ...prev, isTestMember: target } : prev));
       setEmailNotice({
         tone: "success",
-        message: `${target ? "Marked" : "Removed"} test member for ${member.email || member.name || member.id}`,
+        message: `${target ? "Marked" : "Removed"} test member for ${formatMemberIdentity(member)}`,
       });
       void fetch(buildRosterUrl({ refresh: true }), { cache: "no-store" }).catch((err) => {
         console.warn("Failed to refresh roster cache after test-member update", err);
@@ -1268,11 +1298,19 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
   const renderActionModal = () => {
     if (!actionModalMember) return null;
     const member = actionModalMember;
+    const memberDisplayName = getMemberDisplayName(member);
     return (
       <AlertDialog open={!!actionModalMember} onOpenChange={(open) => setActionModalMember(open ? member : null)}>
         <AlertDialogContent className="bg-white">
           <AlertDialogHeader>
-            <AlertDialogTitle>Manage {member.name || member.email || "member"}</AlertDialogTitle>
+            <AlertDialogTitle>
+              Manage{" "}
+              <SensitiveDataText
+                value={memberDisplayName || member.email}
+                kind={memberDisplayName ? "name" : "email"}
+                fallback="member"
+              />
+            </AlertDialogTitle>
             <AlertDialogDescription>
               Wallet: {formatWallet(member.primaryWallet)} · Tier: {resolveMemberTierLabel(member)}
             </AlertDialogDescription>
@@ -1355,6 +1393,8 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
     );
   };
 
+  const refundConfirmDisplayName = refundConfirmMember ? getMemberDisplayName(refundConfirmMember) : "";
+
   return (
     <>
       <div className="space-y-6">
@@ -1414,7 +1454,9 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                   {refundRequests.map((req) => (
                     <tr key={req.id} className="hover:bg-white">
                       <td className="px-4 py-3">
-                        <div className="font-semibold text-[#0b0b43]">{req.email || "Unknown"}</div>
+                        <div className="font-semibold text-[#0b0b43]">
+                          <SensitiveDataText value={req.email} kind="email" fallback="Unknown" />
+                        </div>
                       </td>
                       <td className="px-4 py-3 font-mono text-sm text-[#0b0b43]">
                         {(() => {
@@ -1637,6 +1679,7 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                 )}
                 {filteredMembers.map((member) => {
                   const isDetailLoading = !!detailLoading[member.id];
+                  const displayName = getMemberDisplayName(member);
                   const nonRenewableTier = isNonRenewableTierMember(member);
                   const detailsLoaded = !!detailLoaded[member.id];
                   const hasActiveTier = !!resolveMemberTierKey(member);
@@ -1681,9 +1724,11 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
                       <tr className="transition hover:bg-white">
                         <td className="px-5 py-4 align-top">
                           <div className="font-semibold text-[#0b0b43]">
-                            {member.name || `${member.firstName || ""} ${member.lastName || ""}`.trim() || "Unknown"}
+                            <SensitiveDataText value={displayName} kind="name" fallback="Unknown" />
                           </div>
-                          <div className="text-xs text-muted-foreground">{member.email || "No email on file"}</div>
+                          <div className="text-xs text-muted-foreground">
+                            <SensitiveDataText value={member.email} kind="email" fallback="No email on file" />
+                          </div>
                           {member.isTestMember && (
                             <div className="mt-1 text-[0.65rem] uppercase tracking-[0.2em] text-rose-700">
                               Test member
@@ -1832,9 +1877,9 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>{emailModalMode === "welcome" ? "Send welcome email" : "Send custom email"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {emailModalMode === "welcome"
-                ? `Customize the welcome email to ${emailModalMember?.email || "this member"}.`
-                : `Compose a one-off email to ${emailModalMember?.email || "this member"}.`}
+              {emailModalMode === "welcome" ? "Customize the welcome email to " : "Compose a one-off email to "}
+              <SensitiveDataText value={emailModalMember?.email} kind="email" fallback="this member" />
+              .
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-3">
@@ -1882,7 +1927,13 @@ export default function AdminClient({ initialRoster, currentAdminId }: Props) {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm cancellation & refund</AlertDialogTitle>
             <AlertDialogDescription>
-              This will expire and refund all active memberships for {refundConfirmMember?.email || refundConfirmMember?.name || "this member"} using your wallet as lock manager, and send them a confirmation email with refund details.
+              This will expire and refund all active memberships for{" "}
+              <SensitiveDataText
+                value={refundConfirmMember?.email || refundConfirmDisplayName}
+                kind={refundConfirmMember?.email ? "email" : "name"}
+                fallback="this member"
+              />{" "}
+              using your wallet as lock manager, and send them a confirmation email with refund details.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="rounded-md bg-slate-50 p-3 text-sm text-slate-700">

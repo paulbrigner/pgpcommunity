@@ -124,16 +124,6 @@ function SignupFlow({ callbackUrl }: { callbackUrl: string }) {
     try {
       if (!/.+@.+\..+/.test(email)) throw new Error("Enter a valid email address");
       if (!walletAddress) throw new Error("Wallet address missing. Please reconnect.");
-      const pendingRes = await fetch("/api/signup/pending", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, wallet: walletAddress }),
-      });
-      if (!pendingRes.ok) {
-        let detail: any = undefined;
-        try { detail = await pendingRes.json(); } catch {}
-        throw new Error(detail?.error || "Failed to save signup state");
-      }
       try {
         localStorage.removeItem("pendingProfile");
       } catch {}
@@ -203,7 +193,7 @@ function SignupFlow({ callbackUrl }: { callbackUrl: string }) {
             <Mail className="h-5 w-5" /> Enter Your Email
           </div>
           <p className="text-sm text-muted-foreground">
-            We&apos;ll send you a verification link to complete your sign-up.
+            We&apos;ll send you a verification link to sign in. After that, link your wallet from your account settings.
           </p>
           <div className="rounded-md border border-emerald-300/60 bg-emerald-50 p-3 text-sm text-emerald-900 dark:text-emerald-200 dark:bg-emerald-500/10">
             <div className="flex items-start gap-2">
@@ -260,9 +250,9 @@ function SignupFlow({ callbackUrl }: { callbackUrl: string }) {
             <div className="font-medium">What happens next:</div>
             <ol className="list-decimal pl-4 space-y-1">
               <li>Check your email for a verification link</li>
-              <li>Click the link to verify your email</li>
-              <li>Your account will be fully activated</li>
-              <li>Future sign-ins will only require your wallet</li>
+              <li>Click the link to sign in and activate your account</li>
+              <li>After signing in, link your wallet from the home page or account settings</li>
+              <li>Once linked, you can use wallet-based features and wallet sign-in</li>
             </ol>
           </div>
           <div className="space-y-1 text-sm">

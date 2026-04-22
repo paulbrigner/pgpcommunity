@@ -46,6 +46,8 @@ type HomeClientProps = {
   } | null;
 };
 
+const EMPTY_ALLOWANCES = Object.freeze({}) as Record<string, AllowanceState>;
+const EMPTY_TOKEN_IDS = Object.freeze({}) as Record<string, string[]>;
 const MAX_AUTO_RENEW_MONTHS = 12;
 const SAFE_ALLOWANCE_CAP = 2n ** 200n;
 
@@ -82,8 +84,8 @@ export default function HomeClient({
   initialMembershipSummary,
   initialMembershipStatus = "unknown",
   initialMembershipExpiry = null,
-  initialAllowances = {},
-  initialTokenIds = {},
+  initialAllowances = EMPTY_ALLOWANCES,
+  initialTokenIds = EMPTY_TOKEN_IDS,
   initialAllowancesLoaded = true,
   initialNfts = null,
 }: HomeClientProps) {

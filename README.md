@@ -10,7 +10,7 @@ This software is under active development and has not undergone a full independe
 
 - **Authentication/Authorization**:
   - NextAuth for email sign-in and SIWE wallet linking
-  - Wallet-first sign-up flow that guides new users through wallet connection, email verification, and automatic wallet linking after verification
+  - Sign-up flow that guides new users through email verification first, then wallet linking from their account
 - **Membership & RSVPs**:
   - Unlock Protocol membership with on-site checkout; RSVP uses the same direct checkout flow
 - **Creator NFT collection**:
@@ -116,14 +116,15 @@ Notes:
   - DynamoDB adapter for User/Account/VerificationToken persistence
 - Session fields: `session.user.id`, `session.user.email`, and `session.user.walletAddress`.
 - Client helper: `lib/siwe/client.ts` exposes `signInWithSiwe()` (returns `{ ok, error, address }`).
-- Sign-in page: `app/(auth)/signin/page.tsx` handles both wallet-first sign-up and legacy email sign-in flows.
+- Sign-in page: `app/(auth)/signin/page.tsx` handles the guided sign-up flow and legacy email sign-in flows.
 
 #### Sign-up Flow
-- Visiting `/signin?reason=signup` presents a wallet-first wizard:
-  1. **Connect wallet** – Attempts SIWE. If the wallet is already linked, the user is signed in instantly. Otherwise, the wallet address is captured for the pending signup state.
-  2. **Enter email** – Submitting stores `{ email, wallet }` via `POST /api/signup/pending` and triggers the NextAuth magic-link email.
-  3. **Check email** – Confirmation screen summarises the wallet + email and instructs the user to verify their address.
-- After email verification, the NextAuth session callback consumes the pending record, links the wallet to the user, and clears the temporary entry so the home page immediately recognises the wallet as linked.
+- Visiting `/signin?reason=signup` presents a guided flow:
+  1. **Connect wallet (optional pre-check)** – Attempts SIWE. If the wallet is already linked, the user is signed in instantly. If it is not linked yet, SIWE is rejected and the user continues with email sign-in.
+  2. **Enter email** – Submitting triggers the NextAuth magic-link email sign-in flow.
+  3. **Check email** – Confirmation screen summarises the email (and any connected wallet) and instructs the user to verify their address.
+  4. **Link wallet after sign-in** – Once signed in, the home page and profile/settings surfaces prompt the user to link a wallet through `POST /api/auth/link-wallet`.
+- The app no longer auto-links a wallet after email verification. Wallet linkage is always an explicit post-sign-in step.
 
 Email-first UX and wallet linking
 - Legacy email-first flows still redirect to `/signin` with a helpful banner and `callbackUrl` back to where the user started.
@@ -140,8 +141,8 @@ Unlinking a wallet
 - UI: See the Wallets section on `Settings → Profile` to unlink addresses.
 
 Pending signup storage
-- API route: `app/api/signup/pending/route.ts` persists `{ email, wallet }` pairs during wallet-first signup until the user verifies their email.
-- The NextAuth session callback calls `consumePendingSignup()` to link the stored wallet as soon as the verification completes, then deletes the pending record.
+- API route: `app/api/signup/pending/route.ts` no longer stores pending `{ email, wallet }` pairs.
+- Requests to that route now return HTTP `410` to signal that automatic post-verification wallet linking has been retired in favor of explicit wallet linking after sign-in.
 
 Profile collection
 - Sign-in page collects `firstName` (required), `lastName` (required), `xHandle` (optional), and `linkedinUrl` (optional) along with email.

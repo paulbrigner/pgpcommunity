@@ -5,6 +5,10 @@ import { snapshotToMembershipSummary, type AllowanceState } from "@/lib/membersh
 import type { MembershipSummary } from "@/lib/membership-server";
 import { pickHighestActiveTier } from "@/lib/membership-tiers";
 
+const EMPTY_WALLETS: string[] = [];
+const EMPTY_ALLOWANCES = Object.freeze({}) as Record<string, AllowanceState>;
+const EMPTY_TOKEN_IDS = Object.freeze({}) as Record<string, string[]>;
+
 type UseMembershipOptions = {
   ready: boolean;
   authenticated: boolean;
@@ -27,13 +31,13 @@ export function useMembership({
   ready,
   authenticated,
   walletAddress,
-  wallets = [],
+  wallets = EMPTY_WALLETS,
   addressesKey,
   initialMembershipSummary,
   initialMembershipStatus = "unknown",
   initialMembershipExpiry = null,
-  initialAllowances = {},
-  initialTokenIds = {},
+  initialAllowances = EMPTY_ALLOWANCES,
+  initialTokenIds = EMPTY_TOKEN_IDS,
   initialAllowancesLoaded = true,
 }: UseMembershipOptions) {
   const [membershipStatus, setMembershipStatus] = useState<"active" | "expired" | "none" | "unknown">(
@@ -41,8 +45,8 @@ export function useMembership({
   );
   const [membershipSummary, setMembershipSummary] = useState<MembershipSummary | null>(initialMembershipSummary ?? null);
   const [membershipExpiry, setMembershipExpiry] = useState<number | null>(initialMembershipExpiry ?? null);
-  const [allowances, setAllowances] = useState<Record<string, AllowanceState>>(initialAllowances ?? {});
-  const [tokenIds, setTokenIds] = useState<Record<string, string[]>>(initialTokenIds ?? {});
+  const [allowances, setAllowances] = useState<Record<string, AllowanceState>>(initialAllowances ?? EMPTY_ALLOWANCES);
+  const [tokenIds, setTokenIds] = useState<Record<string, string[]>>(initialTokenIds ?? EMPTY_TOKEN_IDS);
   const [allowancesLoaded, setAllowancesLoaded] = useState<boolean>(!!initialAllowancesLoaded);
 
   const prevStatusRef = useRef<"active" | "expired" | "none">("none");
@@ -71,8 +75,8 @@ export function useMembership({
     initialData: hasInitialData
       ? {
           summary: initialMembershipSummary,
-          allowances: initialAllowances ?? {},
-          tokenIds: initialTokenIds ?? {},
+          allowances: initialAllowances ?? EMPTY_ALLOWANCES,
+          tokenIds: initialTokenIds ?? EMPTY_TOKEN_IDS,
           includesAllowances: initialAllowancesLoaded,
           includesTokenIds: true,
         }
@@ -92,8 +96,8 @@ export function useMembership({
       setMembershipStatus("none");
       setMembershipExpiry(null);
       setMembershipSummary(null);
-      setAllowances({});
-      setTokenIds({});
+      setAllowances(EMPTY_ALLOWANCES);
+      setTokenIds(EMPTY_TOKEN_IDS);
       return;
     }
     if (!initialMembershipAppliedRef.current) {
@@ -103,7 +107,7 @@ export function useMembership({
         setMembershipStatus(summaryStatus);
         setMembershipExpiry(summaryExpiry);
         setMembershipSummary(initialMembershipSummary);
-        setAllowances(initialAllowances ?? {});
+        setAllowances(initialAllowances ?? EMPTY_ALLOWANCES);
         initialMembershipAppliedRef.current = true;
         return;
       }

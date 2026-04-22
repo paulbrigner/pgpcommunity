@@ -9,5 +9,9 @@ type Props = {
 };
 
 export function MarkdownContent({ children }: Props) {
-  return <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>;
+  return (
+    <div className="whitespace-pre-wrap">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{children}</ReactMarkdown>
+    </div>
+  );
 }

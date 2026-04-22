@@ -179,6 +179,17 @@ type ActiveMemberProps = {
   creatorNfts: DisplayNft[] | null | undefined;
 };
 
+const formatMemberWelcomeLine = (memberLevelLabel: string): string => {
+  const label = memberLevelLabel.trim();
+  if (!label) {
+    return "Thank you for being part of the community.";
+  }
+
+  const labelEndsWithMember = /\bmember(ship)?s?\.?$/i.test(label);
+  const article = /^[aeiou]/i.test(label) ? "an" : "a";
+  return `Thank you for being ${article} ${label}${labelEndsWithMember ? "" : " member"}.`;
+};
+
 export function ActiveMemberPanel({
   greetingName,
   memberLevelLabel,
@@ -284,11 +295,12 @@ export function ActiveMemberPanel({
     { id: "upcoming" as const, label: "Upcoming meetings" },
     { id: "past" as const, label: "Past meetings" },
   ];
+  const welcomeLine = formatMemberWelcomeLine(memberLevelLabel);
   return (
     <div className="space-y-8">
       <section className="glass-surface p-6 text-center text-[var(--muted-ink)] md:p-8 md:text-left">
         <p>
-          Hello {greetingName}! Thank you for being a {memberLevelLabel} member.
+          Hello {greetingName}! {welcomeLine}
         </p>
       </section>
       {autoRenewMessageNode}

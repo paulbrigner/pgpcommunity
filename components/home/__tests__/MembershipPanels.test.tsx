@@ -59,7 +59,7 @@ describe("MembershipPanels", () => {
     expect(screen.getByText(/finish setup by enabling auto-renew/i)).toBeInTheDocument();
   });
 
-  it("renders active member panel with upcoming meetings and NFT collection and triggers RSVP", () => {
+  it("renders active member panel with upcoming meetings and NFT collection and triggers RSVP", async () => {
     const onRsvp = vi.fn();
     render(
       <ActiveMemberPanel
@@ -85,8 +85,34 @@ describe("MembershipPanels", () => {
     expect(screen.getByText(/news & updates/i)).toBeInTheDocument();
     const upcomingTab = screen.getByRole("tab", { name: /upcoming meetings/i });
     fireEvent.click(upcomingTab);
-    const rsvpButtons = screen.getAllByRole("button", { name: /rsvp now/i });
-    fireEvent.click(rsvpButtons[rsvpButtons.length - 1]);
+    const rsvpButton = await screen.findByRole("button", { name: /rsvp now/i });
+    fireEvent.click(rsvpButton);
     expect(onRsvp).toHaveBeenCalled();
+  });
+
+  it("renders the stored member label without rewriting or duplicating member text", () => {
+    render(
+      <ActiveMemberPanel
+        greetingName="Alice"
+        memberLevelLabel="Member"
+        autoRenewMessageNode={null}
+        walletLinked
+        profileComplete
+        upcomingNfts={upcoming}
+        onRsvp={() => {}}
+        displayNfts={[nft]}
+        showAllNfts={false}
+        onToggleShowAll={() => {}}
+        missedNfts={[]}
+        missedKeySet={new Set()}
+        creatorNftsLoading={false}
+        creatorNftsError={null}
+        creatorNfts={[nft]}
+      />
+    );
+
+    expect(screen.getByText(/hello alice! thank you for being a member\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/community member/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/member member/i)).not.toBeInTheDocument();
   });
 });

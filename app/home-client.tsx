@@ -223,7 +223,6 @@ export default function HomeClient({
   const memberLevelLabel = useMemo(() => {
     const label = (currentTierLabel || '').trim();
     if (!label) return 'PGP';
-    if (label.toLowerCase() === 'member') return 'community';
     return label;
   }, [currentTierLabel]);
   const renewalTier = useMemo<TierMembershipSummary | null>(() => {

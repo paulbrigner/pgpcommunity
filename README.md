@@ -1,7 +1,10 @@
-# PGP Community Platform
+# PGP Community Platform (retired)
+
+> [!IMPORTANT]
+> The production PGP Community service was retired on July 15, 2026. `https://community.pgpforcrypto.org` now permanently redirects to [PGPZ Community](https://community.pgpz.org). This repository is retained as a historical implementation reference; see [the decommission record](docs/20260715-decommission.md) for the AWS resource and preservation boundaries.
 
 ## Overview
-Community platform built with Next.js 15+, deployed on AWS Amplify. Auth is handled via NextAuth (email) with SIWE wallet linking, and Unlock Protocol for membership. Direct Unlock checkout flows power memberships and on‑site event RSVPs.
+This was a community platform built with Next.js 15+ and deployed on AWS Amplify. Auth was handled via NextAuth (email) with SIWE wallet linking, and Unlock Protocol provided membership. Direct Unlock checkout flows powered memberships and on-site event RSVPs.
 
 ## Security Warning
 This software is under active development and has not undergone a full independent security review. Deploy at your own risk. Do not store production‑critical secrets or funds in connected wallets unless you understand the risks and have performed your own assessment. If you discover a potential vulnerability, please report it privately to the maintainers rather than opening a public issue.

@@ -46,7 +46,7 @@ Parameters:
     NoEcho: true
   AdminRosterRebuildSecret:
     Type: String
-    Default: "tfXQCUfxKsmNzvQuJ9xdFCn9SM9VVfrk3eu8jEd4YX7sqKy82oy9qlli2hEtx9gS"
+    Default: ""
     NoEcho: true
   RosterRebuildSchedule:
     Type: String

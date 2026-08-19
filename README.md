@@ -223,12 +223,9 @@ Protecting API routes
 - **Testing/Tooling**: Vitest + @testing-library/*, Storybook 8, eslint 9, TypeScript 5.9
 
 ## License
-All code in this workspace is licensed under either of
-
-- Apache License, Version 2.0 (see `LICENSE-APACHE` or http://www.apache.org/licenses/LICENSE-2.0)
-- MIT license (see `LICENSE-MIT` or http://opensource.org/licenses/MIT)
-
-at your option.
+This project is licensed under the
+[GNU Affero General Public License, version 3 only](LICENSE)
+(`AGPL-3.0-only`).
 
 ## Contribution
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache‑2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work is licensed under `AGPL-3.0-only`, without any additional terms or conditions.
